@@ -1,5 +1,6 @@
 use std::{
     arch::x86_64::__get_cpuid_max,
+    collections::HashMap,
     error,
     fmt::format,
     fs::File,
@@ -10,6 +11,8 @@ use std::{
 
 use crc::{Crc, CRC_32_CKSUM};
 use walkdir::{DirEntry, WalkDir};
+
+use crate::file_manager::{self, create_database_file, open_database_files, DataBaseFile};
 
 struct Item {
     crc32: u32,
@@ -51,8 +54,8 @@ impl Row {
 }
 
 pub struct Database {
-    data_file: File,
-    database_files: Vec<File>,
+    writing_file_id: u32,
+    database_files: HashMap<u32, File>,
     database_dir: PathBuf,
     current_offset: u64,
     next_file_id: u32,
@@ -62,7 +65,6 @@ pub struct DataBaseOptions {
     max_file_size: u32,
 }
 
-const DATABASE_FILE_PREFIX: &str = "database-";
 const MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
 
 impl Database {
@@ -71,41 +73,40 @@ impl Database {
         options: &DataBaseOptions,
     ) -> Result<Database, Box<dyn error::Error>> {
         let database_dir = directory.join("database");
-        let (max_file_id, database_files) = open_database_files(&database_dir)?;
-        let f = File::options()
-            .write(true)
-            .create(true)
-            .read(true)
-            .open(database_dir)?;
+        let database_files = open_database_files(&database_dir)?;
+        let writing_file_id = database_files.keys().max().unwrap_or(&0) + 1;
+        database_files.insert(
+            writing_file_id,
+            create_database_file(&database_dir, writing_file_id)?,
+        );
         Ok(Database {
+            writing_file_id,
             database_dir,
-            data_file: f,
+            database_files,
             current_offset: 0,
             next_file_id: 0,
         })
     }
 
     pub fn write_row(&mut self, row: Row) -> Result<u64, Box<dyn error::Error>> {
-        self.data_file.write_all(&row.crc.to_be_bytes())?;
-        self.data_file.write_all(&row.tstamp.to_be_bytes())?;
-        self.data_file
-            .write_all(&row.key_size.to_be_bytes())
-            .unwrap();
-        self.data_file
-            .write_all(&row.value_size.to_be_bytes())
-            .unwrap();
+        let data_file = self.database_files.get(&self.writing_file_id).unwrap();
+
+        data_file.write_all(&row.crc.to_be_bytes())?;
+        data_file.write_all(&row.tstamp.to_be_bytes())?;
+        data_file.write_all(&row.key_size.to_be_bytes()).unwrap();
+        data_file.write_all(&row.value_size.to_be_bytes()).unwrap();
         self.current_offset += 28;
 
         let buf = row.key.as_bytes();
-        self.data_file.write_all(&buf).unwrap();
+        data_file.write_all(&buf).zunwrap();
         self.current_offset += buf.len() as u64;
         let value_offset = self.current_offset;
 
         let buf = row.value.as_bytes();
-        self.data_file.write_all(&buf).unwrap();
+        data_file.write_all(&buf).unwrap();
         self.current_offset += buf.len() as u64;
 
-        self.data_file.flush().unwrap();
+        data_file.flush().unwrap();
         Ok(value_offset)
     }
 
@@ -124,69 +125,6 @@ impl Database {
         }
         Ok(ret)
     }
-}
-
-fn open_database_files(path: &Path) -> Result<(u32, Vec<File>), Box<dyn error::Error>> {
-    let database_file_entries = WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(DATABASE_FILE_PREFIX)
-        })
-        .collect::<Vec<DirEntry>>();
-    if database_file_entries.is_empty() {
-        return Ok((0, vec![]));
-    }
-    let file_ids = database_file_entries
-        .iter()
-        .map(|e| e.file_name().to_string_lossy())
-        .map(|f| {
-            let (_, file_id_str) = f.split_at(DATABASE_FILE_PREFIX.len());
-            file_id_str
-                .parse::<u32>()
-                .map_err(|_| format!("{} is not a valid database file", f).into())
-        })
-        .collect::<Result<Vec<u32>, _>>();
-    if file_ids.is_err() {
-        return Err(file_ids.unwrap_err());
-    }
-    database_file_entries.sort_by(|a, b| {
-        a.file_name()
-            .to_string_lossy()
-            .split_at(DATABASE_FILE_PREFIX.len())
-            .1
-            .parse::<u32>()
-            .unwrap()
-            .cmp(
-                &b.file_name()
-                    .to_string_lossy()
-                    .split_at(DATABASE_FILE_PREFIX.len())
-                    .1
-                    .parse::<u32>()
-                    .unwrap(),
-            )
-    });
-
-    Ok((
-        file_ids.unwrap().into_iter().max().unwrap(),
-        database_file_entries
-            .iter()
-            .map(|e| {
-                File::options()
-                    .write(true)
-                    .create(true)
-                    .read(true)
-                    .open(e.path())
-            })
-            .collect::<Result<Vec<File>, _>>()?,
-    ))
-}
-
-fn database_file_name(file_id: u32) -> String {
-    format!("{}{}", DATABASE_FILE_PREFIX, file_id)
 }
 
 #[cfg(test)]
