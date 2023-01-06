@@ -32,7 +32,9 @@ impl Bitcask {
         self.database.write_row(row);
     }
 
-    pub fn get(&self, key: String) {}
+    pub fn get(&mut self, key: String) {
+        self.database.read_value(0, 9, 0);
+    }
     pub fn delete(&self, key: String) {}
     pub fn close(&self) {}
 }

@@ -22,9 +22,8 @@ pub fn create_database_file(
     database_dir: &Path,
     file_id: u32,
 ) -> Result<File, Box<dyn error::Error>> {
-    let path = database_dir
-        .join(DATABASE_FILE_PREFIX)
-        .join(file_id.to_string());
+    let path = database_dir.join(database_file_name(file_id));
+    println!("asdfff {}", path.to_string_lossy());
     Ok(File::options()
         .write(true)
         .create(true)

@@ -11,10 +11,6 @@ use crc::{Crc, CRC_32_CKSUM};
 
 use crate::file_manager::{create_database_file, open_database_files};
 
-struct Item {
-    crc32: u32,
-}
-
 pub struct Row {
     crc: u32,
     tstamp: u64,
@@ -50,6 +46,7 @@ impl Row {
     }
 }
 
+#[derive(Debug)]
 struct WritingFile {
     file_id: u32,
     data_file: File,
@@ -96,6 +93,7 @@ pub struct DataBaseOptions {
     max_file_size: u32,
 }
 
+#[derive(Debug)]
 pub struct Database {
     database_dir: PathBuf,
     writing_file: WritingFile,
@@ -112,6 +110,7 @@ impl Database {
         options: DataBaseOptions,
     ) -> Result<Database, Box<dyn error::Error>> {
         let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
+        std::fs::create_dir_all(database_dir.clone())?;
         let stable_files = open_database_files(&database_dir)?;
         let writing_file_id = stable_files.keys().max().unwrap_or(&0) + 1;
         let writing_file = WritingFile::new(&database_dir, writing_file_id)?;
@@ -163,28 +162,39 @@ fn read_value_from_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    const TESTING_DIR: &str = "/tmp/bitcask";
+    const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions { max_file_size: 11 };
+
     #[test]
     fn test_open_when_directory_not_exists() {
-        let path = Path::new("/tmp/bitcask");
+        let path = Path::new(TESTING_DIR);
         if path.exists() {
             std::fs::remove_dir_all(path).unwrap();
         }
-        assert_eq!(
-            Database::open(&path, DataBaseOptions { max_file_size: 11 }).is_err(),
-            true
-        );
+        let path = Path::new(TESTING_DIR);
+        assert_eq!(Database::open(&path, DEFAULT_OPTIONS).is_err(), true);
     }
 
     #[test]
-    fn test_race() {
-        let path = Path::new("/tmp/bitcask");
+    fn test_read_write() {
+        let path = setup();
+        let mut db = Database::open(&path, DEFAULT_OPTIONS).unwrap();
+        let row = Row::new("Key".into(), "value".into());
+        let offset = db.write_row(row).unwrap();
+        assert_eq!(
+            db.read_value(1, offset, "value".len() as u64)
+                .unwrap()
+                .unwrap(),
+            "value"
+        );
+    }
+
+    fn setup() -> PathBuf {
+        let path = Path::new(TESTING_DIR);
+        if path.exists() {
+            std::fs::remove_dir_all(path).unwrap();
+        }
         std::fs::create_dir_all(path).unwrap();
-        // let mut db = Database::open(&path).unwrap();
-        // let row = Row::new("Key".into(), "value".into());
-        // let offset = db.write_row(row).unwrap();
-        // assert_eq!(
-        //     db.read_value(offset, "value".len() as u64).unwrap(),
-        //     "value"
-        // );
+        path.to_path_buf()
     }
 }
