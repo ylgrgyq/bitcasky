@@ -1,8 +1,6 @@
 use std::{
-    arch::x86_64::__get_cpuid_max,
     collections::HashMap,
     error,
-    fmt::format,
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -10,9 +8,8 @@ use std::{
 };
 
 use crc::{Crc, CRC_32_CKSUM};
-use walkdir::{DirEntry, WalkDir};
 
-use crate::file_manager::{self, create_database_file, open_database_files, DataBaseFile};
+use crate::file_manager::{create_database_file, open_database_files};
 
 struct Item {
     crc32: u32,
@@ -53,78 +50,114 @@ impl Row {
     }
 }
 
-pub struct Database {
-    writing_file_id: u32,
-    database_files: HashMap<u32, File>,
-    database_dir: PathBuf,
+struct WritingFile {
+    file_id: u32,
+    data_file: File,
     current_offset: u64,
-    next_file_id: u32,
 }
 
-pub struct DataBaseOptions {
-    max_file_size: u32,
-}
-
-const MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
-
-impl Database {
-    pub fn open(
-        directory: &Path,
-        options: &DataBaseOptions,
-    ) -> Result<Database, Box<dyn error::Error>> {
-        let database_dir = directory.join("database");
-        let database_files = open_database_files(&database_dir)?;
-        let writing_file_id = database_files.keys().max().unwrap_or(&0) + 1;
-        database_files.insert(
-            writing_file_id,
-            create_database_file(&database_dir, writing_file_id)?,
-        );
-        Ok(Database {
-            writing_file_id,
-            database_dir,
-            database_files,
+impl WritingFile {
+    fn new(database_dir: &Path, file_id: u32) -> Result<WritingFile, Box<dyn error::Error>> {
+        let data_file = create_database_file(&database_dir, file_id)?;
+        Ok(WritingFile {
+            file_id,
+            data_file,
             current_offset: 0,
-            next_file_id: 0,
         })
     }
 
-    pub fn write_row(&mut self, row: Row) -> Result<u64, Box<dyn error::Error>> {
-        let data_file = self.database_files.get(&self.writing_file_id).unwrap();
-
-        data_file.write_all(&row.crc.to_be_bytes())?;
-        data_file.write_all(&row.tstamp.to_be_bytes())?;
-        data_file.write_all(&row.key_size.to_be_bytes()).unwrap();
-        data_file.write_all(&row.value_size.to_be_bytes()).unwrap();
+    fn write_row(&mut self, row: Row) -> Result<u64, Box<dyn error::Error>> {
+        self.data_file.write_all(&row.crc.to_be_bytes())?;
+        self.data_file.write_all(&row.tstamp.to_be_bytes())?;
+        self.data_file
+            .write_all(&row.key_size.to_be_bytes())
+            .unwrap();
+        self.data_file
+            .write_all(&row.value_size.to_be_bytes())
+            .unwrap();
         self.current_offset += 28;
 
         let buf = row.key.as_bytes();
-        data_file.write_all(&buf).zunwrap();
+        self.data_file.write_all(&buf).unwrap();
         self.current_offset += buf.len() as u64;
         let value_offset = self.current_offset;
 
         let buf = row.value.as_bytes();
-        data_file.write_all(&buf).unwrap();
+        self.data_file.write_all(&buf).unwrap();
         self.current_offset += buf.len() as u64;
 
-        data_file.flush().unwrap();
+        self.data_file.flush().unwrap();
         Ok(value_offset)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DataBaseOptions {
+    max_file_size: u32,
+}
+
+pub struct Database {
+    database_dir: PathBuf,
+    writing_file: WritingFile,
+    stable_files: HashMap<u32, File>,
+    options: DataBaseOptions,
+}
+
+const MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
+const DATABASE_FILE_DIRECTORY: &str = "database";
+
+impl Database {
+    pub fn open(
+        directory: &Path,
+        options: DataBaseOptions,
+    ) -> Result<Database, Box<dyn error::Error>> {
+        let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
+        let stable_files = open_database_files(&database_dir)?;
+        let writing_file_id = stable_files.keys().max().unwrap_or(&0) + 1;
+        let writing_file = WritingFile::new(&database_dir, writing_file_id)?;
+        Ok(Database {
+            writing_file,
+            database_dir,
+            stable_files,
+            options,
+        })
+    }
+
+    pub fn write_row(&mut self, row: Row) -> Result<u64, Box<dyn error::Error>> {
+        self.writing_file.write_row(row)
     }
 
     pub fn read_value(
         &mut self,
+        file_id: u32,
         value_offset: u64,
         size: u64,
-    ) -> Result<String, Box<dyn error::Error>> {
-        self.data_file.seek(SeekFrom::Start(value_offset)).unwrap();
-        let mut ret = String::new();
-        let mut buf = vec![0; size as usize];
-        let mut n = self.data_file.read(&mut buf).unwrap();
-        while n > 0 {
-            n = self.data_file.read(&mut buf).unwrap();
-            ret.push_str(String::from_utf8(buf.to_vec()).unwrap().as_str());
+    ) -> Result<Option<String>, Box<dyn error::Error>> {
+        if file_id == self.writing_file.file_id {
+            return read_value_from_file(&mut self.writing_file.data_file, value_offset, size);
         }
-        Ok(ret)
+        let f = self.stable_files.get_mut(&file_id);
+        if f.is_none() {
+            return Ok(None);
+        }
+        read_value_from_file(f.unwrap(), value_offset, size)
     }
+}
+
+fn read_value_from_file(
+    data_file: &mut File,
+    value_offset: u64,
+    size: u64,
+) -> Result<Option<String>, Box<dyn error::Error>> {
+    data_file.seek(SeekFrom::Start(value_offset)).unwrap();
+    let mut ret = String::new();
+    let mut buf = vec![0; size as usize];
+    let mut n = data_file.read(&mut buf).unwrap();
+    while n > 0 {
+        n = data_file.read(&mut buf).unwrap();
+        ret.push_str(String::from_utf8(buf.to_vec()).unwrap().as_str());
+    }
+    Ok(Some(ret))
 }
 
 #[cfg(test)]
@@ -136,7 +169,10 @@ mod tests {
         if path.exists() {
             std::fs::remove_dir_all(path).unwrap();
         }
-        // assert_eq!(Database::open(&path).is_err(), true);
+        assert_eq!(
+            Database::open(&path, DataBaseOptions { max_file_size: 11 }).is_err(),
+            true
+        );
     }
 
     #[test]

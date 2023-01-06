@@ -1,4 +1,9 @@
-use std::{borrow::Cow, collections::HashMap, error, fs::File, path::Path};
+use std::{
+    collections::HashMap,
+    error,
+    fs::File,
+    path::{Path, PathBuf},
+};
 
 use walkdir::WalkDir;
 
@@ -30,48 +35,47 @@ pub fn create_database_file(
 pub fn open_database_files(
     database_dir: &Path,
 ) -> Result<HashMap<u32, File>, Box<dyn error::Error>> {
-    let file_names = get_valid_database_file_names(database_dir)?;
-    let db_files = file_names
+    let file_entries = get_valid_database_file_paths(database_dir)?;
+    let db_files = file_entries
         .iter()
-        .map(|f| open_data_base_file(database_dir, f))
+        .map(|f| open_data_base_file(f))
         .collect::<Result<Vec<DataBaseFile>, _>>()?;
-    Ok(db_files.iter().map(|f| (f.file_id, f.file)).collect())
+    Ok(db_files.into_iter().map(|f| (f.file_id, f.file)).collect())
 }
 
-fn get_valid_database_file_names(
+fn get_valid_database_file_paths(
     database_dir: &Path,
-) -> Result<Vec<Cow<str>>, Box<dyn error::Error>> {
+) -> Result<Vec<PathBuf>, Box<dyn error::Error>> {
     Ok(WalkDir::new(database_dir)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let file_name = e.file_name().to_string_lossy();
-            if file_name.starts_with(DATABASE_FILE_PREFIX) {
-                Some(file_name)
+            if file_name.starts_with(DATABASE_FILE_PREFIX)
+                && parse_file_id_from_database_file(e.path()).is_ok()
+            {
+                Some(e.into_path())
             } else {
                 None
             }
         })
-        .filter(|f| parse_file_id_from_database_file(f).is_ok())
-        .collect::<Vec<Cow<str>>>())
+        .collect())
 }
 
-fn open_data_base_file(
-    database_dir: &Path,
-    file_name: &Cow<str>,
-) -> Result<DataBaseFile, Box<dyn error::Error>> {
-    let file_id = parse_file_id_from_database_file(file_name)?;
+fn open_data_base_file(file_path: &Path) -> Result<DataBaseFile, Box<dyn error::Error>> {
+    let file_id = parse_file_id_from_database_file(file_path)?;
     let file = File::options()
         .write(true)
         .create(true)
         .read(true)
-        .open(database_dir.join(file_name.as_ref()))?;
+        .open(file_path)?;
     Ok(DataBaseFile { file_id, file })
 }
 
-fn parse_file_id_from_database_file(file_name: &Cow<str>) -> Result<u32, Box<dyn error::Error>> {
-    let (_, file_id_str) = file_name.split_at(DATABASE_FILE_PREFIX.len());
+fn parse_file_id_from_database_file(file_path: &Path) -> Result<u32, Box<dyn error::Error>> {
+    let binding = file_path.file_name().unwrap().to_string_lossy();
+    let (_, file_id_str) = binding.split_at(DATABASE_FILE_PREFIX.len());
     file_id_str.parse::<u32>().map_err(|e| "".into())
 }
 
