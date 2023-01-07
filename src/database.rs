@@ -10,7 +10,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use crate::file_manager::{create_database_file, open_database_files};
+use crate::file_manager::{create_database_file, open_stable_database_files};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -68,6 +68,7 @@ impl Row {
     }
 }
 
+#[derive(Debug)]
 pub struct WriteRowResult {
     file_id: u32,
     value_offset: u64,
@@ -87,13 +88,19 @@ impl WritingFile {
     }
 
     fn write_row(&mut self, row: Row) -> Result<WriteRowResult, Box<dyn error::Error>> {
-        let value_offset = self.data_file.seek(SeekFrom::Current(0))?;
+        let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         self.data_file.write_all(&*row.to_bytes())?;
         Ok(WriteRowResult {
             file_id: self.file_id,
             value_offset,
             value_size: row.size,
         })
+    }
+}
+
+impl Drop for WritingFile {
+    fn drop(&mut self) {
+        self.data_file.flush();
     }
 }
 
@@ -120,7 +127,7 @@ impl Database {
     ) -> Result<Database, Box<dyn error::Error>> {
         let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
         std::fs::create_dir_all(database_dir.clone())?;
-        let stable_files = open_database_files(&database_dir)?;
+        let stable_files = open_stable_database_files(&database_dir)?;
         let writing_file_id = stable_files.keys().max().unwrap_or(&0) + 1;
         let writing_file = WritingFile::new(&database_dir, writing_file_id)?;
         Ok(Database {
@@ -186,23 +193,12 @@ fn read_value_from_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    const TESTING_DIR: &str = "/tmp/bitcask";
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions { max_file_size: 11 };
 
     #[test]
-    fn test_open_when_directory_not_exists() {
-        let path = Path::new(TESTING_DIR);
-        if path.exists() {
-            std::fs::remove_dir_all(path).unwrap();
-        }
-        let path = Path::new(TESTING_DIR);
-        assert_eq!(Database::open(&path, DEFAULT_OPTIONS).is_err(), true);
-    }
-
-    #[test]
     fn test_read_write_writing_file() {
-        let path = setup();
-        let mut db = Database::open(&path, DEFAULT_OPTIONS).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
         let kvs = [
             ("k1", "value1奥森"),
             ("k2", "value2"),
@@ -216,7 +212,7 @@ mod tests {
 
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
-                db.read_value(1, ret.value_offset, ret.value_size)
+                db.read_value(ret.file_id, ret.value_offset, ret.value_size)
                     .unwrap()
                     .unwrap(),
                 *value
@@ -226,35 +222,37 @@ mod tests {
 
     #[test]
     fn test_read_write_with_stable_files() {
-        let path = setup();
-        let mut db = Database::open(&path, DEFAULT_OPTIONS).unwrap();
-        let kvs = [
-            ("k1", "value1"),
-            ("k2", "value2"),
-            ("k3", "value3"),
-            ("k1", "value4"),
-        ];
-        let offset_values = kvs
-            .into_iter()
-            .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
-            .collect::<Vec<(WriteRowResult, &str)>>();
+        let dir = tempfile::tempdir().unwrap();
+        let mut offset_values: Vec<(WriteRowResult, &str)> = vec![];
+        {
+            let mut db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+            let kvs = [("k1", "value1"), ("k2", "value2")];
+            offset_values.append(
+                &mut kvs
+                    .into_iter()
+                    .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+                    .collect::<Vec<(WriteRowResult, &str)>>(),
+            );
+        }
+        {
+            let mut db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+            let kvs = [("k3", "hello world"), ("k1", "value4")];
+            offset_values.append(
+                &mut kvs
+                    .into_iter()
+                    .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+                    .collect::<Vec<(WriteRowResult, &str)>>(),
+            );
+        }
 
+        let mut db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
-                db.read_value(1, ret.value_offset, ret.value_size)
+                db.read_value(ret.file_id, ret.value_offset, ret.value_size)
                     .unwrap()
                     .unwrap(),
                 *value
             );
         });
-    }
-
-    fn setup() -> PathBuf {
-        let path = Path::new(TESTING_DIR);
-        if path.exists() {
-            std::fs::remove_dir_all(path).unwrap();
-        }
-        std::fs::create_dir_all(path).unwrap();
-        path.to_path_buf()
     }
 }

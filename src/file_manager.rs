@@ -30,13 +30,13 @@ pub fn create_database_file(
         .open(path)?)
 }
 
-pub fn open_database_files(
+pub fn open_stable_database_files(
     database_dir: &Path,
 ) -> Result<HashMap<u32, File>, Box<dyn error::Error>> {
     let file_entries = get_valid_database_file_paths(database_dir)?;
     let db_files = file_entries
         .iter()
-        .map(|f| open_data_base_file(f))
+        .map(|f| open_stable_data_base_file(f))
         .collect::<Result<Vec<DataBaseFile>, _>>()?;
     Ok(db_files.into_iter().map(|f| (f.file_id, f.file)).collect())
 }
@@ -61,20 +61,16 @@ fn get_valid_database_file_paths(
         .collect())
 }
 
-fn open_data_base_file(file_path: &Path) -> Result<DataBaseFile, Box<dyn error::Error>> {
+fn open_stable_data_base_file(file_path: &Path) -> Result<DataBaseFile, Box<dyn error::Error>> {
     let file_id = parse_file_id_from_database_file(file_path)?;
-    let file = File::options()
-        .write(true)
-        .create(true)
-        .read(true)
-        .open(file_path)?;
+    let file = File::options().read(true).open(file_path)?;
     Ok(DataBaseFile { file_id, file })
 }
 
 fn parse_file_id_from_database_file(file_path: &Path) -> Result<u32, Box<dyn error::Error>> {
     let binding = file_path.file_name().unwrap().to_string_lossy();
     let (_, file_id_str) = binding.split_at(DATABASE_FILE_PREFIX.len());
-    file_id_str.parse::<u32>().map_err(|e| "".into())
+    file_id_str.parse::<u32>().map_err(|_| "".into())
 }
 
 fn database_file_name(file_id: u32) -> String {
