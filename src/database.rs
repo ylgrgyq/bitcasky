@@ -148,14 +148,11 @@ fn read_value_from_file(
     value_offset: u64,
     size: u64,
 ) -> Result<Option<String>, Box<dyn error::Error>> {
-    data_file.seek(SeekFrom::Start(value_offset)).unwrap();
+    data_file.seek(SeekFrom::Start(value_offset))?;
     let mut ret = String::new();
     let mut buf = vec![0; size as usize];
-    let mut n = data_file.read(&mut buf).unwrap();
-    while n > 0 {
-        n = data_file.read(&mut buf).unwrap();
-        ret.push_str(String::from_utf8(buf.to_vec()).unwrap().as_str());
-    }
+    data_file.read_exact(&mut buf)?;
+    ret.push_str(String::from_utf8(buf.to_vec()).unwrap().as_str());
     Ok(Some(ret))
 }
 
@@ -176,17 +173,48 @@ mod tests {
     }
 
     #[test]
-    fn test_read_write() {
+    fn test_read_write_writing_file() {
         let path = setup();
         let mut db = Database::open(&path, DEFAULT_OPTIONS).unwrap();
-        let row = Row::new("Key".into(), "value".into());
-        let offset = db.write_row(row).unwrap();
-        assert_eq!(
-            db.read_value(1, offset, "value".len() as u64)
-                .unwrap()
-                .unwrap(),
-            "value"
-        );
+        let kvs = [
+            ("k1", "value1"),
+            ("k2", "value2"),
+            ("k3", "value3"),
+            ("k1", "value4"),
+        ];
+        let offset_values = kvs
+            .into_iter()
+            .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+            .collect::<Vec<(u64, &str)>>();
+
+        offset_values.iter().for_each(|(offset, value)| {
+            assert_eq!(
+                db.read_value(1, *offset, value.len() as u64)
+                    .unwrap()
+                    .unwrap(),
+                *value
+            );
+        });
+    }
+
+    #[test]
+    fn test_read_write_with_stable_files() {
+        let path = setup();
+        let mut db = Database::open(&path, DEFAULT_OPTIONS).unwrap();
+        let kvs = [("k1", "value1"), ("k2", "value2")];
+        let offset_values = kvs
+            .into_iter()
+            .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+            .collect::<Vec<(u64, &str)>>();
+
+        offset_values.iter().for_each(|(offset, value)| {
+            assert_eq!(
+                db.read_value(1, *offset, value.len() as u64)
+                    .unwrap()
+                    .unwrap(),
+                *value
+            );
+        });
     }
 
     fn setup() -> PathBuf {
