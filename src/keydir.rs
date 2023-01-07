@@ -1,14 +1,9 @@
 use std::collections::HashMap;
 
-struct Index {
-    file_id: String,
-    value_size: u64,
-    value_pos: u64,
-    tstamp: u64,
-}
+use crate::database::ValueEntry;
 
 pub struct KeyDir {
-    index: HashMap<String, Index>,
+    index: HashMap<String, ValueEntry>,
 }
 
 impl KeyDir {
@@ -18,15 +13,15 @@ impl KeyDir {
         };
     }
 
-    pub fn put(&mut self, key: String, value: Index) {
+    pub fn put(&mut self, key: String, value: ValueEntry) {
         self.index.insert(key, value);
     }
 
-    pub fn get(&self, key: &String) -> Option<&Index> {
+    pub fn get(&self, key: &String) -> Option<&ValueEntry> {
         self.index.get(key)
     }
 
-    pub fn delete(&mut self, key: &String) -> Option<Index> {
+    pub fn delete(&mut self, key: &String) -> Option<ValueEntry> {
         self.index.remove(key)
     }
 }

@@ -69,10 +69,11 @@ impl Row {
 }
 
 #[derive(Debug)]
-pub struct WriteRowResult {
-    file_id: u32,
-    value_offset: u64,
-    value_size: usize,
+pub struct ValueEntry {
+    pub file_id: u32,
+    pub value_offset: u64,
+    pub value_size: usize,
+    pub tstmp: u64,
 }
 
 #[derive(Debug)]
@@ -87,13 +88,14 @@ impl WritingFile {
         Ok(WritingFile { file_id, data_file })
     }
 
-    fn write_row(&mut self, row: Row) -> Result<WriteRowResult, Box<dyn error::Error>> {
+    fn write_row(&mut self, row: Row) -> Result<ValueEntry, Box<dyn error::Error>> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         self.data_file.write_all(&*row.to_bytes())?;
-        Ok(WriteRowResult {
+        Ok(ValueEntry {
             file_id: self.file_id,
             value_offset,
             value_size: row.size,
+            tstmp: row.tstamp,
         })
     }
 }
@@ -106,7 +108,7 @@ impl Drop for WritingFile {
 
 #[derive(Debug, Clone)]
 pub struct DataBaseOptions {
-    max_file_size: u32,
+    pub max_file_size: u32,
 }
 
 #[derive(Debug)]
@@ -138,7 +140,7 @@ impl Database {
         })
     }
 
-    pub fn write_row(&mut self, row: Row) -> Result<WriteRowResult, Box<dyn error::Error>> {
+    pub fn write_row(&mut self, row: Row) -> Result<ValueEntry, Box<dyn error::Error>> {
         self.writing_file.write_row(row)
     }
 
@@ -208,7 +210,7 @@ mod tests {
         let offset_values = kvs
             .into_iter()
             .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
-            .collect::<Vec<(WriteRowResult, &str)>>();
+            .collect::<Vec<(ValueEntry, &str)>>();
 
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
@@ -223,7 +225,7 @@ mod tests {
     #[test]
     fn test_read_write_with_stable_files() {
         let dir = tempfile::tempdir().unwrap();
-        let mut offset_values: Vec<(WriteRowResult, &str)> = vec![];
+        let mut offset_values: Vec<(ValueEntry, &str)> = vec![];
         {
             let mut db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
             let kvs = [("k1", "value1"), ("k2", "value2")];
@@ -231,7 +233,7 @@ mod tests {
                 &mut kvs
                     .into_iter()
                     .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
-                    .collect::<Vec<(WriteRowResult, &str)>>(),
+                    .collect::<Vec<(ValueEntry, &str)>>(),
             );
         }
         {
@@ -241,7 +243,7 @@ mod tests {
                 &mut kvs
                     .into_iter()
                     .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
-                    .collect::<Vec<(WriteRowResult, &str)>>(),
+                    .collect::<Vec<(ValueEntry, &str)>>(),
             );
         }
 
