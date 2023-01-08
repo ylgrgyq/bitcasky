@@ -27,19 +27,15 @@ impl Bitcask {
             options,
         })
     }
-    pub fn put(&mut self, key: String, value: String) -> Result<(), Box<dyn error::Error>> {
-        let row = Row::new(key.clone(), value.clone());
+    pub fn put(&mut self, key: Vec<u8>, value: &[u8]) -> Result<(), Box<dyn error::Error>> {
+        let row = Row::new(&key, value);
         let ret = self.database.write_row(row)?;
-        if is_tombstone(&value) {
-            self.keydir.delete(&key);
-        } else {
-            self.keydir.put(key, ret);
-        }
+        self.keydir.put(key, ret);
         Ok(())
     }
 
-    pub fn get(&mut self, key: String) -> Result<Option<String>, Box<dyn error::Error>> {
-        match self.keydir.get(&key) {
+    pub fn get(&mut self, key: &Vec<u8>) -> Result<Option<Vec<u8>>, Box<dyn error::Error>> {
+        match self.keydir.get(key) {
             Some(e) => {
                 let v = self
                     .database
@@ -53,8 +49,11 @@ impl Bitcask {
         }
     }
 
-    pub fn delete(&mut self, key: String) -> Result<(), Box<dyn error::Error>> {
-        self.put(key, TOMBSTONE_VALUE.into())
+    pub fn delete(&mut self, key: &Vec<u8>) -> Result<(), Box<dyn error::Error>> {
+        let row = Row::new(&key, TOMBSTONE_VALUE.as_bytes());
+        self.database.write_row(row)?;
+        self.keydir.delete(&key);
+        Ok(())
     }
     pub fn close(&self) {}
 }
@@ -70,32 +69,32 @@ mod tests {
     fn test_read_write_writing_file() {
         let dir = tempfile::tempdir().unwrap();
         let mut bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-        bc.put("k1".into(), "value1".into()).unwrap();
-        bc.put("k2".into(), "value2".into()).unwrap();
-        bc.put("k3".into(), "value3".into()).unwrap();
-        bc.put("k1".into(), "value4".into()).unwrap();
+        bc.put("k1".into(), "value1".as_bytes()).unwrap();
+        bc.put("k2".into(), "value2".as_bytes()).unwrap();
+        bc.put("k3".into(), "value3".as_bytes()).unwrap();
+        bc.put("k1".into(), "value4".as_bytes()).unwrap();
 
-        assert_eq!(bc.get("k1".into()).unwrap().unwrap(), "value4");
-        assert_eq!(bc.get("k2".into()).unwrap().unwrap(), "value2");
-        assert_eq!(bc.get("k3".into()).unwrap().unwrap(), "value3");
+        assert_eq!(bc.get(&"k1".into()).unwrap().unwrap(), "value4".as_bytes());
+        assert_eq!(bc.get(&"k2".into()).unwrap().unwrap(), "value2".as_bytes());
+        assert_eq!(bc.get(&"k3".into()).unwrap().unwrap(), "value3".as_bytes());
     }
 
     #[test]
     fn test_delete() {
         let dir = tempfile::tempdir().unwrap();
         let mut bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-        bc.put("k1".into(), "value1".into()).unwrap();
-        bc.put("k2".into(), "value2".into()).unwrap();
-        bc.put("k3".into(), "value3".into()).unwrap();
-        bc.put("k1".into(), "value4".into()).unwrap();
+        bc.put("k1".into(), "value1".as_bytes()).unwrap();
+        bc.put("k2".into(), "value2".as_bytes()).unwrap();
+        bc.put("k3".into(), "value3".as_bytes()).unwrap();
+        bc.put("k1".into(), "value4".as_bytes()).unwrap();
 
-        bc.delete("k1".into()).unwrap();
-        assert_eq!(bc.get("k1".into()).unwrap(), None);
+        bc.delete(&"k1".into()).unwrap();
+        assert_eq!(bc.get(&"k1".into()).unwrap(), None);
 
-        bc.delete("k2".into()).unwrap();
-        assert_eq!(bc.get("k2".into()).unwrap(), None);
+        bc.delete(&"k2".into()).unwrap();
+        assert_eq!(bc.get(&"k2".into()).unwrap(), None);
 
-        bc.delete("k3".into()).unwrap();
-        assert_eq!(bc.get("k3".into()).unwrap(), None);
+        bc.delete(&"k3".into()).unwrap();
+        assert_eq!(bc.get(&"k3".into()).unwrap(), None);
     }
 }

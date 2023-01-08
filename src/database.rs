@@ -20,18 +20,18 @@ const KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
 const VALUE_SIZE_OFFSET: usize = KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
-pub struct Row {
+pub struct Row<'a> {
     crc: u32,
     tstamp: u64,
     key_size: u64,
     value_size: u64,
-    key: String,
-    value: String,
+    key: &'a Vec<u8>,
+    value: &'a [u8],
     size: usize,
 }
 
-impl Row {
-    pub fn new(key: String, value: String) -> Row {
+impl<'a> Row<'a> {
+    pub fn new(key: &'a Vec<u8>, value: &'a [u8]) -> Row<'a> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -43,8 +43,8 @@ impl Row {
         ck.update(&now.to_be_bytes());
         ck.update(&key_size.to_be_bytes());
         ck.update(&value_size.to_be_bytes());
-        ck.update(key.as_bytes());
-        ck.update(value.as_bytes());
+        ck.update(&key);
+        ck.update(value);
         Row {
             crc: ck.finalize(),
             tstamp: now,
@@ -62,8 +62,8 @@ impl Row {
         bs.extend_from_slice(&self.tstamp.to_be_bytes());
         bs.extend_from_slice(&self.key_size.to_be_bytes());
         bs.extend_from_slice(&self.value_size.to_be_bytes());
-        bs.extend_from_slice(self.key.as_bytes());
-        bs.extend_from_slice(self.value.as_bytes());
+        bs.extend_from_slice(self.key);
+        bs.extend_from_slice(self.value);
         bs.freeze()
     }
 }
@@ -149,7 +149,7 @@ impl Database {
         file_id: u32,
         value_offset: u64,
         size: usize,
-    ) -> Result<String, Box<dyn error::Error>> {
+    ) -> Result<Vec<u8>, Box<dyn error::Error>> {
         if file_id == self.writing_file.file_id {
             return read_value_from_file(&mut self.writing_file.data_file, value_offset, size);
         }
@@ -165,7 +165,7 @@ fn read_value_from_file(
     data_file: &mut File,
     value_offset: u64,
     size: usize,
-) -> Result<String, Box<dyn error::Error>> {
+) -> Result<Vec<u8>, Box<dyn error::Error>> {
     data_file.seek(SeekFrom::Start(value_offset))?;
     let mut buf = vec![0; size];
     data_file.read_exact(&mut buf)?;
@@ -187,7 +187,7 @@ fn read_value_from_file(
         .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
         .get_u64() as usize;
     let val_offset = KEY_OFFSET + key_size;
-    Ok(String::from_utf8(bs.slice(val_offset..val_offset + val_size).to_vec()).unwrap())
+    Ok(bs.slice(val_offset..val_offset + val_size).into())
 }
 
 #[cfg(test)]
@@ -207,14 +207,14 @@ mod tests {
         ];
         let offset_values = kvs
             .into_iter()
-            .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+            .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
             .collect::<Vec<(ValueEntry, &str)>>();
 
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
                 db.read_value(ret.file_id, ret.value_offset, ret.value_size)
                     .unwrap(),
-                *value
+                *value.as_bytes()
             );
         });
     }
@@ -229,7 +229,7 @@ mod tests {
             offset_values.append(
                 &mut kvs
                     .into_iter()
-                    .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+                    .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
                     .collect::<Vec<(ValueEntry, &str)>>(),
             );
         }
@@ -239,7 +239,7 @@ mod tests {
             offset_values.append(
                 &mut kvs
                     .into_iter()
-                    .map(|(k, v)| (db.write_row(Row::new(k.into(), v.into())).unwrap(), v))
+                    .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
                     .collect::<Vec<(ValueEntry, &str)>>(),
             );
         }
@@ -249,7 +249,7 @@ mod tests {
             assert_eq!(
                 db.read_value(ret.file_id, ret.value_offset, ret.value_size)
                     .unwrap(),
-                *value
+                *value.as_bytes()
             );
         });
     }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::database::ValueEntry;
 
 pub struct KeyDir {
-    index: HashMap<String, ValueEntry>,
+    index: HashMap<Vec<u8>, ValueEntry>,
 }
 
 impl KeyDir {
@@ -13,15 +13,15 @@ impl KeyDir {
         };
     }
 
-    pub fn put(&mut self, key: String, value: ValueEntry) {
+    pub fn put(&mut self, key: Vec<u8>, value: ValueEntry) {
         self.index.insert(key, value);
     }
 
-    pub fn get(&self, key: &String) -> Option<&ValueEntry> {
+    pub fn get(&self, key: &Vec<u8>) -> Option<&ValueEntry> {
         self.index.get(key)
     }
 
-    pub fn delete(&mut self, key: &String) -> Option<ValueEntry> {
+    pub fn delete(&mut self, key: &Vec<u8>) -> Option<ValueEntry> {
         self.index.remove(key)
     }
 }
