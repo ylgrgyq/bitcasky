@@ -149,13 +149,13 @@ impl Database {
         file_id: u32,
         value_offset: u64,
         size: usize,
-    ) -> Result<Option<String>, Box<dyn error::Error>> {
+    ) -> Result<String, Box<dyn error::Error>> {
         if file_id == self.writing_file.file_id {
             return read_value_from_file(&mut self.writing_file.data_file, value_offset, size);
         }
         let f = self.stable_files.get_mut(&file_id);
         if f.is_none() {
-            return Ok(None);
+            return Err("file not found".into());
         }
         read_value_from_file(f.unwrap(), value_offset, size)
     }
@@ -165,7 +165,7 @@ fn read_value_from_file(
     data_file: &mut File,
     value_offset: u64,
     size: usize,
-) -> Result<Option<String>, Box<dyn error::Error>> {
+) -> Result<String, Box<dyn error::Error>> {
     data_file.seek(SeekFrom::Start(value_offset))?;
     let mut buf = vec![0; size];
     data_file.read_exact(&mut buf)?;
@@ -187,9 +187,7 @@ fn read_value_from_file(
         .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
         .get_u64() as usize;
     let val_offset = KEY_OFFSET + key_size;
-    Ok(Some(
-        String::from_utf8(bs.slice(val_offset..val_offset + val_size).to_vec()).unwrap(),
-    ))
+    Ok(String::from_utf8(bs.slice(val_offset..val_offset + val_size).to_vec()).unwrap())
 }
 
 #[cfg(test)]
@@ -215,7 +213,6 @@ mod tests {
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
                 db.read_value(ret.file_id, ret.value_offset, ret.value_size)
-                    .unwrap()
                     .unwrap(),
                 *value
             );
@@ -251,7 +248,6 @@ mod tests {
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
                 db.read_value(ret.file_id, ret.value_offset, ret.value_size)
-                    .unwrap()
                     .unwrap(),
                 *value
             );
