@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::HashMap,
     error,
     fs::File,
@@ -20,6 +21,7 @@ const KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
 const VALUE_SIZE_OFFSET: usize = KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
+#[derive(Debug)]
 pub struct Row<'a> {
     crc: u32,
     tstamp: u64,
@@ -80,17 +82,24 @@ pub struct ValueEntry {
 struct WritingFile {
     file_id: u32,
     data_file: File,
+    file_size: usize,
 }
 
 impl WritingFile {
     fn new(database_dir: &Path, file_id: u32) -> Result<WritingFile, Box<dyn error::Error>> {
         let data_file = create_database_file(&database_dir, file_id)?;
-        Ok(WritingFile { file_id, data_file })
+        Ok(WritingFile {
+            file_id,
+            data_file,
+            file_size: 0,
+        })
     }
 
     fn write_row(&mut self, row: Row) -> Result<ValueEntry, Box<dyn error::Error>> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
-        self.data_file.write_all(&*row.to_bytes())?;
+        let data_to_write = row.to_bytes();
+        self.data_file.write_all(&*data_to_write)?;
+        self.file_size += data_to_write.len();
         Ok(ValueEntry {
             file_id: self.file_id,
             value_offset,
@@ -98,28 +107,35 @@ impl WritingFile {
             tstmp: row.tstamp,
         })
     }
-}
 
-impl Drop for WritingFile {
-    fn drop(&mut self) {
-        self.data_file.flush();
+    fn transit_to_readonly(mut self) -> Result<(u32, File), Box<dyn error::Error>> {
+        self.data_file.flush()?;
+        let file_id = self.file_id;
+        let mut perms = self.data_file.metadata()?.permissions();
+        perms.set_readonly(true);
+        self.data_file.set_permissions(perms)?;
+        Ok((file_id, self.data_file))
+    }
+
+    fn flush(&mut self) -> Result<(), Box<dyn error::Error>> {
+        Ok(self.data_file.flush()?)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
-    pub max_file_size: u32,
+    pub max_file_size: usize,
 }
 
 #[derive(Debug)]
 pub struct Database {
     database_dir: PathBuf,
-    writing_file: WritingFile,
+    writing_file: RefCell<WritingFile>,
     stable_files: HashMap<u32, File>,
     options: DataBaseOptions,
 }
 
-const MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
+const DEFAULT_MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
 const DATABASE_FILE_DIRECTORY: &str = "database";
 
 impl Database {
@@ -131,7 +147,7 @@ impl Database {
         std::fs::create_dir_all(database_dir.clone())?;
         let stable_files = open_stable_database_files(&database_dir)?;
         let writing_file_id = stable_files.keys().max().unwrap_or(&0) + 1;
-        let writing_file = WritingFile::new(&database_dir, writing_file_id)?;
+        let writing_file = RefCell::new(WritingFile::new(&database_dir, writing_file_id)?);
         Ok(Database {
             writing_file,
             database_dir,
@@ -141,7 +157,15 @@ impl Database {
     }
 
     pub fn write_row(&mut self, row: Row) -> Result<ValueEntry, Box<dyn error::Error>> {
-        self.writing_file.write_row(row)
+        if self.check_file_overflow(&row) {
+            let next_writing_file =
+                WritingFile::new(&self.database_dir, self.writing_file.borrow().file_id + 1)?;
+            let old_file = self.writing_file.replace(next_writing_file);
+            let (file_id, file) = old_file.transit_to_readonly()?;
+            self.stable_files.insert(file_id, file);
+        }
+        let mut writing_file = self.writing_file.borrow_mut();
+        writing_file.write_row(row)
     }
 
     pub fn read_value(
@@ -150,14 +174,26 @@ impl Database {
         value_offset: u64,
         size: usize,
     ) -> Result<Vec<u8>, Box<dyn error::Error>> {
-        if file_id == self.writing_file.file_id {
-            return read_value_from_file(&mut self.writing_file.data_file, value_offset, size);
+        let mut writing_file = self.writing_file.borrow_mut();
+        if file_id == writing_file.file_id {
+            return read_value_from_file(&mut writing_file.data_file, value_offset, size);
         }
         let f = self.stable_files.get_mut(&file_id);
         if f.is_none() {
             return Err("file not found".into());
         }
         read_value_from_file(f.unwrap(), value_offset, size)
+    }
+
+    fn check_file_overflow(&self, row: &Row) -> bool {
+        let writing_file = self.writing_file.borrow();
+        row.size + writing_file.file_size > self.options.max_file_size
+    }
+}
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        self.writing_file.borrow_mut().flush();
     }
 }
 
@@ -193,7 +229,9 @@ fn read_value_from_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions { max_file_size: 11 };
+    const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
+        max_file_size: 1024,
+    };
 
     #[test]
     fn test_read_write_writing_file() {
@@ -252,5 +290,30 @@ mod tests {
                 *value.as_bytes()
             );
         });
+    }
+    #[test]
+    fn test_wrap_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut db = Database::open(&dir.path(), DataBaseOptions { max_file_size: 100 }).unwrap();
+        let kvs = [
+            ("k1", "value1_value1_value1"),
+            ("k2", "value2_value2_value2"),
+            ("k3", "value3_value3_value3"),
+            ("k1", "value4_value4_value4"),
+        ];
+        assert_eq!(0, db.stable_files.len());
+        let offset_values = kvs
+            .into_iter()
+            .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
+            .collect::<Vec<(ValueEntry, &str)>>();
+
+        offset_values.iter().for_each(|(ret, value)| {
+            assert_eq!(
+                db.read_value(ret.file_id, ret.value_offset, ret.value_size)
+                    .unwrap(),
+                *value.as_bytes()
+            );
+        });
+        assert_eq!(1, db.stable_files.len());
     }
 }

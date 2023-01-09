@@ -10,7 +10,7 @@ pub struct Bitcask {
     options: BitcaskOptions,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
     database_options: DataBaseOptions,
 }
@@ -20,7 +20,7 @@ impl Bitcask {
         directory: &Path,
         options: BitcaskOptions,
     ) -> Result<Bitcask, Box<dyn error::Error>> {
-        let database = Database::open(directory, options.database_options.clone()).unwrap();
+        let database = Database::open(directory, options.database_options).unwrap();
         Ok(Bitcask {
             keydir: KeyDir::new(),
             database,
