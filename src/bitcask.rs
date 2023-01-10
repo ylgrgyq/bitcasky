@@ -1,6 +1,7 @@
-use std::{error, path::Path};
+use std::path::Path;
 
 use crate::database::{DataBaseOptions, Database, Row};
+use crate::error::BitcaskResult;
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
@@ -16,10 +17,7 @@ pub struct BitcaskOptions {
 }
 
 impl Bitcask {
-    pub fn open(
-        directory: &Path,
-        options: BitcaskOptions,
-    ) -> Result<Bitcask, Box<dyn error::Error>> {
+    pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
         let database = Database::open(directory, options.database_options).unwrap();
         Ok(Bitcask {
             keydir: KeyDir::new(),
@@ -27,14 +25,15 @@ impl Bitcask {
             options,
         })
     }
-    pub fn put(&mut self, key: Vec<u8>, value: &[u8]) -> Result<(), Box<dyn error::Error>> {
+
+    pub fn put(&mut self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
         let row = Row::new(&key, value);
         let ret = self.database.write_row(row)?;
         self.keydir.put(key, ret);
         Ok(())
     }
 
-    pub fn get(&mut self, key: &Vec<u8>) -> Result<Option<Vec<u8>>, Box<dyn error::Error>> {
+    pub fn get(&mut self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         match self.keydir.get(key) {
             Some(e) => {
                 let v = self
@@ -49,7 +48,7 @@ impl Bitcask {
         }
     }
 
-    pub fn delete(&mut self, key: &Vec<u8>) -> Result<(), Box<dyn error::Error>> {
+    pub fn delete(&mut self, key: &Vec<u8>) -> BitcaskResult<()> {
         let row = Row::new(&key, TOMBSTONE_VALUE.as_bytes());
         self.database.write_row(row)?;
         self.keydir.delete(&key);

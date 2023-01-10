@@ -11,7 +11,10 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use crate::file_manager::{create_database_file, open_stable_database_files};
+use crate::{
+    error::{BitcaskError, BitcaskResult},
+    file_manager::{create_database_file, open_stable_database_files},
+};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -86,7 +89,7 @@ struct WritingFile {
 }
 
 impl WritingFile {
-    fn new(database_dir: &Path, file_id: u32) -> Result<WritingFile, Box<dyn error::Error>> {
+    fn new(database_dir: &Path, file_id: u32) -> BitcaskResult<WritingFile> {
         let data_file = create_database_file(&database_dir, file_id)?;
         Ok(WritingFile {
             file_id,
@@ -95,7 +98,7 @@ impl WritingFile {
         })
     }
 
-    fn write_row(&mut self, row: Row) -> Result<ValueEntry, Box<dyn error::Error>> {
+    fn write_row(&mut self, row: Row) -> BitcaskResult<ValueEntry> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&*data_to_write)?;
@@ -108,7 +111,7 @@ impl WritingFile {
         })
     }
 
-    fn transit_to_readonly(mut self) -> Result<(u32, File), Box<dyn error::Error>> {
+    fn transit_to_readonly(mut self) -> BitcaskResult<(u32, File)> {
         self.data_file.flush()?;
         let file_id = self.file_id;
         let mut perms = self.data_file.metadata()?.permissions();
@@ -117,7 +120,7 @@ impl WritingFile {
         Ok((file_id, self.data_file))
     }
 
-    fn flush(&mut self) -> Result<(), Box<dyn error::Error>> {
+    fn flush(&mut self) -> BitcaskResult<()> {
         Ok(self.data_file.flush()?)
     }
 }
@@ -139,10 +142,7 @@ const DEFAULT_MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
 const DATABASE_FILE_DIRECTORY: &str = "database";
 
 impl Database {
-    pub fn open(
-        directory: &Path,
-        options: DataBaseOptions,
-    ) -> Result<Database, Box<dyn error::Error>> {
+    pub fn open(directory: &Path, options: DataBaseOptions) -> BitcaskResult<Database> {
         let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
         std::fs::create_dir_all(database_dir.clone())?;
         let stable_files = open_stable_database_files(&database_dir)?;
@@ -156,7 +156,7 @@ impl Database {
         })
     }
 
-    pub fn write_row(&mut self, row: Row) -> Result<ValueEntry, Box<dyn error::Error>> {
+    pub fn write_row(&mut self, row: Row) -> BitcaskResult<ValueEntry> {
         if self.check_file_overflow(&row) {
             let next_writing_file =
                 WritingFile::new(&self.database_dir, self.writing_file.borrow().file_id + 1)?;
@@ -173,16 +173,16 @@ impl Database {
         file_id: u32,
         value_offset: u64,
         size: usize,
-    ) -> Result<Vec<u8>, Box<dyn error::Error>> {
+    ) -> BitcaskResult<Vec<u8>> {
         let mut writing_file = self.writing_file.borrow_mut();
         if file_id == writing_file.file_id {
-            return read_value_from_file(&mut writing_file.data_file, value_offset, size);
+            return read_value_from_file(file_id, &mut writing_file.data_file, value_offset, size);
         }
         let f = self.stable_files.get_mut(&file_id);
         if f.is_none() {
-            return Err("file not found".into());
+            return Err(BitcaskError::TargetFileIdNotFound(file_id));
         }
-        read_value_from_file(f.unwrap(), value_offset, size)
+        read_value_from_file(file_id, f.unwrap(), value_offset, size)
     }
 
     fn check_file_overflow(&self, row: &Row) -> bool {
@@ -198,10 +198,11 @@ impl Drop for Database {
 }
 
 fn read_value_from_file(
+    file_id: u32,
     data_file: &mut File,
     value_offset: u64,
     size: usize,
-) -> Result<Vec<u8>, Box<dyn error::Error>> {
+) -> BitcaskResult<Vec<u8>> {
     data_file.seek(SeekFrom::Start(value_offset))?;
     let mut buf = vec![0; size];
     data_file.read_exact(&mut buf)?;
@@ -212,8 +213,14 @@ fn read_value_from_file(
     let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
     let mut ck = crc32.digest();
     ck.update(&bs.slice(4..));
-    if expected_crc != ck.finalize() {
-        return Err("".into());
+    let actual_crc = ck.finalize();
+    if expected_crc != actual_crc {
+        return Err(BitcaskError::CrcCheckFailed(
+            file_id,
+            value_offset,
+            expected_crc,
+            actual_crc,
+        ));
     }
 
     let key_size = bs
