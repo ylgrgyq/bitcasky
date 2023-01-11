@@ -26,14 +26,14 @@ impl Bitcask {
         })
     }
 
-    pub fn put(&mut self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
+    pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
         let row = Row::new(&key, value);
         let ret = self.database.write_row(row)?;
         self.keydir.put(key, ret);
         Ok(())
     }
 
-    pub fn get(&mut self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
+    pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         match self.keydir.get(key) {
             Some(e) => {
                 let v = self
@@ -48,7 +48,7 @@ impl Bitcask {
         }
     }
 
-    pub fn delete(&mut self, key: &Vec<u8>) -> BitcaskResult<()> {
+    pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
         let row = Row::new(&key, TOMBSTONE_VALUE.as_bytes());
         self.database.write_row(row)?;
         self.keydir.delete(&key);
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_read_write_writing_file() {
         let dir = tempfile::tempdir().unwrap();
-        let mut bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+        let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
         bc.put("k1".into(), "value1".as_bytes()).unwrap();
         bc.put("k2".into(), "value2".as_bytes()).unwrap();
         bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn test_delete() {
         let dir = tempfile::tempdir().unwrap();
-        let mut bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+        let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
         bc.put("k1".into(), "value1".as_bytes()).unwrap();
         bc.put("k2".into(), "value2".as_bytes()).unwrap();
         bc.put("k3".into(), "value3".as_bytes()).unwrap();
