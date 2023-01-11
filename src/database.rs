@@ -1,10 +1,10 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    error,
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -133,7 +133,7 @@ pub struct DataBaseOptions {
 #[derive(Debug)]
 pub struct Database {
     database_dir: PathBuf,
-    writing_file: RefCell<WritingFile>,
+    writing_file: Mutex<RefCell<WritingFile>>,
     stable_files: HashMap<u32, File>,
     options: DataBaseOptions,
 }
@@ -147,7 +147,10 @@ impl Database {
         std::fs::create_dir_all(database_dir.clone())?;
         let stable_files = open_stable_database_files(&database_dir)?;
         let writing_file_id = stable_files.keys().max().unwrap_or(&0) + 1;
-        let writing_file = RefCell::new(WritingFile::new(&database_dir, writing_file_id)?);
+        let writing_file = Mutex::new(RefCell::new(WritingFile::new(
+            &database_dir,
+            writing_file_id,
+        )?));
         Ok(Database {
             writing_file,
             database_dir,
@@ -157,14 +160,15 @@ impl Database {
     }
 
     pub fn write_row(&mut self, row: Row) -> BitcaskResult<ValueEntry> {
-        if self.check_file_overflow(&row) {
+        let writing_file_ref = self.writing_file.lock().unwrap();
+        if self.check_file_overflow(&writing_file_ref, &row) {
             let next_writing_file =
-                WritingFile::new(&self.database_dir, self.writing_file.borrow().file_id + 1)?;
-            let old_file = self.writing_file.replace(next_writing_file);
+                WritingFile::new(&self.database_dir, writing_file_ref.borrow().file_id + 1)?;
+            let old_file = writing_file_ref.replace(next_writing_file);
             let (file_id, file) = old_file.transit_to_readonly()?;
             self.stable_files.insert(file_id, file);
         }
-        let mut writing_file = self.writing_file.borrow_mut();
+        let mut writing_file = writing_file_ref.borrow_mut();
         writing_file.write_row(row)
     }
 
@@ -174,10 +178,19 @@ impl Database {
         value_offset: u64,
         size: usize,
     ) -> BitcaskResult<Vec<u8>> {
-        let mut writing_file = self.writing_file.borrow_mut();
-        if file_id == writing_file.file_id {
-            return read_value_from_file(file_id, &mut writing_file.data_file, value_offset, size);
+        {
+            let writing_file_ref = self.writing_file.lock().unwrap();
+            let mut writing_file = writing_file_ref.borrow_mut();
+            if file_id == writing_file.file_id {
+                return read_value_from_file(
+                    file_id,
+                    &mut writing_file.data_file,
+                    value_offset,
+                    size,
+                );
+            }
         }
+
         let f = self.stable_files.get_mut(&file_id);
         if f.is_none() {
             return Err(BitcaskError::TargetFileIdNotFound(file_id));
@@ -185,15 +198,9 @@ impl Database {
         read_value_from_file(file_id, f.unwrap(), value_offset, size)
     }
 
-    fn check_file_overflow(&self, row: &Row) -> bool {
-        let writing_file = self.writing_file.borrow();
+    fn check_file_overflow(&self, writing_file_ref: &RefCell<WritingFile>, row: &Row) -> bool {
+        let writing_file = writing_file_ref.borrow();
         row.size + writing_file.file_size > self.options.max_file_size
-    }
-}
-
-impl Drop for Database {
-    fn drop(&mut self) {
-        self.writing_file.borrow_mut().flush();
     }
 }
 
