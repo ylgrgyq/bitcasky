@@ -176,6 +176,16 @@ impl Database {
         writing_file.write_row(row)
     }
 
+    pub fn iter(&self) -> BitcaskResult<Iter> {
+        let mut opened_stable_files = open_stable_database_files(&self.database_dir)?
+            .into_iter()
+            .collect::<Vec<(u32, File)>>();
+        opened_stable_files.sort_by_key(|e| e.0);
+        Ok(Iter {
+            files: opened_stable_files,
+        })
+    }
+
     pub fn read_value(
         &self,
         file_id: u32,
@@ -209,6 +219,21 @@ impl Database {
         self.stable_files
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
+    }
+}
+
+struct Iter {
+    files: Vec<(u32, File)>,
+    current: usize,
+}
+
+impl Iterator for Iter {
+    type Item = (Vec<u8>, ValueEntry);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (file_id, file) = self.files.get(self.current);
+
+        todo!()
     }
 }
 

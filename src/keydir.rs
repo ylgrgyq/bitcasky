@@ -1,13 +1,15 @@
+use std::path::Path;
+
 use dashmap::{mapref::one::Ref, DashMap};
 
-use crate::database::ValueEntry;
+use crate::database::{Database, ValueEntry};
 
 pub struct KeyDir {
     index: DashMap<Vec<u8>, ValueEntry>,
 }
 
 impl KeyDir {
-    pub fn new() -> KeyDir {
+    pub fn new(directory: &Path) -> KeyDir {
         return KeyDir {
             index: DashMap::new(),
         };
