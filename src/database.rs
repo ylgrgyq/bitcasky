@@ -183,6 +183,7 @@ impl Database {
         opened_stable_files.sort_by_key(|e| e.0);
         Ok(Iter {
             files: opened_stable_files,
+            current: 0,
         })
     }
 
@@ -231,7 +232,7 @@ impl Iterator for Iter {
     type Item = (Vec<u8>, ValueEntry);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (file_id, file) = self.files.get(self.current);
+        let (file_id, file) = self.files.get(self.current).unwrap();
 
         todo!()
     }
@@ -271,6 +272,45 @@ fn read_value_from_file(
         .get_u64() as usize;
     let val_offset = KEY_OFFSET + key_size;
     Ok(bs.slice(val_offset..val_offset + val_size).into())
+}
+
+fn read_key_value_from_file(
+    file_id: u32,
+    data_file: &mut File,
+) -> BitcaskResult<(Vec<u8>, Vec<u8>)> {
+    let value_offset = data_file.seek(SeekFrom::End(0))?;
+    let mut header_buf = vec![0; KEY_OFFSET];
+    data_file.read_exact(&mut header_buf)?;
+
+    let header_bs = Bytes::from(header_buf);
+    let expected_crc = header_bs.slice(0..4).get_u32();
+    let key_size = header_bs
+        .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
+        .get_u64() as usize;
+    let val_size = header_bs
+        .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
+        .get_u64() as usize;
+
+    let mut kv_buf = vec![0; key_size + val_size];
+    data_file.read_exact(&mut kv_buf)?;
+    let kv_bs = Bytes::from(kv_buf);
+    let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
+    let mut ck = crc32.digest();
+    ck.update(&header_bs[4..]);
+    ck.update(&kv_bs);
+    let actual_crc = ck.finalize();
+    if expected_crc != actual_crc {
+        return Err(BitcaskError::CrcCheckFailed(
+            file_id,
+            value_offset,
+            expected_crc,
+            actual_crc,
+        ));
+    }
+    Ok((
+        kv_bs.slice(0..key_size).into(),
+        kv_bs.slice(key_size..key_size + val_size).into(),
+    ))
 }
 
 #[cfg(test)]
