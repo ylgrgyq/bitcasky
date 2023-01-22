@@ -1,18 +1,23 @@
-use std::path::Path;
-
 use dashmap::{mapref::one::Ref, DashMap};
 
-use crate::database::{Database, ValueEntry};
+use crate::{
+    database::{Database, ValueEntry},
+    error::BitcaskResult,
+};
 
 pub struct KeyDir {
     index: DashMap<Vec<u8>, ValueEntry>,
 }
 
 impl KeyDir {
-    pub fn new(directory: &Path) -> KeyDir {
-        return KeyDir {
+    pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
+        let index = DashMap::new();
+        for (k, v) in database.iter()? {
+            index.insert(k, v);
+        }
+        return Ok(KeyDir {
             index: DashMap::new(),
-        };
+        });
     }
 
     pub fn put(&self, key: Vec<u8>, value: ValueEntry) {

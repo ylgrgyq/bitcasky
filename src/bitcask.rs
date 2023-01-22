@@ -19,8 +19,9 @@ pub struct BitcaskOptions {
 impl Bitcask {
     pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
         let database = Database::open(directory, options.database_options)?;
+        let keydir = KeyDir::new(&database)?;
         Ok(Bitcask {
-            keydir: KeyDir::new(directory),
+            keydir,
             database,
             options,
         })

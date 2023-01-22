@@ -20,6 +20,7 @@ const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
 const KEY_SIZE_SIZE: usize = 8;
 const VALUE_SIZE_SIZE: usize = 8;
+const TSTAMP_OFFSET: usize = CRC_SIZE;
 const KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
 const VALUE_SIZE_OFFSET: usize = KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
@@ -223,7 +224,7 @@ impl Database {
     }
 }
 
-struct Iter {
+pub struct Iter {
     files: Vec<(u32, File)>,
     current: usize,
 }
@@ -232,9 +233,12 @@ impl Iterator for Iter {
     type Item = (Vec<u8>, ValueEntry);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut a = self.files.get_mut(self.current).unwrap();
-        read_key_value_from_file(a.0.clone(), &mut a.1);
-        todo!()
+        let a = self.files.get_mut(self.current).unwrap();
+        match read_key_value_from_file(a.0.clone(), &mut a.1) {
+            Ok(r) => Some(r),
+            // todo do we need panic
+            Err(_) => None,
+        }
     }
 }
 
@@ -277,21 +281,22 @@ fn read_value_from_file(
 fn read_key_value_from_file(
     file_id: u32,
     data_file: &mut File,
-) -> BitcaskResult<(Vec<u8>, Vec<u8>)> {
+) -> BitcaskResult<(Vec<u8>, ValueEntry)> {
     let value_offset = data_file.seek(SeekFrom::End(0))?;
     let mut header_buf = vec![0; KEY_OFFSET];
     data_file.read_exact(&mut header_buf)?;
 
     let header_bs = Bytes::from(header_buf);
     let expected_crc = header_bs.slice(0..4).get_u32();
+    let tstmp = header_bs.slice(TSTAMP_OFFSET..KEY_SIZE_OFFSET).get_u64();
     let key_size = header_bs
         .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
         .get_u64() as usize;
-    let val_size = header_bs
+    let value_size = header_bs
         .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
         .get_u64() as usize;
 
-    let mut kv_buf = vec![0; key_size + val_size];
+    let mut kv_buf = vec![0; key_size + value_size];
     data_file.read_exact(&mut kv_buf)?;
     let kv_bs = Bytes::from(kv_buf);
     let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
@@ -309,7 +314,12 @@ fn read_key_value_from_file(
     }
     Ok((
         kv_bs.slice(0..key_size).into(),
-        kv_bs.slice(key_size..key_size + val_size).into(),
+        ValueEntry {
+            file_id,
+            value_offset,
+            value_size,
+            tstmp,
+        },
     ))
 }
 
