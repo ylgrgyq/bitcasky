@@ -230,15 +230,11 @@ pub struct Iter {
 }
 
 impl Iterator for Iter {
-    type Item = (Vec<u8>, ValueEntry);
+    type Item = BitcaskResult<(Vec<u8>, ValueEntry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let a = self.files.get_mut(self.current).unwrap();
-        match read_key_value_from_file(a.0.clone(), &mut a.1) {
-            Ok(r) => Some(r),
-            // todo do we need panic
-            Err(_) => None,
-        }
+        let (file_id, file) = self.files.get_mut(self.current).unwrap();
+        Some(read_key_value_from_file(file_id.clone(), file))
     }
 }
 

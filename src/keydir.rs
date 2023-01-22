@@ -12,7 +12,8 @@ pub struct KeyDir {
 impl KeyDir {
     pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
-        for (k, v) in database.iter()? {
+        for ret in database.iter()? {
+            let (k, v) = ret?;
             index.insert(k, v);
         }
         return Ok(KeyDir {
