@@ -232,8 +232,8 @@ impl Iterator for Iter {
     type Item = (Vec<u8>, ValueEntry);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (file_id, file) = self.files.get(self.current).unwrap();
-
+        let mut a = self.files.get_mut(self.current).unwrap();
+        read_key_value_from_file(a.0.clone(), &mut a.1);
         todo!()
     }
 }
