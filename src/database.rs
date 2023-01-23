@@ -236,7 +236,6 @@ impl Iterator for Iter {
         let files_len = self.files.len();
         while self.current < files_len {
             let (file_id, file) = self.files.get_mut(self.current).unwrap();
-            println!("sdfsdf {} {}", file_id, self.current);
             match read_key_value_from_file(file_id.clone(), file) {
                 Err(BitcaskError::IoError(e)) => match e.kind() {
                     std::io::ErrorKind::UnexpectedEof => {
@@ -293,7 +292,6 @@ fn read_key_value_from_file(
 ) -> BitcaskResult<(Vec<u8>, ValueEntry)> {
     let a = data_file.metadata().unwrap().len();
     let value_offset = data_file.seek(SeekFrom::Current(0))?;
-    println!("value offset {} {} {}", file_id, value_offset, a);
     let mut header_buf = vec![0; KEY_OFFSET];
     data_file.read_exact(&mut header_buf)?;
 
@@ -301,8 +299,6 @@ fn read_key_value_from_file(
     let expected_crc = header_bs.slice(0..4).get_u32();
 
     data_file.metadata().unwrap();
-
-    println!("expected_crc {} {}", file_id, expected_crc);
 
     let tstmp = header_bs.slice(TSTAMP_OFFSET..KEY_SIZE_OFFSET).get_u64();
     let key_size = header_bs
@@ -328,17 +324,6 @@ fn read_key_value_from_file(
             actual_crc,
         ));
     }
-
-    println!(
-        "read ret {} {:?}",
-        file_id,
-        ValueEntry {
-            file_id,
-            value_offset,
-            value_size: KEY_OFFSET + key_size + value_size,
-            tstmp,
-        }
-    );
 
     Ok((
         kv_bs.slice(0..key_size).into(),
