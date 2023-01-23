@@ -482,5 +482,26 @@ mod tests {
             );
         });
         assert_eq!(1, db.stable_files.len());
+        assert_eq!(
+            offset_values
+                .iter()
+                .map(|v| v.0)
+                .collect::<Vec<ValueEntry>>(),
+            db.iter()
+                .unwrap()
+                .map(|r| r.unwrap().1)
+                .collect::<Vec<ValueEntry>>()
+        );
+        assert_eq!(
+            vec!["k1", "k2", "k3", "k1"]
+                .iter()
+                .map(|kv| kv.to_string())
+                .map(|k| k.as_bytes().clone().to_vec())
+                .collect::<Vec<Vec<u8>>>(),
+            db.iter()
+                .unwrap()
+                .map(|r| r.unwrap().0)
+                .collect::<Vec<Vec<u8>>>()
+        )
     }
 }
