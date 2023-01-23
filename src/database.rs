@@ -74,7 +74,7 @@ impl<'a> Row<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct ValueEntry {
     pub file_id: u32,
     pub value_offset: u64,
@@ -234,7 +234,18 @@ impl Iterator for Iter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (file_id, file) = self.files.get_mut(self.current).unwrap();
-        Some(read_key_value_from_file(file_id.clone(), file))
+        println!("sdfsdf {} {}", file_id, self.current);
+        match read_key_value_from_file(file_id.clone(), file) {
+            Ok(ret) => Some(Ok(ret)),
+            Err(BitcaskError::IoError(e)) => match e.kind() {
+                std::io::ErrorKind::UnexpectedEof => {
+                    self.current += 1;
+                    None
+                }
+                _ => Some(Err(BitcaskError::IoError(e))),
+            },
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
@@ -278,12 +289,19 @@ fn read_key_value_from_file(
     file_id: u32,
     data_file: &mut File,
 ) -> BitcaskResult<(Vec<u8>, ValueEntry)> {
-    let value_offset = data_file.seek(SeekFrom::End(0))?;
+    let a = data_file.metadata().unwrap().len();
+    let value_offset = data_file.seek(SeekFrom::Current(0))?;
+    println!("value offset {} {} {}", file_id, value_offset, a);
     let mut header_buf = vec![0; KEY_OFFSET];
     data_file.read_exact(&mut header_buf)?;
 
     let header_bs = Bytes::from(header_buf);
     let expected_crc = header_bs.slice(0..4).get_u32();
+
+    data_file.metadata().unwrap();
+
+    println!("expected_crc {} {}", file_id, expected_crc);
+
     let tstmp = header_bs.slice(TSTAMP_OFFSET..KEY_SIZE_OFFSET).get_u64();
     let key_size = header_bs
         .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
@@ -308,12 +326,24 @@ fn read_key_value_from_file(
             actual_crc,
         ));
     }
+
+    println!(
+        "read ret {} {:?}",
+        file_id,
+        ValueEntry {
+            file_id,
+            value_offset,
+            value_size: KEY_OFFSET + key_size + value_size,
+            tstmp,
+        }
+    );
+
     Ok((
         kv_bs.slice(0..key_size).into(),
         ValueEntry {
             file_id,
             value_offset,
-            value_size,
+            value_size: KEY_OFFSET + key_size + value_size,
             tstmp,
         },
     ))
@@ -321,6 +351,7 @@ fn read_key_value_from_file(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: 1024,
@@ -348,6 +379,26 @@ mod tests {
                 *value.as_bytes()
             );
         });
+        assert_eq!(
+            offset_values
+                .iter()
+                .map(|v| v.0)
+                .collect::<Vec<ValueEntry>>(),
+            db.iter()
+                .unwrap()
+                .map(|r| r.unwrap().1)
+                .collect::<Vec<ValueEntry>>()
+        );
+        assert_eq!(
+            kvs.iter()
+                .map(|kv| kv.0.to_string())
+                .map(|k| k.as_bytes().clone().to_vec())
+                .collect::<Vec<Vec<u8>>>(),
+            db.iter()
+                .unwrap()
+                .map(|r| r.unwrap().0)
+                .collect::<Vec<Vec<u8>>>()
+        )
     }
 
     #[test]
@@ -383,6 +434,27 @@ mod tests {
                 *value.as_bytes()
             );
         });
+        assert_eq!(
+            offset_values
+                .iter()
+                .map(|v| v.0)
+                .collect::<Vec<ValueEntry>>(),
+            db.iter()
+                .unwrap()
+                .map(|r| r.unwrap().1)
+                .collect::<Vec<ValueEntry>>()
+        );
+        assert_eq!(
+            vec!["k3", "k2", "k1"]
+                .iter()
+                .map(|kv| kv.to_string())
+                .map(|k| k.as_bytes().clone().to_vec())
+                .collect::<Vec<Vec<u8>>>(),
+            db.iter()
+                .unwrap()
+                .map(|r| r.unwrap().0)
+                .collect::<Vec<Vec<u8>>>()
+        )
     }
     #[test]
     fn test_wrap_file() {
