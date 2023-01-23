@@ -233,19 +233,21 @@ impl Iterator for Iter {
     type Item = BitcaskResult<(Vec<u8>, ValueEntry)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (file_id, file) = self.files.get_mut(self.current).unwrap();
-        println!("sdfsdf {} {}", file_id, self.current);
-        match read_key_value_from_file(file_id.clone(), file) {
-            Ok(ret) => Some(Ok(ret)),
-            Err(BitcaskError::IoError(e)) => match e.kind() {
-                std::io::ErrorKind::UnexpectedEof => {
-                    self.current += 1;
-                    None
-                }
-                _ => Some(Err(BitcaskError::IoError(e))),
-            },
-            Err(e) => Some(Err(e)),
+        let files_len = self.files.len();
+        while self.current < files_len {
+            let (file_id, file) = self.files.get_mut(self.current).unwrap();
+            println!("sdfsdf {} {}", file_id, self.current);
+            match read_key_value_from_file(file_id.clone(), file) {
+                Err(BitcaskError::IoError(e)) => match e.kind() {
+                    std::io::ErrorKind::UnexpectedEof => {
+                        self.current += 1;
+                    }
+                    _ => return Some(Err(BitcaskError::IoError(e))),
+                },
+                r => return Some(r),
+            }
         }
+        None
     }
 }
 
@@ -445,7 +447,7 @@ mod tests {
                 .collect::<Vec<ValueEntry>>()
         );
         assert_eq!(
-            vec!["k3", "k2", "k1"]
+            vec!["k1", "k2", "k3", "k1"]
                 .iter()
                 .map(|kv| kv.to_string())
                 .map(|k| k.as_bytes().clone().to_vec())
