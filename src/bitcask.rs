@@ -62,7 +62,9 @@ impl Bitcask {
 mod tests {
     use super::*;
     const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-        database_options: DataBaseOptions { max_file_size: 11 },
+        database_options: DataBaseOptions {
+            max_file_size: Some(11),
+        },
     };
 
     #[test]
@@ -86,7 +88,9 @@ mod tests {
             let bc = Bitcask::open(
                 &dir.path(),
                 BitcaskOptions {
-                    database_options: DataBaseOptions { max_file_size: 100 },
+                    database_options: DataBaseOptions {
+                        max_file_size: Some(100),
+                    },
                 },
             )
             .unwrap();
@@ -102,7 +106,9 @@ mod tests {
         let bc = Bitcask::open(
             &dir.path(),
             BitcaskOptions {
-                database_options: DataBaseOptions { max_file_size: 100 },
+                database_options: DataBaseOptions {
+                    max_file_size: Some(100),
+                },
             },
         )
         .unwrap();

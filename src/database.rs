@@ -128,7 +128,7 @@ impl WritingFile {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
-    pub max_file_size: usize,
+    pub max_file_size: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -139,7 +139,7 @@ pub struct Database {
     options: DataBaseOptions,
 }
 
-const DEFAULT_MAX_DATABASE_FILE_SIZE: u32 = 100 * 1024;
+const DEFAULT_MAX_DATABASE_FILE_SIZE: usize = 100 * 1024;
 const DATABASE_FILE_DIRECTORY: &str = "database";
 
 impl Database {
@@ -214,7 +214,11 @@ impl Database {
 
     fn check_file_overflow(&self, writing_file_ref: &RefCell<WritingFile>, row: &Row) -> bool {
         let writing_file = writing_file_ref.borrow();
-        row.size + writing_file.file_size > self.options.max_file_size
+        row.size + writing_file.file_size
+            > self
+                .options
+                .max_file_size
+                .unwrap_or(DEFAULT_MAX_DATABASE_FILE_SIZE)
     }
 
     fn get_file_to_read(&self, file_id: u32) -> BitcaskResult<RefMut<u32, Mutex<File>>> {
@@ -341,7 +345,7 @@ mod tests {
 
     use super::*;
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
-        max_file_size: 1024,
+        max_file_size: Some(1024),
     };
 
     #[test]
@@ -446,7 +450,13 @@ mod tests {
     #[test]
     fn test_wrap_file() {
         let dir = tempfile::tempdir().unwrap();
-        let db = Database::open(&dir.path(), DataBaseOptions { max_file_size: 100 }).unwrap();
+        let db = Database::open(
+            &dir.path(),
+            DataBaseOptions {
+                max_file_size: Some(100),
+            },
+        )
+        .unwrap();
         let kvs = [
             ("k1", "value1_value1_value1"),
             ("k2", "value2_value2_value2"),
