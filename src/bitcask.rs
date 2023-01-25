@@ -80,6 +80,47 @@ mod tests {
     }
 
     #[test]
+    fn test_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let bc = Bitcask::open(
+                &dir.path(),
+                BitcaskOptions {
+                    database_options: DataBaseOptions { max_file_size: 100 },
+                },
+            )
+            .unwrap();
+            bc.put("k1".into(), "value1_value1_value1".as_bytes())
+                .unwrap();
+            bc.put("k2".into(), "value2_value2_value2".as_bytes())
+                .unwrap();
+            bc.put("k3".into(), "value3_value3_value3".as_bytes())
+                .unwrap();
+            bc.put("k1".into(), "value4_value4_value4".as_bytes())
+                .unwrap();
+        }
+        let bc = Bitcask::open(
+            &dir.path(),
+            BitcaskOptions {
+                database_options: DataBaseOptions { max_file_size: 100 },
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            bc.get(&"k1".into()).unwrap().unwrap(),
+            "value4_value4_value4".as_bytes()
+        );
+        assert_eq!(
+            bc.get(&"k2".into()).unwrap().unwrap(),
+            "value2_value2_value2".as_bytes()
+        );
+        assert_eq!(
+            bc.get(&"k3".into()).unwrap().unwrap(),
+            "value3_value3_value3".as_bytes()
+        );
+    }
+
+    #[test]
     fn test_delete() {
         let dir = tempfile::tempdir().unwrap();
         let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();

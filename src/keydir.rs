@@ -16,9 +16,7 @@ impl KeyDir {
             let (k, v) = ret?;
             index.insert(k, v);
         }
-        return Ok(KeyDir {
-            index: DashMap::new(),
-        });
+        return Ok(KeyDir { index });
     }
 
     pub fn put(&self, key: Vec<u8>, value: ValueEntry) {
