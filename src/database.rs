@@ -26,7 +26,7 @@ const VALUE_SIZE_OFFSET: usize = KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
 #[derive(Debug)]
-pub struct Row<'a> {
+struct RowToWrite<'a> {
     crc: u32,
     tstamp: u64,
     key_size: u64,
@@ -36,8 +36,8 @@ pub struct Row<'a> {
     size: usize,
 }
 
-impl<'a> Row<'a> {
-    pub fn new(key: &'a Vec<u8>, value: &'a [u8]) -> Row<'a> {
+impl<'a> RowToWrite<'a> {
+    fn new(key: &'a Vec<u8>, value: &'a [u8]) -> RowToWrite<'a> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -51,7 +51,7 @@ impl<'a> Row<'a> {
         ck.update(&value_size.to_be_bytes());
         ck.update(&key);
         ck.update(value);
-        Row {
+        RowToWrite {
             crc: ck.finalize(),
             tstamp: now,
             key_size,
@@ -99,7 +99,7 @@ impl WritingFile {
         })
     }
 
-    fn write_row(&mut self, row: Row) -> BitcaskResult<RowPosition> {
+    fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowPosition> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&*data_to_write)?;
@@ -164,7 +164,8 @@ impl Database {
         })
     }
 
-    pub fn write_row(&self, row: Row) -> BitcaskResult<RowPosition> {
+    pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
+        let row = RowToWrite::new(&key, value);
         let writing_file_ref = self.writing_file.lock().unwrap();
         if self.check_file_overflow(&writing_file_ref, &row) {
             let next_writing_file =
@@ -188,31 +189,35 @@ impl Database {
         })
     }
 
-    pub fn read_value(
-        &self,
-        file_id: u32,
-        value_offset: u64,
-        size: usize,
-    ) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&self, row_position: &RowPosition) -> BitcaskResult<Vec<u8>> {
         {
             let writing_file_ref = self.writing_file.lock().unwrap();
             let mut writing_file = writing_file_ref.borrow_mut();
-            if file_id == writing_file.file_id {
+            if row_position.file_id == writing_file.file_id {
                 return read_value_from_file(
-                    file_id,
+                    row_position.file_id,
                     &mut writing_file.data_file,
-                    value_offset,
-                    size,
+                    row_position.row_offset,
+                    row_position.row_size,
                 );
             }
         }
 
-        let l = self.get_file_to_read(file_id)?;
+        let l = self.get_file_to_read(row_position.file_id)?;
         let mut f = l.lock().unwrap();
-        read_value_from_file(file_id, &mut f, value_offset, size)
+        read_value_from_file(
+            row_position.file_id,
+            &mut f,
+            row_position.row_offset,
+            row_position.row_size,
+        )
     }
 
-    fn check_file_overflow(&self, writing_file_ref: &RefCell<WritingFile>, row: &Row) -> bool {
+    fn check_file_overflow(
+        &self,
+        writing_file_ref: &RefCell<WritingFile>,
+        row: &RowToWrite,
+    ) -> bool {
         let writing_file = writing_file_ref.borrow();
         row.size + writing_file.file_size
             > self
@@ -246,7 +251,7 @@ impl Iterator for Iter {
         let files_len = self.files.len();
         while self.current < files_len {
             let (file_id, file) = self.files.get_mut(self.current).unwrap();
-            match read_key_value_from_file(file_id.clone(), file) {
+            match read_next_item_from_file(file_id.clone(), file) {
                 Err(BitcaskError::IoError(e)) => match e.kind() {
                     std::io::ErrorKind::UnexpectedEof => {
                         self.current += 1;
@@ -296,8 +301,7 @@ fn read_value_from_file(
     Ok(bs.slice(val_offset..val_offset + val_size).into())
 }
 
-fn read_key_value_from_file(file_id: u32, data_file: &mut File) -> BitcaskResult<IterItem> {
-    let a = data_file.metadata().unwrap().len();
+fn read_next_item_from_file(file_id: u32, data_file: &mut File) -> BitcaskResult<IterItem> {
     let value_offset = data_file.seek(SeekFrom::Current(0))?;
     let mut header_buf = vec![0; KEY_OFFSET];
     data_file.read_exact(&mut header_buf)?;
@@ -364,15 +368,11 @@ mod tests {
         ];
         let offset_values = kvs
             .into_iter()
-            .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
+            .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
             .collect::<Vec<(RowPosition, &str)>>();
 
         offset_values.iter().for_each(|(ret, value)| {
-            assert_eq!(
-                db.read_value(ret.file_id, ret.row_offset, ret.row_size)
-                    .unwrap(),
-                *value.as_bytes()
-            );
+            assert_eq!(db.read_value(&ret).unwrap(), *value.as_bytes());
         });
         assert_eq!(
             offset_values
@@ -406,7 +406,7 @@ mod tests {
             offset_values.append(
                 &mut kvs
                     .into_iter()
-                    .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
+                    .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
                     .collect::<Vec<(RowPosition, &str)>>(),
             );
         }
@@ -416,18 +416,14 @@ mod tests {
             offset_values.append(
                 &mut kvs
                     .into_iter()
-                    .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
+                    .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
                     .collect::<Vec<(RowPosition, &str)>>(),
             );
         }
 
         let db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
         offset_values.iter().for_each(|(ret, value)| {
-            assert_eq!(
-                db.read_value(ret.file_id, ret.row_offset, ret.row_size)
-                    .unwrap(),
-                *value.as_bytes()
-            );
+            assert_eq!(db.read_value(&ret).unwrap(), *value.as_bytes());
         });
         assert_eq!(
             offset_values
@@ -470,15 +466,11 @@ mod tests {
         assert_eq!(0, db.stable_files.len());
         let offset_values = kvs
             .into_iter()
-            .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
+            .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
             .collect::<Vec<(RowPosition, &str)>>();
 
         offset_values.iter().for_each(|(ret, value)| {
-            assert_eq!(
-                db.read_value(ret.file_id, ret.row_offset, ret.row_size)
-                    .unwrap(),
-                *value.as_bytes()
-            );
+            assert_eq!(db.read_value(&ret).unwrap(), *value.as_bytes());
         });
         assert_eq!(1, db.stable_files.len());
         assert_eq!(

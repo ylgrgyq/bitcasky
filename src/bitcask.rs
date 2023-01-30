@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::database::{DataBaseOptions, Database, Row};
+use crate::database::{DataBaseOptions, Database};
 use crate::error::BitcaskResult;
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
@@ -28,8 +28,7 @@ impl Bitcask {
     }
 
     pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
-        let row = Row::new(&key, value);
-        let ret = self.database.write_row(row)?;
+        let ret = self.database.write(&key, value)?;
         self.keydir.put(key, ret);
         Ok(())
     }
@@ -37,9 +36,7 @@ impl Bitcask {
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         match self.keydir.get(key) {
             Some(e) => {
-                let v = self
-                    .database
-                    .read_value(e.file_id, e.row_offset, e.row_size)?;
+                let v = self.database.read_value(e.value())?;
                 if is_tombstone(&v) {
                     return Ok(None);
                 }
@@ -50,12 +47,10 @@ impl Bitcask {
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
-        let row = Row::new(&key, TOMBSTONE_VALUE.as_bytes());
-        self.database.write_row(row)?;
+        self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
         self.keydir.delete(&key);
         Ok(())
     }
-    pub fn close(&self) {}
 }
 
 #[cfg(test)]
