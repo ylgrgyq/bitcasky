@@ -39,7 +39,7 @@ impl Bitcask {
             Some(e) => {
                 let v = self
                     .database
-                    .read_value(e.file_id, e.value_offset, e.value_size)?;
+                    .read_value(e.file_id, e.row_offset, e.row_size)?;
                 if is_tombstone(&v) {
                     return Ok(None);
                 }
@@ -102,6 +102,7 @@ mod tests {
                 .unwrap();
             bc.put("k1".into(), "value4_value4_value4".as_bytes())
                 .unwrap();
+            bc.delete(&"k2".into()).unwrap();
         }
         let bc = Bitcask::open(
             &dir.path(),
@@ -116,10 +117,7 @@ mod tests {
             bc.get(&"k1".into()).unwrap().unwrap(),
             "value4_value4_value4".as_bytes()
         );
-        assert_eq!(
-            bc.get(&"k2".into()).unwrap().unwrap(),
-            "value2_value2_value2".as_bytes()
-        );
+        assert_eq!(bc.get(&"k2".into()).unwrap(), None,);
         assert_eq!(
             bc.get(&"k3".into()).unwrap().unwrap(),
             "value3_value3_value3".as_bytes()

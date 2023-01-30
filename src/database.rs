@@ -75,10 +75,10 @@ impl<'a> Row<'a> {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub struct ValuePosition {
+pub struct RowPosition {
     pub file_id: u32,
-    pub value_offset: u64,
-    pub value_size: usize,
+    pub row_offset: u64,
+    pub row_size: usize,
     pub tstmp: u64,
 }
 
@@ -99,15 +99,15 @@ impl WritingFile {
         })
     }
 
-    fn write_row(&mut self, row: Row) -> BitcaskResult<ValuePosition> {
+    fn write_row(&mut self, row: Row) -> BitcaskResult<RowPosition> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&*data_to_write)?;
         self.file_size += data_to_write.len();
-        Ok(ValuePosition {
+        Ok(RowPosition {
             file_id: self.file_id,
-            value_offset,
-            value_size: row.size,
+            row_offset: value_offset,
+            row_size: row.size,
             tstmp: row.tstamp,
         })
     }
@@ -164,7 +164,7 @@ impl Database {
         })
     }
 
-    pub fn write_row(&self, row: Row) -> BitcaskResult<ValuePosition> {
+    pub fn write_row(&self, row: Row) -> BitcaskResult<RowPosition> {
         let writing_file_ref = self.writing_file.lock().unwrap();
         if self.check_file_overflow(&writing_file_ref, &row) {
             let next_writing_file =
@@ -228,13 +228,19 @@ impl Database {
     }
 }
 
+pub struct IterItem {
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
+    pub row_position: RowPosition,
+}
+
 pub struct Iter {
     files: Vec<(u32, File)>,
     current: usize,
 }
 
 impl Iterator for Iter {
-    type Item = BitcaskResult<(Vec<u8>, ValuePosition)>;
+    type Item = BitcaskResult<IterItem>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let files_len = self.files.len();
@@ -290,10 +296,7 @@ fn read_value_from_file(
     Ok(bs.slice(val_offset..val_offset + val_size).into())
 }
 
-fn read_key_value_from_file(
-    file_id: u32,
-    data_file: &mut File,
-) -> BitcaskResult<(Vec<u8>, ValuePosition)> {
+fn read_key_value_from_file(file_id: u32, data_file: &mut File) -> BitcaskResult<IterItem> {
     let a = data_file.metadata().unwrap().len();
     let value_offset = data_file.seek(SeekFrom::Current(0))?;
     let mut header_buf = vec![0; KEY_OFFSET];
@@ -329,15 +332,16 @@ fn read_key_value_from_file(
         ));
     }
 
-    Ok((
-        kv_bs.slice(0..key_size).into(),
-        ValuePosition {
+    Ok(IterItem {
+        key: kv_bs.slice(0..key_size).into(),
+        value: kv_bs.slice(key_size..).into(),
+        row_position: RowPosition {
             file_id,
-            value_offset,
-            value_size: KEY_OFFSET + key_size + value_size,
+            row_offset: value_offset,
+            row_size: KEY_OFFSET + key_size + value_size,
             tstmp,
         },
-    ))
+    })
 }
 
 #[cfg(test)]
@@ -361,11 +365,11 @@ mod tests {
         let offset_values = kvs
             .into_iter()
             .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
-            .collect::<Vec<(ValuePosition, &str)>>();
+            .collect::<Vec<(RowPosition, &str)>>();
 
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
-                db.read_value(ret.file_id, ret.value_offset, ret.value_size)
+                db.read_value(ret.file_id, ret.row_offset, ret.row_size)
                     .unwrap(),
                 *value.as_bytes()
             );
@@ -374,11 +378,11 @@ mod tests {
             offset_values
                 .iter()
                 .map(|v| v.0)
-                .collect::<Vec<ValuePosition>>(),
+                .collect::<Vec<RowPosition>>(),
             db.iter()
                 .unwrap()
-                .map(|r| r.unwrap().1)
-                .collect::<Vec<ValuePosition>>()
+                .map(|r| r.unwrap().row_position)
+                .collect::<Vec<RowPosition>>()
         );
         assert_eq!(
             kvs.iter()
@@ -387,7 +391,7 @@ mod tests {
                 .collect::<Vec<Vec<u8>>>(),
             db.iter()
                 .unwrap()
-                .map(|r| r.unwrap().0)
+                .map(|r| r.unwrap().key)
                 .collect::<Vec<Vec<u8>>>()
         )
     }
@@ -395,7 +399,7 @@ mod tests {
     #[test]
     fn test_read_write_with_stable_files() {
         let dir = tempfile::tempdir().unwrap();
-        let mut offset_values: Vec<(ValuePosition, &str)> = vec![];
+        let mut offset_values: Vec<(RowPosition, &str)> = vec![];
         {
             let db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
             let kvs = [("k1", "value1"), ("k2", "value2")];
@@ -403,7 +407,7 @@ mod tests {
                 &mut kvs
                     .into_iter()
                     .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
-                    .collect::<Vec<(ValuePosition, &str)>>(),
+                    .collect::<Vec<(RowPosition, &str)>>(),
             );
         }
         {
@@ -413,14 +417,14 @@ mod tests {
                 &mut kvs
                     .into_iter()
                     .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
-                    .collect::<Vec<(ValuePosition, &str)>>(),
+                    .collect::<Vec<(RowPosition, &str)>>(),
             );
         }
 
         let db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
-                db.read_value(ret.file_id, ret.value_offset, ret.value_size)
+                db.read_value(ret.file_id, ret.row_offset, ret.row_size)
                     .unwrap(),
                 *value.as_bytes()
             );
@@ -429,11 +433,11 @@ mod tests {
             offset_values
                 .iter()
                 .map(|v| v.0)
-                .collect::<Vec<ValuePosition>>(),
+                .collect::<Vec<RowPosition>>(),
             db.iter()
                 .unwrap()
-                .map(|r| r.unwrap().1)
-                .collect::<Vec<ValuePosition>>()
+                .map(|r| r.unwrap().row_position)
+                .collect::<Vec<RowPosition>>()
         );
         assert_eq!(
             vec!["k1", "k2", "k3", "k1"]
@@ -443,7 +447,7 @@ mod tests {
                 .collect::<Vec<Vec<u8>>>(),
             db.iter()
                 .unwrap()
-                .map(|r| r.unwrap().0)
+                .map(|r| r.unwrap().key)
                 .collect::<Vec<Vec<u8>>>()
         )
     }
@@ -467,11 +471,11 @@ mod tests {
         let offset_values = kvs
             .into_iter()
             .map(|(k, v)| (db.write_row(Row::new(&k.into(), v.as_bytes())).unwrap(), v))
-            .collect::<Vec<(ValuePosition, &str)>>();
+            .collect::<Vec<(RowPosition, &str)>>();
 
         offset_values.iter().for_each(|(ret, value)| {
             assert_eq!(
-                db.read_value(ret.file_id, ret.value_offset, ret.value_size)
+                db.read_value(ret.file_id, ret.row_offset, ret.row_size)
                     .unwrap(),
                 *value.as_bytes()
             );
@@ -481,11 +485,11 @@ mod tests {
             offset_values
                 .iter()
                 .map(|v| v.0)
-                .collect::<Vec<ValuePosition>>(),
+                .collect::<Vec<RowPosition>>(),
             db.iter()
                 .unwrap()
-                .map(|r| r.unwrap().1)
-                .collect::<Vec<ValuePosition>>()
+                .map(|r| r.unwrap().row_position)
+                .collect::<Vec<RowPosition>>()
         );
         assert_eq!(
             vec!["k1", "k2", "k3", "k1"]
@@ -495,7 +499,7 @@ mod tests {
                 .collect::<Vec<Vec<u8>>>(),
             db.iter()
                 .unwrap()
-                .map(|r| r.unwrap().0)
+                .map(|r| r.unwrap().key)
                 .collect::<Vec<Vec<u8>>>()
         )
     }

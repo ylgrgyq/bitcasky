@@ -1,33 +1,38 @@
 use dashmap::{mapref::one::Ref, DashMap};
 
 use crate::{
-    database::{Database, ValuePosition},
+    database::{Database, RowPosition},
     error::BitcaskResult,
+    utils::is_tombstone,
 };
 
 pub struct KeyDir {
-    index: DashMap<Vec<u8>, ValuePosition>,
+    index: DashMap<Vec<u8>, RowPosition>,
 }
 
 impl KeyDir {
     pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
         for ret in database.iter()? {
-            let (k, v) = ret?;
-            index.insert(k, v);
+            let item = ret?;
+            if is_tombstone(&item.value) {
+                index.remove(&item.key);
+                continue;
+            }
+            index.insert(item.key, item.row_position);
         }
         return Ok(KeyDir { index });
     }
 
-    pub fn put(&self, key: Vec<u8>, value: ValuePosition) {
+    pub fn put(&self, key: Vec<u8>, value: RowPosition) {
         self.index.insert(key, value);
     }
 
-    pub fn get(&self, key: &Vec<u8>) -> Option<Ref<Vec<u8>, ValuePosition>> {
+    pub fn get(&self, key: &Vec<u8>) -> Option<Ref<Vec<u8>, RowPosition>> {
         self.index.get(key)
     }
 
-    pub fn delete(&self, key: &Vec<u8>) -> Option<(Vec<u8>, ValuePosition)> {
+    pub fn delete(&self, key: &Vec<u8>) -> Option<(Vec<u8>, RowPosition)> {
         self.index.remove(key)
     }
 }
