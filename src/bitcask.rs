@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::RwLock;
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::BitcaskResult;
@@ -6,7 +7,7 @@ use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
 pub struct Bitcask {
-    keydir: KeyDir,
+    keydir: RwLock<KeyDir>,
     database: Database,
     options: BitcaskOptions,
 }
@@ -21,22 +22,31 @@ impl Bitcask {
         let database = Database::open(directory, options.database_options)?;
         let keydir = KeyDir::new(&database)?;
         Ok(Bitcask {
-            keydir,
+            keydir: RwLock::new(keydir),
             database,
             options,
         })
     }
 
     pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
+        let kd = self.keydir.write().unwrap();
         let ret = self.database.write(&key, value)?;
-        self.keydir.put(key, ret);
+        kd.put(key, ret);
         Ok(())
     }
 
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
-        match self.keydir.get(key) {
+        let row_pos = {
+            self.keydir
+                .read()
+                .unwrap()
+                .get(key)
+                .and_then(|r| Some(r.value().clone()))
+        };
+
+        match row_pos {
             Some(e) => {
-                let v = self.database.read_value(e.value())?;
+                let v = self.database.read_value(&e)?;
                 if is_tombstone(&v) {
                     return Ok(None);
                 }
@@ -47,8 +57,9 @@ impl Bitcask {
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
+        let kd = self.keydir.write().unwrap();
         self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
-        self.keydir.delete(&key);
+        kd.delete(&key);
         Ok(())
     }
 }
