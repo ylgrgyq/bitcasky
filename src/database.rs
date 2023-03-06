@@ -298,7 +298,8 @@ fn read_value_from_file(
         .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
         .get_u64() as usize;
     let val_offset = KEY_OFFSET + key_size;
-    Ok(bs.slice(val_offset..val_offset + val_size).into())
+    let ret = bs.slice(val_offset..val_offset + val_size).into();
+    Ok(ret)
 }
 
 fn read_next_item_from_file(file_id: u32, data_file: &mut File) -> BitcaskResult<IterItem> {
