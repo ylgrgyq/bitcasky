@@ -20,11 +20,11 @@ impl FileType {
     fn generate_name(&self, database_dir: &Path, file_id: u32) -> PathBuf {
         database_dir.join(format!(
             "{}{}",
+            file_id,
             match self {
                 Self::DataFile => DATA_FILE_POSTFIX,
                 Self::HintFile => HINT_FILE_POSTFIX,
             },
-            file_id,
         ))
     }
 }
@@ -59,7 +59,7 @@ fn get_valid_database_file_paths(database_dir: &Path) -> Vec<PathBuf> {
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let file_name = e.file_name().to_string_lossy();
-            if file_name.starts_with(DATA_FILE_POSTFIX)
+            if file_name.ends_with(DATA_FILE_POSTFIX)
                 && parse_file_id_from_database_file(e.path()).is_ok()
             {
                 Some(e.into_path())
@@ -78,7 +78,7 @@ fn open_stable_data_base_file(file_path: &Path) -> BitcaskResult<IdentifiedFile>
 
 fn parse_file_id_from_database_file(file_path: &Path) -> BitcaskResult<u32> {
     let binding = file_path.file_name().unwrap().to_string_lossy();
-    let (_, file_id_str) = binding.split_at(DATA_FILE_POSTFIX.len());
+    let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_POSTFIX.len());
     file_id_str
         .parse::<u32>()
         .map_err(|_| BitcaskError::InvalidDatabaseFileName(binding.to_string()))
