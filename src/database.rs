@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::{
     cell::{Cell, RefCell},
     fs::File,
@@ -13,13 +14,14 @@ use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
-    file_manager::{create_database_file, open_stable_database_files},
+    file_manager::{create_file, open_stable_database_files, FileType},
 };
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
 const KEY_SIZE_SIZE: usize = 8;
 const VALUE_SIZE_SIZE: usize = 8;
+const ROW_OFFSET_SIZE: usize = 8;
 const TSTAMP_OFFSET: usize = CRC_SIZE;
 const KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
 const VALUE_SIZE_OFFSET: usize = KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
@@ -119,7 +121,7 @@ fn read_value_from_file(
     Ok(ret)
 }
 
-trait BitcaskFile {
+trait BitcaskDataFile {
     fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>>;
 }
 
@@ -132,7 +134,7 @@ struct WritingFile {
 
 impl WritingFile {
     fn new(database_dir: &Path, file_id: u32) -> BitcaskResult<WritingFile> {
-        let data_file = create_database_file(&database_dir, file_id)?;
+        let data_file = create_file(&database_dir, file_id, FileType::DataFile)?;
         Ok(WritingFile {
             file_id,
             data_file,
@@ -179,11 +181,20 @@ pub struct RowToRead {
 
 #[derive(Debug)]
 struct StableFile {
+    database_dir: PathBuf,
     file_id: u32,
     file: File,
 }
 
 impl StableFile {
+    fn new(database_dir: &PathBuf, file_id: u32, file: File) -> StableFile {
+        StableFile {
+            database_dir: database_dir.clone(),
+            file_id,
+            file,
+        }
+    }
+
     fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
     }
@@ -235,13 +246,10 @@ impl StableFile {
         })
     }
 
-    pub fn iter(&self) -> BitcaskResult<StableFileIter> {
+    fn iter(&self) -> BitcaskResult<StableFileIter> {
         let file = self.file.try_clone()?;
         Ok(StableFileIter {
-            stable_file: StableFile {
-                file_id: self.file_id,
-                file,
-            },
+            stable_file: StableFile::new(&self.database_dir, self.file_id, file),
         })
     }
 }
@@ -256,6 +264,102 @@ impl Iterator for StableFileIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.stable_file.read_next_row() {
+            Err(BitcaskError::IoError(e)) => match e.kind() {
+                std::io::ErrorKind::UnexpectedEof => {
+                    return None;
+                }
+                _ => return Some(Err(BitcaskError::IoError(e))),
+            },
+            r => return Some(r),
+        }
+    }
+}
+
+struct RowHint {
+    pub timestamp: u64,
+    pub key_size: u64,
+    pub value_size: u64,
+    pub row_offset: u64,
+    pub key: Vec<u8>,
+}
+
+const HINT_FILE_HEADER_SIZE: usize =
+    TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE + ROW_OFFSET_SIZE;
+
+impl RowHint {
+    fn to_bytes(&self) -> Bytes {
+        let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + self.key.len());
+        bs.extend_from_slice(&self.timestamp.to_be_bytes());
+        bs.extend_from_slice(&self.key_size.to_be_bytes());
+        bs.extend_from_slice(&self.value_size.to_be_bytes());
+        bs.extend_from_slice(&self.row_offset.to_be_bytes());
+        bs.extend_from_slice(&self.key);
+        bs.freeze()
+    }
+}
+
+struct HintFile {
+    file_id: u32,
+    file: File,
+}
+
+impl HintFile {
+    fn new(file_id: u32, file: File) -> HintFile {
+        HintFile { file_id, file }
+    }
+
+    fn write_file(
+        &mut self,
+        iter: Box<dyn Iterator<Item = BitcaskResult<RowHint>>>,
+    ) -> BitcaskResult<()> {
+        let hints: BitcaskResult<Vec<RowHint>> = iter.collect();
+        for hint in hints? {
+            let data_to_write = hint.to_bytes();
+            self.file.write_all(&*data_to_write)?;
+        }
+        Ok(())
+    }
+
+    fn iter(&self) -> BitcaskResult<HintFileIterator> {
+        // Ok(HintFileIterator {
+        //     file: self.file.try_clone()?,
+        // })
+        todo!()
+    }
+
+    fn read_next_hint(&mut self) -> BitcaskResult<RowHint> {
+        let mut header_buf = vec![0; HINT_FILE_HEADER_SIZE];
+        self.file.read_exact(&mut header_buf)?;
+
+        let header_bs = Bytes::from(header_buf);
+        let timestamp = header_bs.slice(0..8).get_u64();
+        let key_size = header_bs.slice(8..16).get_u64();
+        let value_size = header_bs.slice(16..24).get_u64();
+        let row_offset = header_bs.slice(24..32).get_u64();
+
+        let mut k_buf = vec![0; key_size as usize];
+        self.file.read_exact(&mut k_buf)?;
+        let kv_bs = Bytes::from(k_buf);
+
+        Ok(RowHint {
+            timestamp,
+            key_size,
+            value_size,
+            row_offset,
+            key: kv_bs.into(),
+        })
+    }
+}
+
+struct HintFileIterator {
+    file: HintFile,
+}
+
+impl Iterator for HintFileIterator {
+    type Item = BitcaskResult<RowHint>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.file.read_next_hint() {
             Err(BitcaskError::IoError(e)) => match e.kind() {
                 std::io::ErrorKind::UnexpectedEof => {
                     return None;
@@ -295,15 +399,7 @@ impl Database {
         )?));
         let stable_files = opened_stable_files
             .into_iter()
-            .map(|(k, v)| {
-                (
-                    k,
-                    Mutex::new(StableFile {
-                        file_id: k,
-                        file: v,
-                    }),
-                )
-            })
+            .map(|(k, v)| (k, Mutex::new(StableFile::new(&database_dir, k, v))))
             .collect::<DashMap<u32, Mutex<StableFile>>>();
         Ok(Database {
             writing_file,
@@ -321,8 +417,10 @@ impl Database {
                 WritingFile::new(&self.database_dir, writing_file_ref.borrow().file_id + 1)?;
             let old_file = writing_file_ref.replace(next_writing_file);
             let (file_id, file) = old_file.transit_to_readonly()?;
-            self.stable_files
-                .insert(file_id, Mutex::new(StableFile { file_id, file }));
+            self.stable_files.insert(
+                file_id,
+                Mutex::new(StableFile::new(&self.database_dir, file_id, file)),
+            );
         }
         let mut writing_file = writing_file_ref.borrow_mut();
         writing_file.write_row(row)
@@ -332,7 +430,7 @@ impl Database {
         let mut opened_stable_files: Vec<StableFile> =
             open_stable_database_files(&self.database_dir)?
                 .into_iter()
-                .map(|(file_id, file)| StableFile { file_id, file })
+                .map(|(file_id, file)| StableFile::new(&self.database_dir, file_id, file))
                 .collect();
         opened_stable_files.sort_by_key(|e| e.file_id);
         let iters: BitcaskResult<Vec<StableFileIter>> =
