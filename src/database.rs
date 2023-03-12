@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -234,6 +234,37 @@ impl StableFile {
             },
         })
     }
+
+    pub fn iter(&self) -> BitcaskResult<StableFileIter> {
+        let file = self.file.try_clone()?;
+        Ok(StableFileIter {
+            stable_file: StableFile {
+                file_id: self.file_id,
+                file,
+            },
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct StableFileIter {
+    stable_file: StableFile,
+}
+
+impl Iterator for StableFileIter {
+    type Item = BitcaskResult<RowToRead>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.stable_file.read_next_row() {
+            Err(BitcaskError::IoError(e)) => match e.kind() {
+                std::io::ErrorKind::UnexpectedEof => {
+                    return None;
+                }
+                _ => return Some(Err(BitcaskError::IoError(e))),
+            },
+            r => return Some(r),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -304,10 +335,9 @@ impl Database {
                 .map(|(file_id, file)| StableFile { file_id, file })
                 .collect();
         opened_stable_files.sort_by_key(|e| e.file_id);
-        Ok(DatabaseIter {
-            files: opened_stable_files,
-            current: 0,
-        })
+        let iters: BitcaskResult<Vec<StableFileIter>> =
+            opened_stable_files.iter().rev().map(|f| f.iter()).collect();
+        Ok(DatabaseIter::new(iters?))
     }
 
     pub fn read_value(&self, row_position: &RowPosition) -> BitcaskResult<Vec<u8>> {
@@ -345,25 +375,40 @@ impl Database {
 }
 
 pub struct DatabaseIter {
-    files: Vec<StableFile>,
-    current: usize,
+    current_iter: Cell<Option<StableFileIter>>,
+    remain_iters: Vec<StableFileIter>,
+}
+
+impl DatabaseIter {
+    fn new(mut iters: Vec<StableFileIter>) -> DatabaseIter {
+        if iters.is_empty() {
+            return DatabaseIter {
+                remain_iters: iters,
+                current_iter: Cell::new(None),
+            };
+        } else {
+            let current_iter = iters.pop();
+            return DatabaseIter {
+                remain_iters: iters,
+                current_iter: Cell::new(current_iter),
+            };
+        }
+    }
 }
 
 impl Iterator for DatabaseIter {
     type Item = BitcaskResult<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let files_len = self.files.len();
-        while self.current < files_len {
-            let file = self.files.get_mut(self.current).unwrap();
-            match file.read_next_row() {
-                Err(BitcaskError::IoError(e)) => match e.kind() {
-                    std::io::ErrorKind::UnexpectedEof => {
-                        self.current += 1;
+        loop {
+            match self.current_iter.get_mut() {
+                None => break,
+                Some(iter) => match iter.next() {
+                    None => {
+                        self.current_iter.replace(self.remain_iters.pop());
                     }
-                    _ => return Some(Err(BitcaskError::IoError(e))),
+                    other => return other,
                 },
-                r => return Some(r),
             }
         }
         None
