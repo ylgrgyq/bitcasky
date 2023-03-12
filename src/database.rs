@@ -82,6 +82,47 @@ pub struct RowPosition {
     pub tstmp: u64,
 }
 
+fn read_value_from_file(
+    file_id: u32,
+    data_file: &mut File,
+    value_offset: u64,
+    size: usize,
+) -> BitcaskResult<Vec<u8>> {
+    data_file.seek(SeekFrom::Start(value_offset))?;
+    let mut buf = vec![0; size];
+    data_file.read_exact(&mut buf)?;
+
+    let bs = Bytes::from(buf);
+    let expected_crc = bs.slice(0..4).get_u32();
+
+    let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
+    let mut ck = crc32.digest();
+    ck.update(&bs.slice(4..));
+    let actual_crc = ck.finalize();
+    if expected_crc != actual_crc {
+        return Err(BitcaskError::CrcCheckFailed(
+            file_id,
+            value_offset,
+            expected_crc,
+            actual_crc,
+        ));
+    }
+
+    let key_size = bs
+        .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
+        .get_u64() as usize;
+    let val_size = bs
+        .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
+        .get_u64() as usize;
+    let val_offset = KEY_OFFSET + key_size;
+    let ret = bs.slice(val_offset..val_offset + val_size).into();
+    Ok(ret)
+}
+
+trait BitcaskFile {
+    fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>>;
+}
+
 #[derive(Debug)]
 struct WritingFile {
     file_id: u32,
@@ -112,6 +153,10 @@ impl WritingFile {
         })
     }
 
+    fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
+        read_value_from_file(self.file_id, &mut self.data_file, value_offset, size)
+    }
+
     fn transit_to_readonly(mut self) -> BitcaskResult<(u32, File)> {
         self.data_file.flush()?;
         let file_id = self.file_id;
@@ -126,6 +171,18 @@ impl WritingFile {
     }
 }
 
+#[derive(Debug)]
+struct StableFile {
+    file_id: u32,
+    file: File,
+}
+
+impl StableFile {
+    fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
+        read_value_from_file(self.file_id, &mut self.file, value_offset, size)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub max_file_size: Option<usize>,
@@ -135,7 +192,7 @@ pub struct DataBaseOptions {
 pub struct Database {
     database_dir: PathBuf,
     writing_file: Mutex<RefCell<WritingFile>>,
-    stable_files: DashMap<u32, Mutex<File>>,
+    stable_files: DashMap<u32, Mutex<StableFile>>,
     options: DataBaseOptions,
 }
 
@@ -154,8 +211,16 @@ impl Database {
         )?));
         let stable_files = opened_stable_files
             .into_iter()
-            .map(|(k, v)| (k, Mutex::new(v)))
-            .collect::<DashMap<u32, Mutex<File>>>();
+            .map(|(k, v)| {
+                (
+                    k,
+                    Mutex::new(StableFile {
+                        file_id: k,
+                        file: v,
+                    }),
+                )
+            })
+            .collect::<DashMap<u32, Mutex<StableFile>>>();
         Ok(Database {
             writing_file,
             database_dir,
@@ -172,7 +237,8 @@ impl Database {
                 WritingFile::new(&self.database_dir, writing_file_ref.borrow().file_id + 1)?;
             let old_file = writing_file_ref.replace(next_writing_file);
             let (file_id, file) = old_file.transit_to_readonly()?;
-            self.stable_files.insert(file_id, Mutex::new(file));
+            self.stable_files
+                .insert(file_id, Mutex::new(StableFile { file_id, file }));
         }
         let mut writing_file = writing_file_ref.borrow_mut();
         writing_file.write_row(row)
@@ -194,23 +260,13 @@ impl Database {
             let writing_file_ref = self.writing_file.lock().unwrap();
             let mut writing_file = writing_file_ref.borrow_mut();
             if row_position.file_id == writing_file.file_id {
-                return read_value_from_file(
-                    row_position.file_id,
-                    &mut writing_file.data_file,
-                    row_position.row_offset,
-                    row_position.row_size,
-                );
+                return writing_file.read_value(row_position.row_offset, row_position.row_size);
             }
         }
 
         let l = self.get_file_to_read(row_position.file_id)?;
         let mut f = l.lock().unwrap();
-        read_value_from_file(
-            row_position.file_id,
-            &mut f,
-            row_position.row_offset,
-            row_position.row_size,
-        )
+        f.read_value(row_position.row_offset, row_position.row_size)
     }
 
     fn check_file_overflow(
@@ -226,7 +282,7 @@ impl Database {
                 .unwrap_or(DEFAULT_MAX_DATABASE_FILE_SIZE)
     }
 
-    fn get_file_to_read(&self, file_id: u32) -> BitcaskResult<RefMut<u32, Mutex<File>>> {
+    fn get_file_to_read(&self, file_id: u32) -> BitcaskResult<RefMut<u32, Mutex<StableFile>>> {
         self.stable_files
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
@@ -263,43 +319,6 @@ impl Iterator for Iter {
         }
         None
     }
-}
-
-fn read_value_from_file(
-    file_id: u32,
-    data_file: &mut File,
-    value_offset: u64,
-    size: usize,
-) -> BitcaskResult<Vec<u8>> {
-    data_file.seek(SeekFrom::Start(value_offset))?;
-    let mut buf = vec![0; size];
-    data_file.read_exact(&mut buf)?;
-
-    let bs = Bytes::from(buf);
-    let expected_crc = bs.slice(0..4).get_u32();
-
-    let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-    let mut ck = crc32.digest();
-    ck.update(&bs.slice(4..));
-    let actual_crc = ck.finalize();
-    if expected_crc != actual_crc {
-        return Err(BitcaskError::CrcCheckFailed(
-            file_id,
-            value_offset,
-            expected_crc,
-            actual_crc,
-        ));
-    }
-
-    let key_size = bs
-        .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-        .get_u64() as usize;
-    let val_size = bs
-        .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-        .get_u64() as usize;
-    let val_offset = KEY_OFFSET + key_size;
-    let ret = bs.slice(val_offset..val_offset + val_size).into();
-    Ok(ret)
 }
 
 fn read_next_item_from_file(file_id: u32, data_file: &mut File) -> BitcaskResult<IterItem> {
