@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::{
     cell::{Cell, RefCell},
     fs::File,
@@ -22,10 +21,10 @@ const TSTAMP_SIZE: usize = 8;
 const KEY_SIZE_SIZE: usize = 8;
 const VALUE_SIZE_SIZE: usize = 8;
 const ROW_OFFSET_SIZE: usize = 8;
-const TSTAMP_OFFSET: usize = CRC_SIZE;
-const KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
-const VALUE_SIZE_OFFSET: usize = KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
-const KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
+const DATA_FILE_TSTAMP_OFFSET: usize = CRC_SIZE;
+const DATA_FILE_KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
+const DATA_FILE_VALUE_SIZE_OFFSET: usize = DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
+const DATA_FILE_KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
 #[derive(Debug)]
 struct RowToWrite<'a> {
@@ -60,7 +59,7 @@ impl<'a> RowToWrite<'a> {
             value_size,
             key,
             value,
-            size: KEY_OFFSET + key_size as usize + value_size as usize,
+            size: DATA_FILE_KEY_OFFSET + key_size as usize + value_size as usize,
         }
     }
 
@@ -111,12 +110,12 @@ fn read_value_from_file(
     }
 
     let key_size = bs
-        .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
+        .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
         .get_u64() as usize;
     let val_size = bs
-        .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
+        .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
         .get_u64() as usize;
-    let val_offset = KEY_OFFSET + key_size;
+    let val_offset = DATA_FILE_KEY_OFFSET + key_size;
     let ret = bs.slice(val_offset..val_offset + val_size).into();
     Ok(ret)
 }
@@ -201,20 +200,22 @@ impl StableFile {
 
     fn read_next_row(&mut self) -> BitcaskResult<RowToRead> {
         let value_offset = self.file.seek(SeekFrom::Current(0))?;
-        let mut header_buf = vec![0; KEY_OFFSET];
+        let mut header_buf = vec![0; DATA_FILE_KEY_OFFSET];
         self.file.read_exact(&mut header_buf)?;
 
         let header_bs = Bytes::from(header_buf);
-        let expected_crc = header_bs.slice(0..4).get_u32();
+        let expected_crc = header_bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
 
         self.file.metadata().unwrap();
 
-        let tstmp = header_bs.slice(TSTAMP_OFFSET..KEY_SIZE_OFFSET).get_u64();
+        let tstmp = header_bs
+            .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
+            .get_u64();
         let key_size = header_bs
-            .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
+            .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
             .get_u64() as usize;
         let value_size = header_bs
-            .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
+            .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
             .get_u64() as usize;
 
         let mut kv_buf = vec![0; key_size + value_size];
@@ -222,7 +223,7 @@ impl StableFile {
         let kv_bs = Bytes::from(kv_buf);
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
-        ck.update(&header_bs[4..]);
+        ck.update(&header_bs[DATA_FILE_TSTAMP_OFFSET..]);
         ck.update(&kv_bs);
         let actual_crc = ck.finalize();
         if expected_crc != actual_crc {
@@ -240,7 +241,7 @@ impl StableFile {
             row_position: RowPosition {
                 file_id: self.file_id,
                 row_offset: value_offset,
-                row_size: KEY_OFFSET + key_size + value_size,
+                row_size: DATA_FILE_KEY_OFFSET + key_size + value_size,
                 tstmp,
             },
         })
@@ -277,12 +278,16 @@ impl Iterator for StableFileIter {
 
 struct RowHint {
     pub timestamp: u64,
-    pub key_size: u64,
-    pub value_size: u64,
+    pub key_size: usize,
+    pub value_size: usize,
     pub row_offset: u64,
     pub key: Vec<u8>,
 }
 
+const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
+const HINT_FILE_VALUE_SIZE_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
+const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE;
+const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
 const HINT_FILE_HEADER_SIZE: usize =
     TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE + ROW_OFFSET_SIZE;
 
@@ -332,12 +337,16 @@ impl HintFile {
         self.file.read_exact(&mut header_buf)?;
 
         let header_bs = Bytes::from(header_buf);
-        let timestamp = header_bs.slice(0..8).get_u64();
-        let key_size = header_bs.slice(8..16).get_u64();
-        let value_size = header_bs.slice(16..24).get_u64();
-        let row_offset = header_bs.slice(24..32).get_u64();
+        let timestamp = header_bs.slice(0..HINT_FILE_KEY_SIZE_OFFSET).get_u64();
+        let key_size = header_bs
+            .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_VALUE_SIZE_OFFSET)
+            .get_u64() as usize;
+        let value_size = header_bs.slice(HINT_FILE_VALUE_SIZE_OFFSET..24).get_u64() as usize;
+        let row_offset = header_bs
+            .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
+            .get_u64();
 
-        let mut k_buf = vec![0; key_size as usize];
+        let mut k_buf = vec![0; key_size];
         self.file.read_exact(&mut k_buf)?;
         let kv_bs = Bytes::from(k_buf);
 
