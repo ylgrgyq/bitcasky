@@ -171,6 +171,12 @@ impl WritingFile {
     }
 }
 
+pub struct RowToRead {
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
+    pub row_position: RowPosition,
+}
+
 #[derive(Debug)]
 struct StableFile {
     file_id: u32,
@@ -180,6 +186,53 @@ struct StableFile {
 impl StableFile {
     fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
+    }
+
+    fn read_next_row(&mut self) -> BitcaskResult<RowToRead> {
+        let value_offset = self.file.seek(SeekFrom::Current(0))?;
+        let mut header_buf = vec![0; KEY_OFFSET];
+        self.file.read_exact(&mut header_buf)?;
+
+        let header_bs = Bytes::from(header_buf);
+        let expected_crc = header_bs.slice(0..4).get_u32();
+
+        self.file.metadata().unwrap();
+
+        let tstmp = header_bs.slice(TSTAMP_OFFSET..KEY_SIZE_OFFSET).get_u64();
+        let key_size = header_bs
+            .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
+            .get_u64() as usize;
+        let value_size = header_bs
+            .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
+            .get_u64() as usize;
+
+        let mut kv_buf = vec![0; key_size + value_size];
+        self.file.read_exact(&mut kv_buf)?;
+        let kv_bs = Bytes::from(kv_buf);
+        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
+        let mut ck = crc32.digest();
+        ck.update(&header_bs[4..]);
+        ck.update(&kv_bs);
+        let actual_crc = ck.finalize();
+        if expected_crc != actual_crc {
+            return Err(BitcaskError::CrcCheckFailed(
+                self.file_id,
+                value_offset,
+                expected_crc,
+                actual_crc,
+            ));
+        }
+
+        Ok(RowToRead {
+            key: kv_bs.slice(0..key_size).into(),
+            value: kv_bs.slice(key_size..).into(),
+            row_position: RowPosition {
+                file_id: self.file_id,
+                row_offset: value_offset,
+                row_size: KEY_OFFSET + key_size + value_size,
+                tstmp,
+            },
+        })
     }
 }
 
@@ -244,12 +297,14 @@ impl Database {
         writing_file.write_row(row)
     }
 
-    pub fn iter(&self) -> BitcaskResult<Iter> {
-        let mut opened_stable_files = open_stable_database_files(&self.database_dir)?
-            .into_iter()
-            .collect::<Vec<(u32, File)>>();
-        opened_stable_files.sort_by_key(|e| e.0);
-        Ok(Iter {
+    pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
+        let mut opened_stable_files: Vec<StableFile> =
+            open_stable_database_files(&self.database_dir)?
+                .into_iter()
+                .map(|(file_id, file)| StableFile { file_id, file })
+                .collect();
+        opened_stable_files.sort_by_key(|e| e.file_id);
+        Ok(DatabaseIter {
             files: opened_stable_files,
             current: 0,
         })
@@ -289,25 +344,19 @@ impl Database {
     }
 }
 
-pub struct IterItem {
-    pub key: Vec<u8>,
-    pub value: Vec<u8>,
-    pub row_position: RowPosition,
-}
-
-pub struct Iter {
-    files: Vec<(u32, File)>,
+pub struct DatabaseIter {
+    files: Vec<StableFile>,
     current: usize,
 }
 
-impl Iterator for Iter {
-    type Item = BitcaskResult<IterItem>;
+impl Iterator for DatabaseIter {
+    type Item = BitcaskResult<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let files_len = self.files.len();
         while self.current < files_len {
-            let (file_id, file) = self.files.get_mut(self.current).unwrap();
-            match read_next_item_from_file(file_id.clone(), file) {
+            let file = self.files.get_mut(self.current).unwrap();
+            match file.read_next_row() {
                 Err(BitcaskError::IoError(e)) => match e.kind() {
                     std::io::ErrorKind::UnexpectedEof => {
                         self.current += 1;
@@ -319,53 +368,6 @@ impl Iterator for Iter {
         }
         None
     }
-}
-
-fn read_next_item_from_file(file_id: u32, data_file: &mut File) -> BitcaskResult<IterItem> {
-    let value_offset = data_file.seek(SeekFrom::Current(0))?;
-    let mut header_buf = vec![0; KEY_OFFSET];
-    data_file.read_exact(&mut header_buf)?;
-
-    let header_bs = Bytes::from(header_buf);
-    let expected_crc = header_bs.slice(0..4).get_u32();
-
-    data_file.metadata().unwrap();
-
-    let tstmp = header_bs.slice(TSTAMP_OFFSET..KEY_SIZE_OFFSET).get_u64();
-    let key_size = header_bs
-        .slice(KEY_SIZE_OFFSET..(KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-        .get_u64() as usize;
-    let value_size = header_bs
-        .slice(VALUE_SIZE_OFFSET..(VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-        .get_u64() as usize;
-
-    let mut kv_buf = vec![0; key_size + value_size];
-    data_file.read_exact(&mut kv_buf)?;
-    let kv_bs = Bytes::from(kv_buf);
-    let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-    let mut ck = crc32.digest();
-    ck.update(&header_bs[4..]);
-    ck.update(&kv_bs);
-    let actual_crc = ck.finalize();
-    if expected_crc != actual_crc {
-        return Err(BitcaskError::CrcCheckFailed(
-            file_id,
-            value_offset,
-            expected_crc,
-            actual_crc,
-        ));
-    }
-
-    Ok(IterItem {
-        key: kv_bs.slice(0..key_size).into(),
-        value: kv_bs.slice(key_size..).into(),
-        row_position: RowPosition {
-            file_id,
-            row_offset: value_offset,
-            row_size: KEY_OFFSET + key_size + value_size,
-            tstmp,
-        },
-    })
 }
 
 #[cfg(test)]
