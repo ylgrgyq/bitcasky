@@ -15,4 +15,5 @@ dashmap = "5.4.0"
 log = "0.4.17"
 
 [dev-dependencies]
-test-env-log = "0.2.8"
+test-log = "0.2.11"
+env_logger = "*"

@@ -67,6 +67,7 @@ impl Bitcask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_log::test;
     const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
         database_options: DataBaseOptions {
             max_file_size: Some(11),

@@ -43,6 +43,16 @@ pub fn create_file(database_dir: &Path, file_id: u32, file_type: FileType) -> Bi
         .open(path)?)
 }
 
+pub fn open_file(
+    database_dir: &Path,
+    file_id: u32,
+    file_type: FileType,
+) -> BitcaskResult<IdentifiedFile> {
+    let path = file_type.generate_name(database_dir, file_id);
+    let file = File::options().read(true).open(path)?;
+    Ok(IdentifiedFile { file_id, file })
+}
+
 pub fn open_stable_database_files(database_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
     let file_entries = get_valid_database_file_paths(database_dir);
     let db_files = file_entries

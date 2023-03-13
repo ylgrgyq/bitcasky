@@ -13,8 +13,9 @@ use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
-    file_manager::{create_file, open_stable_database_files, FileType},
+    file_manager::{self, create_file, open_stable_database_files, FileType},
 };
+use log::{info, warn};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -248,9 +249,9 @@ impl StableFile {
     }
 
     fn iter(&self) -> BitcaskResult<StableFileIter> {
-        let file = self.file.try_clone()?;
+        let file = file_manager::open_file(&self.database_dir, self.file_id, FileType::DataFile)?;
         Ok(StableFileIter {
-            stable_file: StableFile::new(&self.database_dir, self.file_id, file),
+            stable_file: StableFile::new(&self.database_dir, self.file_id, file.file),
         })
     }
 }
@@ -276,7 +277,7 @@ impl Iterator for StableFileIter {
     }
 }
 
-struct RowHint {
+pub struct RowHint {
     pub timestamp: u64,
     pub key_size: usize,
     pub value_size: usize,
@@ -304,13 +305,18 @@ impl RowHint {
 }
 
 struct HintFile {
+    database_dir: PathBuf,
     file_id: u32,
     file: File,
 }
 
 impl HintFile {
-    fn new(file_id: u32, file: File) -> HintFile {
-        HintFile { file_id, file }
+    fn new(database_dir: &PathBuf, file_id: u32, file: File) -> HintFile {
+        HintFile {
+            database_dir: database_dir.clone(),
+            file_id,
+            file,
+        }
     }
 
     fn write_file(
@@ -326,10 +332,10 @@ impl HintFile {
     }
 
     fn iter(&self) -> BitcaskResult<HintFileIterator> {
-        // Ok(HintFileIterator {
-        //     file: self.file.try_clone()?,
-        // })
-        todo!()
+        let file = file_manager::open_file(&self.database_dir, self.file_id, FileType::HintFile)?;
+        Ok(HintFileIterator {
+            file: HintFile::new(&self.database_dir, self.file_id, file.file),
+        })
     }
 
     fn read_next_hint(&mut self) -> BitcaskResult<RowHint> {
@@ -398,6 +404,7 @@ const DATABASE_FILE_DIRECTORY: &str = "database";
 
 impl Database {
     pub fn open(directory: &Path, options: DataBaseOptions) -> BitcaskResult<Database> {
+        info!(target: "database", "open db at {:?}", directory);
         let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
         std::fs::create_dir_all(database_dir.clone())?;
         let opened_stable_files = open_stable_database_files(&database_dir)?;
@@ -459,6 +466,29 @@ impl Database {
         let l = self.get_file_to_read(row_position.file_id)?;
         let mut f = l.lock().unwrap();
         f.read_value(row_position.row_offset, row_position.row_size)
+    }
+
+    pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
+        let row_hint_file =
+            file_manager::create_file(&self.database_dir, file_id, FileType::HintFile)?;
+        let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
+
+        let data_file = file_manager::open_file(&self.database_dir, file_id, FileType::DataFile)?;
+        let stable_file_iter =
+            StableFile::new(&self.database_dir, file_id, data_file.file).iter()?;
+
+        let boxed_iter = Box::new(stable_file_iter.map(|ret| {
+            ret.and_then(|row| {
+                Ok(RowHint {
+                    timestamp: row.row_position.tstmp,
+                    key_size: row.key.len(),
+                    value_size: row.value.len(),
+                    row_offset: row.row_position.row_offset,
+                    key: row.key,
+                })
+            })
+        }));
+        hint_file.write_file(boxed_iter)
     }
 
     fn check_file_overflow(
@@ -524,8 +554,8 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
+    use test_log::test;
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: Some(1024),
     };
@@ -668,5 +698,22 @@ mod tests {
                 .map(|r| r.unwrap().key)
                 .collect::<Vec<Vec<u8>>>()
         )
+    }
+    #[test]
+    fn test_hint_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut offset_values: Vec<(RowPosition, &str)> = vec![];
+        {
+            let db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+            let kvs = [("k1", "value1"), ("k2", "value2")];
+            offset_values.append(
+                &mut kvs
+                    .into_iter()
+                    .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
+                    .collect::<Vec<(RowPosition, &str)>>(),
+            );
+        }
+        let db = Database::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+        db.write_hint_file(1);
     }
 }
