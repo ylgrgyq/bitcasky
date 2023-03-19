@@ -3,6 +3,7 @@ use std::sync::RwLock;
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
+use crate::file_manager;
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
@@ -98,9 +99,18 @@ impl Bitcask {
     }
 
     pub fn merge(&self) -> BitcaskResult<()> {
+        let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let kd = self.flush_writing_file()?;
-        self.database.prepare_merge();
-        self.database.commit_merge();
+        let merge_db = Database::open(&dir_path, self.options.database_options)?;
+
+        for r in kd.iter() {
+            let k = r.key();
+            let v = self.database.read_value(r.value())?;
+            if !is_tombstone(&v) {
+                merge_db.write(k, &v)?;
+            }
+        }
+
         Ok(())
     }
 

@@ -12,6 +12,8 @@ pub enum BitcaskError {
     CrcCheckFailed(u32, u64, u32, u32),
     #[error("Read non-existent file with id {0}")]
     TargetFileIdNotFound(u32),
+    #[error("Merge file directory: {0} is not empty. Maybe last merge is failed. Please remove files in this directory manually")]
+    MergeFileDirectoryNotEmpty(String),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;

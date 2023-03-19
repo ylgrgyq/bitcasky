@@ -1,13 +1,15 @@
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{self, File},
     path::{Path, PathBuf},
 };
 
+use log::warn;
 use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
 
+const MERGE_FILES_DIRECTORY: &str = "Merge";
 const DATA_FILE_POSTFIX: &str = ".data";
 const HINT_FILE_POSTFIX: &str = ".hint";
 
@@ -17,8 +19,8 @@ pub enum FileType {
 }
 
 impl FileType {
-    fn generate_name(&self, database_dir: &Path, file_id: u32) -> PathBuf {
-        database_dir.join(format!(
+    fn generate_name(&self, base_dir: &Path, file_id: u32) -> PathBuf {
+        base_dir.join(format!(
             "{}{}",
             file_id,
             match self {
@@ -34,8 +36,8 @@ pub struct IdentifiedFile {
     pub file: File,
 }
 
-pub fn create_file(database_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<File> {
-    let path = file_type.generate_name(database_dir, file_id);
+pub fn create_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<File> {
+    let path = file_type.generate_name(base_dir, file_id);
     Ok(File::options()
         .write(true)
         .create(true)
@@ -43,18 +45,32 @@ pub fn create_file(database_dir: &Path, file_id: u32, file_type: FileType) -> Bi
         .open(path)?)
 }
 
+pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
+    let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
+    fs::create_dir(merge_dir_path.clone())?;
+    let paths = fs::read_dir(merge_dir_path.clone())?;
+    for path in paths {
+        let file_path = path?;
+        warn!(target: "FileManager", "Merge file directory:{} is not empty", merge_dir_path.display().to_string());
+        return Err(BitcaskError::MergeFileDirectoryNotEmpty(
+            file_path.path().display().to_string(),
+        ));
+    }
+    Ok(merge_dir_path)
+}
+
 pub fn open_file(
-    database_dir: &Path,
+    base_dir: &Path,
     file_id: u32,
     file_type: FileType,
 ) -> BitcaskResult<IdentifiedFile> {
-    let path = file_type.generate_name(database_dir, file_id);
+    let path = file_type.generate_name(base_dir, file_id);
     let file = File::options().read(true).open(path)?;
     Ok(IdentifiedFile { file_id, file })
 }
 
-pub fn open_stable_database_files(database_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
-    let file_entries = get_valid_database_file_paths(database_dir);
+pub fn open_stable_database_files(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
+    let file_entries = get_valid_database_file_paths(base_dir);
     let db_files = file_entries
         .iter()
         .map(|f| open_stable_data_base_file(f))
@@ -62,8 +78,8 @@ pub fn open_stable_database_files(database_dir: &Path) -> BitcaskResult<HashMap<
     Ok(db_files.into_iter().map(|f| (f.file_id, f.file)).collect())
 }
 
-fn get_valid_database_file_paths(database_dir: &Path) -> Vec<PathBuf> {
-    WalkDir::new(database_dir)
+fn get_valid_database_file_paths(base_dir: &Path) -> Vec<PathBuf> {
+    WalkDir::new(base_dir)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())

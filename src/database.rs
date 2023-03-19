@@ -425,6 +425,10 @@ impl Database {
         })
     }
 
+    pub fn get_database_dir(&self) -> &Path {
+        &self.database_dir
+    }
+
     pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
         let row = RowToWrite::new(&key, value);
         let writing_file_ref = self.writing_file.lock().unwrap();
