@@ -1,8 +1,9 @@
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
+use crate::file_id::FileIdGenerator;
 use crate::file_manager;
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
@@ -26,16 +27,23 @@ pub struct FoldResult<T> {
 
 pub struct Bitcask {
     keydir: RwLock<KeyDir>,
-    database: Database,
+    file_id_generator: Arc<FileIdGenerator>,
     options: BitcaskOptions,
+    database: Database,
 }
 
 impl Bitcask {
     pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
-        let database = Database::open(directory, options.database_options)?;
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let database = Database::open(
+            &directory,
+            file_id_generator.clone(),
+            options.database_options,
+        )?;
         let keydir = KeyDir::new(&database)?;
         Ok(Bitcask {
             keydir: RwLock::new(keydir),
+            file_id_generator,
             database,
             options,
         })
@@ -101,7 +109,11 @@ impl Bitcask {
     pub fn merge(&self) -> BitcaskResult<()> {
         let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let kd = self.flush_writing_file()?;
-        let merge_db = Database::open(&dir_path, self.options.database_options)?;
+        let merge_db = Database::open(
+            &dir_path,
+            self.file_id_generator.clone(),
+            self.options.database_options,
+        )?;
 
         for r in kd.iter() {
             let k = r.key();
