@@ -2,19 +2,25 @@ use std::path::Path;
 use std::sync::RwLock;
 
 use crate::database::{DataBaseOptions, Database};
-use crate::error::BitcaskResult;
+use crate::error::{BitcaskError, BitcaskResult};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
+
+#[derive(Debug, Clone, Copy)]
+pub struct BitcaskOptions {
+    database_options: DataBaseOptions,
+    max_key_size: usize,
+    max_value_size: usize,
+}
+
+pub struct FoldResult<T> {
+    acc: T,
+}
 
 pub struct Bitcask {
     keydir: RwLock<KeyDir>,
     database: Database,
     options: BitcaskOptions,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct BitcaskOptions {
-    database_options: DataBaseOptions,
 }
 
 impl Bitcask {
@@ -29,6 +35,19 @@ impl Bitcask {
     }
 
     pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
+        if key.len() > self.options.max_key_size {
+            return Err(BitcaskError::InvalidParameter(
+                "key".into(),
+                "key size overflow".into(),
+            ));
+        }
+        if value.len() > self.options.max_value_size {
+            return Err(BitcaskError::InvalidParameter(
+                "value".into(),
+                "values size overflow".into(),
+            ));
+        }
+
         let kd = self.keydir.write().unwrap();
         let ret = self.database.write(&key, value)?;
         kd.put(key, ret);
@@ -56,12 +75,19 @@ impl Bitcask {
         }
     }
 
+    pub fn foreach_key(&self, func: fn(key: &Vec<u8>)) {
+        let kd = self.keydir.read().unwrap();
+        kd.iter().for_each(|r| func(r.key()));
+    }
+
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
         let kd = self.keydir.write().unwrap();
         self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
         kd.delete(&key);
         Ok(())
     }
+
+    pub fn merge(directory: &Path) {}
 }
 
 #[cfg(test)]
@@ -72,6 +98,8 @@ mod tests {
         database_options: DataBaseOptions {
             max_file_size: Some(11),
         },
+        max_key_size: 1024,
+        max_value_size: 1024,
     };
 
     #[test]
@@ -98,6 +126,8 @@ mod tests {
                     database_options: DataBaseOptions {
                         max_file_size: Some(100),
                     },
+                    max_key_size: 1024,
+                    max_value_size: 1024,
                 },
             )
             .unwrap();
@@ -117,6 +147,8 @@ mod tests {
                 database_options: DataBaseOptions {
                     max_file_size: Some(100),
                 },
+                max_key_size: 1024,
+                max_value_size: 1024,
             },
         )
         .unwrap();

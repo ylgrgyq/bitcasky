@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum BitcaskError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
+    #[error("The parameter: \"{0}\" is invalid for reason: {1}")]
+    InvalidParameter(String, String),
     #[error("Failed to parse database file name: {0}")]
     InvalidDatabaseFileName(String),
     #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]

@@ -1,4 +1,8 @@
-use dashmap::{mapref::one::Ref, DashMap};
+use dashmap::{
+    iter::Iter,
+    mapref::{multiple::RefMulti, one::Ref},
+    DashMap,
+};
 
 use crate::{
     database::{Database, RowPosition},
@@ -32,7 +36,25 @@ impl KeyDir {
         self.index.get(key)
     }
 
+    pub fn iter(&self) -> KeyDirIterator {
+        KeyDirIterator {
+            iter: self.index.iter(),
+        }
+    }
+
     pub fn delete(&self, key: &Vec<u8>) -> Option<(Vec<u8>, RowPosition)> {
         self.index.remove(key)
+    }
+}
+
+pub struct KeyDirIterator<'a> {
+    iter: Iter<'a, Vec<u8>, RowPosition>,
+}
+
+impl<'a> Iterator for KeyDirIterator<'a> {
+    type Item = RefMulti<'a, Vec<u8>, RowPosition>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
     }
 }
