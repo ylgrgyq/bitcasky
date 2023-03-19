@@ -1,4 +1,3 @@
-use core::time;
 use std::{
     cell::{Cell, RefCell},
     fs::File,
@@ -17,7 +16,7 @@ use crate::{
     file_id::FileIdGenerator,
     file_manager::{self, create_file, open_stable_database_files, FileType},
 };
-use log::{info, warn};
+use log::{error, info};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -445,6 +444,12 @@ impl Database {
         &self.database_dir
     }
 
+    pub fn get_max_file_id(&self) -> u32 {
+        let writing_file_ref = self.writing_file.lock().unwrap();
+        let writing_file = writing_file_ref.borrow();
+        writing_file.file_id
+    }
+
     pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
         let row = RowToWrite::new(&key, value);
         self.do_write(row)
@@ -492,9 +497,40 @@ impl Database {
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
-    pub fn prepare_merge(&self) {}
+    pub fn load_files(&self, file_ids: Vec<u32>) -> BitcaskResult<()> {
+        self.flush_writing_file()?;
 
-    pub fn commit_merge(&self) {}
+        for file_id in file_ids {
+            let data_file =
+                file_manager::open_file(&self.database_dir, file_id, FileType::DataFile)?;
+            self.stable_files.insert(
+                file_id,
+                Mutex::new(StableFile::new(&self.database_dir, file_id, data_file.file)),
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn get_file_ids(&self) -> Vec<u32> {
+        let writing_file_ref = self.writing_file.lock().unwrap();
+        let writing_file_id = writing_file_ref.borrow().file_id;
+        let mut ids: Vec<u32> = self
+            .stable_files
+            .iter()
+            .map(|f| f.value().lock().unwrap().file_id)
+            .collect();
+        ids.push(writing_file_id);
+        ids
+    }
+
+    pub fn purge_outdated_files(&self, max_file_id: u32) -> BitcaskResult<()> {
+        self.stable_files.retain(|_, v| {
+            let f = v.lock().unwrap();
+            f.file_id >= max_file_id
+        });
+        Ok(())
+    }
 
     pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
         let row_hint_file =
@@ -517,6 +553,11 @@ impl Database {
             })
         }));
         hint_file.write_file(boxed_iter)
+    }
+
+    pub fn close(&self) -> BitcaskResult<()> {
+        self.flush_writing_file()?;
+        Ok(())
     }
 
     fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowPosition> {
@@ -558,6 +599,15 @@ impl Database {
         self.stable_files
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
+    }
+}
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        let ret = self.close();
+        if ret.is_err() {
+            error!(target: "Database", "Close database failed: {}", ret.err().unwrap())
+        }
     }
 }
 

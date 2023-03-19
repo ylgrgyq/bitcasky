@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose, Engine};
 use dashmap::{
-    iter::Iter,
+    iter::{Iter, OwningIter},
     mapref::{multiple::RefMulti, one::Ref},
     DashMap,
 };
@@ -18,6 +18,11 @@ pub struct KeyDir {
 }
 
 impl KeyDir {
+    pub fn new_empty_key_dir() -> KeyDir {
+        let index = DashMap::new();
+        KeyDir { index }
+    }
+
     pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
         for ret in database.iter()? {
@@ -47,6 +52,10 @@ impl KeyDir {
         self.index.insert(key, value);
     }
 
+    pub fn checked_put(&self, key: Vec<u8>, value: RowPosition) {
+        self.index.insert(key, value);
+    }
+
     pub fn get(&self, key: &Vec<u8>) -> Option<Ref<Vec<u8>, RowPosition>> {
         self.index.get(key)
     }
@@ -54,6 +63,12 @@ impl KeyDir {
     pub fn iter(&self) -> KeyDirIterator {
         KeyDirIterator {
             iter: self.index.iter(),
+        }
+    }
+
+    pub fn into_iter(self) -> IntoKeyDirIterator {
+        IntoKeyDirIterator {
+            iter: self.index.into_iter(),
         }
     }
 
@@ -68,6 +83,18 @@ pub struct KeyDirIterator<'a> {
 
 impl<'a> Iterator for KeyDirIterator<'a> {
     type Item = RefMulti<'a, Vec<u8>, RowPosition>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+}
+
+pub struct IntoKeyDirIterator {
+    iter: OwningIter<Vec<u8>, RowPosition>,
+}
+
+impl Iterator for IntoKeyDirIterator {
+    type Item = (Vec<u8>, RowPosition);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()

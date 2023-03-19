@@ -59,6 +59,18 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
     Ok(merge_dir_path)
 }
 
+pub fn commit_merge_files(base_dir: &Path) -> BitcaskResult<()> {
+    let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
+    let paths = fs::read_dir(merge_dir_path.clone())?;
+    for path in paths {
+        let file_path = path?;
+        let target_path = base_dir.join(file_path.file_name());
+        fs::rename(file_path.path(), target_path)?;
+    }
+
+    Ok(())
+}
+
 pub fn open_file(
     base_dir: &Path,
     file_id: u32,

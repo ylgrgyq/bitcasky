@@ -108,29 +108,52 @@ impl Bitcask {
 
     pub fn merge(&self) -> BitcaskResult<()> {
         let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
-        let kd = self.flush_writing_file()?;
+        let (kd, known_max_file_id) = self.flush_writing_file()?;
+        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;
+
+        file_manager::commit_merge_files(self.database.get_database_dir())?;
+
+        let kd = self.keydir.write().unwrap();
+        for (k, v) in new_kd.into_iter() {
+            kd.put(k, v)
+        }
+
+        self.database.load_files(file_ids)?;
+        self.database.purge_outdated_files(known_max_file_id)?;
+        Ok(())
+    }
+
+    fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
+        // stop writing and switch the writing file to stable files
+        let _kd = self.keydir.write().unwrap();
+        self.database.flush_writing_file()?;
+        let known_max_file_id = self.database.get_max_file_id();
+        Ok((_kd.clone(), known_max_file_id))
+    }
+
+    fn write_merged_files(
+        &self,
+        merge_file_dir: &Path,
+        key_dir_to_write: &KeyDir,
+    ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
+        let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
-            &dir_path,
+            merge_file_dir,
             self.file_id_generator.clone(),
             self.options.database_options,
         )?;
 
-        for r in kd.iter() {
+        for r in key_dir_to_write.iter() {
             let k = r.key();
             let v = self.database.read_value(r.value())?;
             if !is_tombstone(&v) {
-                merge_db.write_with_timestamp(k, &v, r.value().tstmp)?;
+                let pos = merge_db.write_with_timestamp(k, &v, r.value().tstmp)?;
+                new_kd.put(k.clone(), pos)
             }
         }
-
-        Ok(())
-    }
-
-    fn flush_writing_file(&self) -> BitcaskResult<KeyDir> {
-        // stop writing and switch the writing file to stable files
-        let _kd = self.keydir.write().unwrap();
-        self.database.flush_writing_file()?;
-        Ok(_kd.clone())
+        merge_db.flush_writing_file()?;
+        let file_ids = merge_db.get_file_ids();
+        Ok((file_ids, new_kd))
     }
 }
 
