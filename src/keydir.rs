@@ -1,8 +1,10 @@
+use base64::{engine::general_purpose, Engine};
 use dashmap::{
     iter::Iter,
     mapref::{multiple::RefMulti, one::Ref},
     DashMap,
 };
+use log::{info, warn};
 
 use crate::{
     database::{Database, RowPosition},
@@ -10,6 +12,7 @@ use crate::{
     utils::is_tombstone,
 };
 
+#[derive(Clone)]
 pub struct KeyDir {
     index: DashMap<Vec<u8>, RowPosition>,
 }
@@ -22,6 +25,18 @@ impl KeyDir {
             if is_tombstone(&item.value) {
                 index.remove(&item.key);
                 continue;
+            }
+            let r = index.get(&item.key);
+            if r.is_some() {
+                let pos: RowPosition = *(r.unwrap());
+                if pos.tstmp > item.row_position.tstmp {
+                    let k = general_purpose::STANDARD.encode(&item.key);
+                    warn!(target: "KeyDir", "Found old version value for key in Base64: {} during recovery. Known version: {}, found version: {}", k, pos.tstmp, item.row_position.tstmp);
+                    continue;
+                } else if pos.tstmp == item.row_position.tstmp {
+                    let k = general_purpose::STANDARD.encode(&item.key);
+                    info!(target: "KeyDir", "Found known version value for key in Base64: {} during recovery. Known version: {}", k, pos.tstmp);
+                }
             }
             index.insert(item.key, item.row_position);
         }
