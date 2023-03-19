@@ -429,17 +429,16 @@ impl Database {
         let row = RowToWrite::new(&key, value);
         let writing_file_ref = self.writing_file.lock().unwrap();
         if self.check_file_overflow(&writing_file_ref, &row) {
-            let next_writing_file =
-                WritingFile::new(&self.database_dir, writing_file_ref.borrow().file_id + 1)?;
-            let old_file = writing_file_ref.replace(next_writing_file);
-            let (file_id, file) = old_file.transit_to_readonly()?;
-            self.stable_files.insert(
-                file_id,
-                Mutex::new(StableFile::new(&self.database_dir, file_id, file)),
-            );
+            self.do_flush_writing_file(&writing_file_ref)?;
         }
         let mut writing_file = writing_file_ref.borrow_mut();
         writing_file.write_row(row)
+    }
+
+    pub fn flush_writing_file(&self) -> BitcaskResult<()> {
+        let writing_file_ref = self.writing_file.lock().unwrap();
+        self.do_flush_writing_file(&writing_file_ref)?;
+        Ok(())
     }
 
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
@@ -467,6 +466,10 @@ impl Database {
         let mut f = l.lock().unwrap();
         f.read_value(row_position.row_offset, row_position.row_size)
     }
+
+    pub fn prepare_merge(&self) {}
+
+    pub fn commit_merge(&self) {}
 
     pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
         let row_hint_file =
@@ -502,6 +505,19 @@ impl Database {
                 .options
                 .max_file_size
                 .unwrap_or(DEFAULT_MAX_DATABASE_FILE_SIZE)
+    }
+
+    fn do_flush_writing_file(&self, writing_file_ref: &RefCell<WritingFile>) -> BitcaskResult<()> {
+        let next_writing_file =
+            WritingFile::new(&self.database_dir, writing_file_ref.borrow().file_id + 1)?;
+        let mut old_file = writing_file_ref.replace(next_writing_file);
+        old_file.flush()?;
+        let (file_id, file) = old_file.transit_to_readonly()?;
+        self.stable_files.insert(
+            file_id,
+            Mutex::new(StableFile::new(&self.database_dir, file_id, file)),
+        );
+        Ok(())
     }
 
     fn get_file_to_read(&self, file_id: u32) -> BitcaskResult<RefMut<u32, Mutex<StableFile>>> {

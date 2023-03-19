@@ -13,8 +13,14 @@ pub struct BitcaskOptions {
     max_value_size: usize,
 }
 
+#[derive(PartialEq)]
+enum FoldStatus {
+    Stopped,
+    Continue,
+}
 pub struct FoldResult<T> {
-    acc: T,
+    accumulator: T,
+    status: FoldStatus,
 }
 
 pub struct Bitcask {
@@ -75,9 +81,13 @@ impl Bitcask {
         }
     }
 
-    pub fn foreach_key(&self, func: fn(key: &Vec<u8>)) {
+    pub fn foreach_key<T>(&self, func: fn(key: &Vec<u8>) -> FoldResult<T>) {
         let kd = self.keydir.read().unwrap();
-        kd.iter().for_each(|r| func(r.key()));
+        for r in kd.iter() {
+            if func(r.key()).status == FoldStatus::Stopped {
+                break;
+            }
+        }
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
@@ -87,7 +97,19 @@ impl Bitcask {
         Ok(())
     }
 
-    pub fn merge(directory: &Path) {}
+    pub fn merge(&self) -> BitcaskResult<()> {
+        let kd = self.flush_writing_file()?;
+        self.database.prepare_merge();
+        self.database.commit_merge();
+        Ok(())
+    }
+
+    fn flush_writing_file(&self) -> BitcaskResult<KeyDir> {
+        // stop writing and switch the writing file to stable files
+        let _kd = self.keydir.write().unwrap();
+        self.database.flush_writing_file()?;
+        Ok(_kd.clone())
+    }
 }
 
 #[cfg(test)]
