@@ -119,7 +119,7 @@ impl Bitcask {
             let k = r.key();
             let v = self.database.read_value(r.value())?;
             if !is_tombstone(&v) {
-                merge_db.write(k, &v)?;
+                merge_db.write_with_timestamp(k, &v, r.value().tstmp)?;
             }
         }
 

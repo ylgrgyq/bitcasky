@@ -1,3 +1,4 @@
+use core::time;
 use std::{
     cell::{Cell, RefCell},
     fs::File,
@@ -45,18 +46,22 @@ impl<'a> RowToWrite<'a> {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64;
+        RowToWrite::new_with_timestamp(key, value, now)
+    }
+
+    fn new_with_timestamp(key: &'a Vec<u8>, value: &'a [u8], timestamp: u64) -> RowToWrite<'a> {
         let key_size = key.len() as u64;
         let value_size = value.len() as u64;
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
-        ck.update(&now.to_be_bytes());
+        ck.update(&timestamp.to_be_bytes());
         ck.update(&key_size.to_be_bytes());
         ck.update(&value_size.to_be_bytes());
         ck.update(&key);
         ck.update(value);
         RowToWrite {
             crc: ck.finalize(),
-            tstamp: now,
+            tstamp: timestamp,
             key_size,
             value_size,
             key,
@@ -442,12 +447,17 @@ impl Database {
 
     pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
         let row = RowToWrite::new(&key, value);
-        let writing_file_ref = self.writing_file.lock().unwrap();
-        if self.check_file_overflow(&writing_file_ref, &row) {
-            self.do_flush_writing_file(&writing_file_ref)?;
-        }
-        let mut writing_file = writing_file_ref.borrow_mut();
-        writing_file.write_row(row)
+        self.do_write(row)
+    }
+
+    pub fn write_with_timestamp(
+        &self,
+        key: &Vec<u8>,
+        value: &[u8],
+        timestamp: u64,
+    ) -> BitcaskResult<RowPosition> {
+        let row = RowToWrite::new_with_timestamp(&key, value, timestamp);
+        self.do_write(row)
     }
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
@@ -507,6 +517,15 @@ impl Database {
             })
         }));
         hint_file.write_file(boxed_iter)
+    }
+
+    fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowPosition> {
+        let writing_file_ref = self.writing_file.lock().unwrap();
+        if self.check_file_overflow(&writing_file_ref, &row) {
+            self.do_flush_writing_file(&writing_file_ref)?;
+        }
+        let mut writing_file = writing_file_ref.borrow_mut();
+        writing_file.write_row(row)
     }
 
     fn check_file_overflow(
