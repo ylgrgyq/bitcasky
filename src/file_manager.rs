@@ -47,10 +47,17 @@ pub fn create_file(base_dir: &Path, file_id: u32, file_type: FileType) -> Bitcas
 
 pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
     let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
-    fs::create_dir(merge_dir_path.clone())?;
+
+    if !merge_dir_path.exists() {
+        fs::create_dir(merge_dir_path.clone())?;
+    }
+
     let paths = fs::read_dir(merge_dir_path.clone())?;
     for path in paths {
         let file_path = path?;
+        if file_path.path().is_dir() {
+            continue;
+        }
         warn!(target: "FileManager", "Merge file directory:{} is not empty", merge_dir_path.display().to_string());
         return Err(BitcaskError::MergeFileDirectoryNotEmpty(
             file_path.path().display().to_string(),
@@ -120,4 +127,70 @@ fn parse_file_id_from_database_file(file_path: &Path) -> BitcaskResult<u32> {
     file_id_str
         .parse::<u32>()
         .map_err(|_| BitcaskError::InvalidDatabaseFileName(binding.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_log::test;
+
+    fn is_empty_dir(dir: &Path) -> BitcaskResult<bool> {
+        let paths = fs::read_dir(dir.clone())?;
+
+        for path in paths {
+            let file_path = path?;
+            if file_path.path() == dir {
+                continue;
+            }
+            return Ok(false);
+        }
+        Ok(true)
+    }
+    fn get_data_file_ids_in_dir(dir_path: &Path) -> Vec<u32> {
+        let mut actual_file_ids = vec![];
+        for path in fs::read_dir(dir_path).unwrap() {
+            let file_path = path.unwrap();
+            if file_path.path().is_dir() {
+                continue;
+            }
+
+            let id = parse_file_id_from_database_file(&file_path.path()).unwrap();
+            actual_file_ids.push(id);
+        }
+        actual_file_ids.sort();
+        actual_file_ids
+    }
+
+    #[test]
+    fn test_create_merge_file_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let merge_file_path = create_merge_file_dir(&dir.path()).unwrap();
+        create_file(&merge_file_path, 0, FileType::DataFile).unwrap();
+
+        let failed_to_create = create_merge_file_dir(&dir.path());
+        assert!(match failed_to_create.err().unwrap() {
+            BitcaskError::MergeFileDirectoryNotEmpty(_) => true,
+            _ => false,
+        });
+    }
+
+    #[test]
+    fn test_commit_merge_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_path = dir.path();
+
+        let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
+        create_file(&merge_file_path, 0, FileType::DataFile).unwrap();
+        create_file(&merge_file_path, 1, FileType::DataFile).unwrap();
+        create_file(&merge_file_path, 2, FileType::DataFile).unwrap();
+
+        assert_eq!(vec![0, 1, 2,], get_data_file_ids_in_dir(&merge_file_path));
+        assert!(get_data_file_ids_in_dir(dir_path).is_empty());
+
+        commit_merge_files(&dir_path).unwrap();
+
+        assert!(is_empty_dir(&merge_file_path).unwrap());
+
+        assert_eq!(vec![0, 1, 2,], get_data_file_ids_in_dir(dir_path));
+    }
 }

@@ -25,27 +25,16 @@ impl KeyDir {
 
     pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
+        let kd = KeyDir { index };
         for ret in database.iter()? {
             let item = ret?;
             if is_tombstone(&item.value) {
-                index.remove(&item.key);
+                kd.delete(&item.key);
                 continue;
             }
-            let r = index.get(&item.key);
-            if r.is_some() {
-                let pos: RowPosition = *(r.unwrap());
-                if pos.tstmp > item.row_position.tstmp {
-                    let k = general_purpose::STANDARD.encode(&item.key);
-                    warn!(target: "KeyDir", "Found old version value for key in Base64: {} during recovery. Known version: {}, found version: {}", k, pos.tstmp, item.row_position.tstmp);
-                    continue;
-                } else if pos.tstmp == item.row_position.tstmp {
-                    let k = general_purpose::STANDARD.encode(&item.key);
-                    info!(target: "KeyDir", "Found known version value for key in Base64: {} during recovery. Known version: {}", k, pos.tstmp);
-                }
-            }
-            index.insert(item.key, item.row_position);
+            kd.checked_put(item.key, item.row_position);
         }
-        return Ok(KeyDir { index });
+        return Ok(kd);
     }
 
     pub fn put(&self, key: Vec<u8>, value: RowPosition) {
@@ -53,6 +42,18 @@ impl KeyDir {
     }
 
     pub fn checked_put(&self, key: Vec<u8>, value: RowPosition) {
+        let r = self.index.get(&key);
+        if r.is_some() {
+            let pos: RowPosition = *(r.unwrap());
+            if pos.tstmp > value.tstmp {
+                let k = general_purpose::STANDARD.encode(&key);
+                warn!(target: "KeyDir", "Found old version value for key in Base64: {} during recovery. Known version: {}, found version: {}", k, pos.tstmp, value.tstmp);
+                return;
+            } else if pos.tstmp == value.tstmp {
+                let k = general_purpose::STANDARD.encode(&key);
+                info!(target: "KeyDir", "Found known version value for key in Base64: {} during recovery. Known version: {}", k, pos.tstmp);
+            }
+        }
         self.index.insert(key, value);
     }
 

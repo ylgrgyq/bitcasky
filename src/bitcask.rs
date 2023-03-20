@@ -148,7 +148,7 @@ impl Bitcask {
             let v = self.database.read_value(r.value())?;
             if !is_tombstone(&v) {
                 let pos = merge_db.write_with_timestamp(k, &v, r.value().tstmp)?;
-                new_kd.put(k.clone(), pos)
+                new_kd.checked_put(k.clone(), pos)
             }
         }
         merge_db.flush_writing_file()?;
