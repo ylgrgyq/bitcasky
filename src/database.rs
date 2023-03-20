@@ -14,7 +14,7 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
-    file_manager::{self, create_file, open_stable_database_files, FileType},
+    file_manager::{self, create_file, open_data_files_under_path, FileType},
 };
 use log::{error, info};
 
@@ -417,7 +417,7 @@ impl Database {
         info!(target: "database", "open db at {:?}", directory);
         let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
         std::fs::create_dir_all(database_dir.clone())?;
-        let opened_stable_files = open_stable_database_files(&database_dir)?;
+        let opened_stable_files = open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0) + 1;
             file_id_generator.update_file_id(writing_file_id);
@@ -473,7 +473,7 @@ impl Database {
 
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
         let mut opened_stable_files: Vec<StableFile> =
-            open_stable_database_files(&self.database_dir)?
+            open_data_files_under_path(&self.database_dir)?
                 .into_iter()
                 .map(|(file_id, file)| StableFile::new(&self.database_dir, file_id, file))
                 .collect();

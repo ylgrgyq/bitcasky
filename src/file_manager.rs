@@ -88,16 +88,22 @@ pub fn open_file(
     Ok(IdentifiedFile { file_id, file })
 }
 
-pub fn open_stable_database_files(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
-    let file_entries = get_valid_database_file_paths(base_dir);
+pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
+    let file_entries = get_valid_data_file_paths(base_dir);
     let db_files = file_entries
         .iter()
-        .map(|f| open_stable_data_base_file(f))
+        .map(|f| open_file_by_path(f))
         .collect::<BitcaskResult<Vec<IdentifiedFile>>>()?;
     Ok(db_files.into_iter().map(|f| (f.file_id, f.file)).collect())
 }
 
-fn get_valid_database_file_paths(base_dir: &Path) -> Vec<PathBuf> {
+fn open_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
+    let file_id = parse_file_id_from_data_file(file_path)?;
+    let file = File::options().read(true).open(file_path)?;
+    Ok(IdentifiedFile { file_id, file })
+}
+
+fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
     WalkDir::new(base_dir)
         .follow_links(false)
         .into_iter()
@@ -105,7 +111,7 @@ fn get_valid_database_file_paths(base_dir: &Path) -> Vec<PathBuf> {
         .filter_map(|e| {
             let file_name = e.file_name().to_string_lossy();
             if file_name.ends_with(DATA_FILE_POSTFIX)
-                && parse_file_id_from_database_file(e.path()).is_ok()
+                && parse_file_id_from_data_file(e.path()).is_ok()
             {
                 Some(e.into_path())
             } else {
@@ -115,13 +121,7 @@ fn get_valid_database_file_paths(base_dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn open_stable_data_base_file(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
-    let file_id = parse_file_id_from_database_file(file_path)?;
-    let file = File::options().read(true).open(file_path)?;
-    Ok(IdentifiedFile { file_id, file })
-}
-
-fn parse_file_id_from_database_file(file_path: &Path) -> BitcaskResult<u32> {
+fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
     let binding = file_path.file_name().unwrap().to_string_lossy();
     let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_POSTFIX.len());
     file_id_str
@@ -154,7 +154,7 @@ mod tests {
                 continue;
             }
 
-            let id = parse_file_id_from_database_file(&file_path.path()).unwrap();
+            let id = parse_file_id_from_data_file(&file_path.path()).unwrap();
             actual_file_ids.push(id);
         }
         actual_file_ids.sort();
