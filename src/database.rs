@@ -654,107 +654,121 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashSet, str::from_utf8_unchecked};
+
     use super::*;
     use test_log::test;
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: Some(1024),
     };
 
+    struct TestingKV {
+        key: Vec<u8>,
+        value: Vec<u8>,
+    }
+
+    impl TestingKV {
+        fn new(k: &str, v: &str) -> TestingKV {
+            TestingKV {
+                key: k.into(),
+                value: v.into(),
+            }
+        }
+        fn key(&self) -> Vec<u8> {
+            self.key.clone()
+        }
+        fn value(&self) -> Vec<u8> {
+            self.value.clone()
+        }
+    }
+    struct TestingRow {
+        kv: TestingKV,
+        pos: RowPosition,
+    }
+
+    impl TestingRow {
+        fn new(kv: TestingKV, pos: RowPosition) -> TestingRow {
+            TestingRow { kv, pos }
+        }
+    }
+
+    fn assert_rows_value(db: &Database, expect: &Vec<TestingRow>) {
+        for row in expect {
+            assert_row_value(db, row);
+        }
+    }
+
+    fn assert_row_value(db: &Database, expect: &TestingRow) {
+        let actual = db.read_value(&expect.pos).unwrap();
+        assert_eq!(*expect.kv.value(), actual);
+    }
+
+    fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
+        let mut i = 0;
+        for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
+            let expect_row = expect_rows.get(i).unwrap();
+            assert_eq!(expect_row.kv.key(), actual_row.key);
+            assert_eq!(expect_row.kv.value(), actual_row.value);
+            assert_eq!(expect_row.pos, actual_row.row_position);
+            i += 1;
+        }
+        assert_eq!(expect_rows.len(), i);
+    }
+
+    fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
+        kvs.into_iter()
+            .map(|kv| {
+                let pos = db.write(&kv.key(), &kv.value()).unwrap();
+                TestingRow::new(kv, pos)
+            })
+            .collect::<Vec<TestingRow>>()
+    }
+
     #[test]
     fn test_read_write_writing_file() {
         let dir = tempfile::tempdir().unwrap();
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
-        let kvs = [
-            ("k1", "value1奥森"),
-            ("k2", "value2"),
-            ("k3", "value3"),
-            ("k1", "value4"),
+        let kvs = vec![
+            TestingKV::new("k1", "value1奥森"),
+            TestingKV::new("k2", "value2"),
+            TestingKV::new("k3", "value3"),
+            TestingKV::new("k1", "value4"),
         ];
-        let offset_values = kvs
-            .into_iter()
-            .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
-            .collect::<Vec<(RowPosition, &str)>>();
-
-        offset_values.iter().for_each(|(ret, value)| {
-            assert_eq!(db.read_value(&ret).unwrap(), *value.as_bytes());
-        });
-        assert_eq!(
-            offset_values
-                .iter()
-                .map(|v| v.0)
-                .collect::<Vec<RowPosition>>(),
-            db.iter()
-                .unwrap()
-                .map(|r| r.unwrap().row_position)
-                .collect::<Vec<RowPosition>>()
-        );
-        assert_eq!(
-            kvs.iter()
-                .map(|kv| kv.0.to_string())
-                .map(|k| k.as_bytes().clone().to_vec())
-                .collect::<Vec<Vec<u8>>>(),
-            db.iter()
-                .unwrap()
-                .map(|r| r.unwrap().key)
-                .collect::<Vec<Vec<u8>>>()
-        )
+        let rows = write_kvs_to_db(&db, kvs);
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
     }
 
     #[test]
     fn test_read_write_with_stable_files() {
         let dir = tempfile::tempdir().unwrap();
-        let mut offset_values: Vec<(RowPosition, &str)> = vec![];
+        let mut rows: Vec<TestingRow> = vec![];
+        let file_id_generator = Arc::new(FileIdGenerator::new());
         {
-            let file_id_generator = Arc::new(FileIdGenerator::new());
-            let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
-            let kvs = [("k1", "value1"), ("k2", "value2")];
-            offset_values.append(
-                &mut kvs
-                    .into_iter()
-                    .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
-                    .collect::<Vec<(RowPosition, &str)>>(),
-            );
+            let db =
+                Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
         }
         {
-            let file_id_generator = Arc::new(FileIdGenerator::new());
-            let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
-            let kvs = [("k3", "hello world"), ("k1", "value4")];
-            offset_values.append(
-                &mut kvs
-                    .into_iter()
-                    .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
-                    .collect::<Vec<(RowPosition, &str)>>(),
-            );
+            let db =
+                Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k3", "hello world"),
+                TestingKV::new("k1", "value4"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
         }
 
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
-        offset_values.iter().for_each(|(ret, value)| {
-            assert_eq!(db.read_value(&ret).unwrap(), *value.as_bytes());
-        });
-        assert_eq!(
-            offset_values
-                .iter()
-                .map(|v| v.0)
-                .collect::<Vec<RowPosition>>(),
-            db.iter()
-                .unwrap()
-                .map(|r| r.unwrap().row_position)
-                .collect::<Vec<RowPosition>>()
-        );
-        assert_eq!(
-            vec!["k1", "k2", "k3", "k1"]
-                .iter()
-                .map(|kv| kv.to_string())
-                .map(|k| k.as_bytes().clone().to_vec())
-                .collect::<Vec<Vec<u8>>>(),
-            db.iter()
-                .unwrap()
-                .map(|r| r.unwrap().key)
-                .collect::<Vec<Vec<u8>>>()
-        )
+        let db = Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
     }
+
     #[test]
     fn test_wrap_file() {
         let file_id_generator = Arc::new(FileIdGenerator::new());
@@ -767,43 +781,17 @@ mod tests {
             },
         )
         .unwrap();
-        let kvs = [
-            ("k1", "value1_value1_value1"),
-            ("k2", "value2_value2_value2"),
-            ("k3", "value3_value3_value3"),
-            ("k1", "value4_value4_value4"),
+        let kvs = vec![
+            TestingKV::new("k1", "value1_value1_value1"),
+            TestingKV::new("k2", "value2_value2_value2"),
+            TestingKV::new("k3", "value3_value3_value3"),
+            TestingKV::new("k1", "value4_value4_value4"),
         ];
         assert_eq!(0, db.stable_files.len());
-        let offset_values = kvs
-            .into_iter()
-            .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
-            .collect::<Vec<(RowPosition, &str)>>();
-
-        offset_values.iter().for_each(|(ret, value)| {
-            assert_eq!(db.read_value(&ret).unwrap(), *value.as_bytes());
-        });
+        let rows = write_kvs_to_db(&db, kvs);
+        assert_rows_value(&db, &rows);
         assert_eq!(1, db.stable_files.len());
-        assert_eq!(
-            offset_values
-                .iter()
-                .map(|v| v.0)
-                .collect::<Vec<RowPosition>>(),
-            db.iter()
-                .unwrap()
-                .map(|r| r.unwrap().row_position)
-                .collect::<Vec<RowPosition>>()
-        );
-        assert_eq!(
-            vec!["k1", "k2", "k3", "k1"]
-                .iter()
-                .map(|kv| kv.to_string())
-                .map(|k| k.as_bytes().clone().to_vec())
-                .collect::<Vec<Vec<u8>>>(),
-            db.iter()
-                .unwrap()
-                .map(|r| r.unwrap().key)
-                .collect::<Vec<Vec<u8>>>()
-        )
+        assert_database_rows(&db, &rows);
     }
     #[test]
     fn test_hint_file() {
