@@ -19,9 +19,19 @@ impl FileIdGenerator {
         next_id
     }
 
-    pub fn update_file_id(&self, current_max_file_id: u32) {
+    pub fn update_file_id(&self, known_max_file_id: u32) {
         let mut id = self.file_id.lock().unwrap();
-        *id = current_max_file_id;
+        if known_max_file_id < *id {
+            panic!(
+                "cannot decrease file id from {} to {}",
+                *id, known_max_file_id
+            )
+        }
+        *id = known_max_file_id;
+    }
+
+    pub fn get_file_id(&self) -> u32 {
+        *self.file_id.lock().unwrap()
     }
 }
 
@@ -36,6 +46,7 @@ mod tests {
         assert_eq!(1, id_gen.generate_next_file_id());
         assert_eq!(2, id_gen.generate_next_file_id());
         assert_eq!(3, id_gen.generate_next_file_id());
+        assert_eq!(3, id_gen.get_file_id());
     }
 
     #[test]
@@ -45,5 +56,6 @@ mod tests {
         id_gen.update_file_id(10);
         assert_eq!(11, id_gen.generate_next_file_id());
         assert_eq!(12, id_gen.generate_next_file_id());
+        assert_eq!(12, id_gen.get_file_id());
     }
 }
