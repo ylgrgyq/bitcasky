@@ -406,7 +406,6 @@ pub struct Database {
 }
 
 const DEFAULT_MAX_DATABASE_FILE_SIZE: usize = 100 * 1024;
-const DATABASE_FILE_DIRECTORY: &str = "database";
 
 impl Database {
     pub fn open(
@@ -414,7 +413,7 @@ impl Database {
         file_id_generator: Arc<FileIdGenerator>,
         options: DataBaseOptions,
     ) -> BitcaskResult<Database> {
-        let database_dir = directory.join(DATABASE_FILE_DIRECTORY);
+        let database_dir: PathBuf = directory.into();
         std::fs::create_dir_all(database_dir.clone())?;
         let opened_stable_files = open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
@@ -501,6 +500,9 @@ impl Database {
         self.flush_writing_file()?;
 
         for file_id in file_ids {
+            if self.stable_files.contains_key(&file_id) {
+                continue;
+            }
             let data_file =
                 file_manager::open_file(&self.database_dir, file_id, FileType::DataFile)?;
             self.stable_files.insert(
@@ -655,10 +657,6 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, str::from_utf8_unchecked};
-
-    use crate::file_id;
-
     use super::*;
     use test_log::test;
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
@@ -823,6 +821,37 @@ mod tests {
         assert_rows_value(&db, &rows);
         assert_eq!(1, db.stable_files.len());
         assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_load_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut rows: Vec<TestingRow> = vec![];
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let old_db =
+            Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let kvs = vec![
+            TestingKV::new("k1", "value1"),
+            TestingKV::new("k2", "value2"),
+        ];
+        rows.append(&mut write_kvs_to_db(&old_db, kvs));
+        {
+            let merge_path = file_manager::create_merge_file_dir(dir.path()).unwrap();
+            let db =
+                Database::open(&merge_path, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k3", "hello world"),
+                TestingKV::new("k1", "value4"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+            file_manager::commit_merge_files(&dir.path()).unwrap();
+            old_db.load_files(db.get_file_ids()).unwrap();
+        }
+
+        assert_eq!(3, file_id_generator.get_file_id());
+        assert_eq!(2, old_db.stable_files.len());
+        assert_rows_value(&old_db, &rows);
+        assert_database_rows(&old_db, &rows);
     }
 
     #[test]

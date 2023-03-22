@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use log::warn;
+use log::{info, warn};
 use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
@@ -71,6 +71,9 @@ pub fn commit_merge_files(base_dir: &Path) -> BitcaskResult<()> {
     let paths = fs::read_dir(merge_dir_path.clone())?;
     for path in paths {
         let file_path = path?;
+        if file_path.path().is_dir() {
+            continue;
+        }
         let target_path = base_dir.join(file_path.file_name());
         fs::rename(file_path.path(), target_path)?;
     }
