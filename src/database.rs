@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
+    vec,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -178,6 +179,7 @@ impl WritingFile {
     }
 }
 
+#[derive(Debug)]
 pub struct RowToRead {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
@@ -471,11 +473,25 @@ impl Database {
     }
 
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
-        let mut opened_stable_files: Vec<StableFile> =
-            open_data_files_under_path(&self.database_dir)?
-                .into_iter()
-                .map(|(file_id, file)| StableFile::new(&self.database_dir, file_id, file))
-                .collect();
+        let mut file_ids: Vec<u32>;
+        {
+            let writing_file = self.writing_file.lock().unwrap();
+            let writing_file_id = writing_file.borrow().file_id;
+
+            file_ids = self
+                .stable_files
+                .iter()
+                .map(|f| f.lock().unwrap().file_id)
+                .collect::<Vec<u32>>();
+            file_ids.push(writing_file_id);
+        }
+
+        let files: BitcaskResult<Vec<StableFile>> = file_ids
+            .iter()
+            .map(|id| file_manager::open_file(&self.database_dir, *id, FileType::DataFile))
+            .map(|f| f.and_then(|f| Ok(StableFile::new(&self.database_dir, f.file_id, f.file))))
+            .collect();
+        let mut opened_stable_files = files?;
         opened_stable_files.sort_by_key(|e| e.file_id);
         let iters: BitcaskResult<Vec<StableFileIter>> =
             opened_stable_files.iter().rev().map(|f| f.iter()).collect();
@@ -852,6 +868,34 @@ mod tests {
         assert_eq!(2, old_db.stable_files.len());
         assert_rows_value(&old_db, &rows);
         assert_database_rows(&old_db, &rows);
+    }
+
+    #[test]
+    fn test_purge_outdated_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let db = Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let kvs = vec![
+            TestingKV::new("k1", "value1"),
+            TestingKV::new("k2", "value2"),
+        ];
+        write_kvs_to_db(&db, kvs);
+        db.flush_writing_file().unwrap();
+
+        let kvs = vec![
+            TestingKV::new("k3", "hello world"),
+            TestingKV::new("k1", "value4"),
+        ];
+        let mut rows: Vec<TestingRow> = vec![];
+        rows.append(&mut write_kvs_to_db(&db, kvs));
+        let file_id_to_purge = file_id_generator.get_file_id();
+        db.flush_writing_file().unwrap();
+        db.purge_outdated_files(file_id_to_purge).unwrap();
+
+        assert_eq!(3, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
     }
 
     #[test]
