@@ -1,3 +1,4 @@
 *.rlib
 target
 Cargo.lock
+.cargo/config.toml
