@@ -8,14 +8,42 @@ use crate::file_manager;
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
+pub const DEFAULT_BITCASK_OPTIONS: BitcaskOptions = BitcaskOptions {
+    max_file_size: 128 * 1024 * 1024,
+    max_key_size: 64,
+    max_value_size: 100 * 1024,
+};
+
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
-    pub max_file_size: Option<usize>,
+    pub max_file_size: usize,
     pub max_key_size: usize,
     pub max_value_size: usize,
 }
 
 impl BitcaskOptions {
+    fn validate(&self) -> Option<BitcaskError> {
+        if self.max_file_size <= 0 {
+            Some(BitcaskError::InvalidParameter(
+                "max_file_size".into(),
+                "need a positive value".into(),
+            ));
+        }
+        if self.max_key_size <= 0 {
+            Some(BitcaskError::InvalidParameter(
+                "max_key_size".into(),
+                "need a positive value".into(),
+            ));
+        }
+        if self.max_value_size <= 0 {
+            Some(BitcaskError::InvalidParameter(
+                "max_value_size".into(),
+                "need a positive value".into(),
+            ));
+        }
+        None
+    }
+
     fn get_database_options(&self) -> DataBaseOptions {
         return DataBaseOptions {
             max_file_size: self.max_file_size,
@@ -42,6 +70,10 @@ pub struct Bitcask {
 
 impl Bitcask {
     pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
+        let valid_opt = options.validate();
+        if valid_opt.is_some() {
+            return Err(valid_opt.unwrap());
+        }
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let database = Database::open(
             &directory,

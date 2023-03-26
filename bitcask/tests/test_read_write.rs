@@ -1,11 +1,10 @@
 use std::fs;
 
 use bitcask::bitcask::{Bitcask, BitcaskOptions};
-use log::info;
 use test_log::test;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-    max_file_size: Some(11),
+    max_file_size: 11,
     max_key_size: 1024,
     max_value_size: 1024,
 };
@@ -31,7 +30,7 @@ fn test_recovery() {
         let bc = Bitcask::open(
             &dir.path(),
             BitcaskOptions {
-                max_file_size: Some(100),
+                max_file_size: 100,
                 max_key_size: 1024,
                 max_value_size: 1024,
             },
@@ -50,7 +49,7 @@ fn test_recovery() {
     let bc = Bitcask::open(
         &dir.path(),
         BitcaskOptions {
-            max_file_size: Some(100),
+            max_file_size: 100,
             max_key_size: 1024,
             max_value_size: 1024,
         },

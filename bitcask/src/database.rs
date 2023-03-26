@@ -395,7 +395,7 @@ impl Iterator for HintFileIterator {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
-    pub max_file_size: Option<usize>,
+    pub max_file_size: usize,
 }
 
 #[derive(Debug)]
@@ -406,8 +406,6 @@ pub struct Database {
     stable_files: DashMap<u32, Mutex<StableFile>>,
     options: DataBaseOptions,
 }
-
-const DEFAULT_MAX_DATABASE_FILE_SIZE: usize = 100 * 1024;
 
 impl Database {
     pub fn open(
@@ -594,11 +592,7 @@ impl Database {
         row: &RowToWrite,
     ) -> bool {
         let writing_file = writing_file_ref.borrow();
-        row.size + writing_file.file_size
-            > self
-                .options
-                .max_file_size
-                .unwrap_or(DEFAULT_MAX_DATABASE_FILE_SIZE)
+        row.size + writing_file.file_size > self.options.max_file_size
     }
 
     fn do_flush_writing_file(&self, writing_file_ref: &RefCell<WritingFile>) -> BitcaskResult<()> {
@@ -678,7 +672,7 @@ mod tests {
     use test_log::test;
 
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
-        max_file_size: Some(1024),
+        max_file_size: 1024,
     };
 
     struct TestingRow {
@@ -804,9 +798,7 @@ mod tests {
         let db = Database::open(
             &dir.path(),
             file_id_generator,
-            DataBaseOptions {
-                max_file_size: Some(100),
-            },
+            DataBaseOptions { max_file_size: 100 },
         )
         .unwrap();
         let kvs = vec![
