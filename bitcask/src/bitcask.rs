@@ -10,9 +10,17 @@ use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
-    database_options: DataBaseOptions,
-    max_key_size: usize,
-    max_value_size: usize,
+    pub max_file_size: Option<usize>,
+    pub max_key_size: usize,
+    pub max_value_size: usize,
+}
+
+impl BitcaskOptions {
+    fn get_database_options(&self) -> DataBaseOptions {
+        return DataBaseOptions {
+            max_file_size: self.max_file_size,
+        };
+    }
 }
 
 #[derive(PartialEq)]
@@ -38,7 +46,7 @@ impl Bitcask {
         let database = Database::open(
             &directory,
             file_id_generator.clone(),
-            options.database_options,
+            options.get_database_options(),
         )?;
         let keydir = KeyDir::new(&database)?;
         Ok(Bitcask {
@@ -140,7 +148,7 @@ impl Bitcask {
         let merge_db = Database::open(
             merge_file_dir,
             self.file_id_generator.clone(),
-            self.options.database_options,
+            self.options.get_database_options(),
         )?;
 
         for r in key_dir_to_write.iter() {
@@ -154,139 +162,5 @@ impl Bitcask {
         merge_db.flush_writing_file()?;
         let file_ids = merge_db.get_file_ids();
         Ok((file_ids, new_kd))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use super::*;
-    use log::info;
-    use test_log::test;
-    const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-        database_options: DataBaseOptions {
-            max_file_size: Some(11),
-        },
-        max_key_size: 1024,
-        max_value_size: 1024,
-    };
-
-    #[test]
-    fn test_read_write_writing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-        bc.put("k1".into(), "value1".as_bytes()).unwrap();
-        bc.put("k2".into(), "value2".as_bytes()).unwrap();
-        bc.put("k3".into(), "value3".as_bytes()).unwrap();
-        bc.put("k1".into(), "value4".as_bytes()).unwrap();
-
-        assert_eq!(bc.get(&"k1".into()).unwrap().unwrap(), "value4".as_bytes());
-        assert_eq!(bc.get(&"k2".into()).unwrap().unwrap(), "value2".as_bytes());
-        assert_eq!(bc.get(&"k3".into()).unwrap().unwrap(), "value3".as_bytes());
-    }
-
-    #[test]
-    fn test_recovery() {
-        let dir = tempfile::tempdir().unwrap();
-        {
-            let bc = Bitcask::open(
-                &dir.path(),
-                BitcaskOptions {
-                    database_options: DataBaseOptions {
-                        max_file_size: Some(100),
-                    },
-                    max_key_size: 1024,
-                    max_value_size: 1024,
-                },
-            )
-            .unwrap();
-            bc.put("k1".into(), "value1_value1_value1".as_bytes())
-                .unwrap();
-            bc.put("k2".into(), "value2_value2_value2".as_bytes())
-                .unwrap();
-            bc.put("k3".into(), "value3_value3_value3".as_bytes())
-                .unwrap();
-            bc.put("k1".into(), "value4_value4_value4".as_bytes())
-                .unwrap();
-            bc.delete(&"k2".into()).unwrap();
-        }
-        let bc = Bitcask::open(
-            &dir.path(),
-            BitcaskOptions {
-                database_options: DataBaseOptions {
-                    max_file_size: Some(100),
-                },
-                max_key_size: 1024,
-                max_value_size: 1024,
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            bc.get(&"k1".into()).unwrap().unwrap(),
-            "value4_value4_value4".as_bytes()
-        );
-        assert_eq!(bc.get(&"k2".into()).unwrap(), None,);
-        assert_eq!(
-            bc.get(&"k3".into()).unwrap().unwrap(),
-            "value3_value3_value3".as_bytes()
-        );
-    }
-
-    #[test]
-    fn test_merge() {
-        let dir = tempfile::tempdir().unwrap();
-        {
-            let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-            bc.put("k1".into(), "value1".as_bytes()).unwrap();
-        }
-        {
-            let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-            bc.put("k2".into(), "value2".as_bytes()).unwrap();
-            bc.put("k21".into(), "value2".as_bytes()).unwrap();
-        }
-        {
-            let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-            bc.put("k3".into(), "value3".as_bytes()).unwrap();
-            bc.delete(&"k21".into()).unwrap();
-        }
-        {
-            let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-            bc.put("k1".into(), "value4".as_bytes()).unwrap();
-        }
-
-        let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-        bc.merge().unwrap();
-
-        for path in fs::read_dir(dir.path()).unwrap() {
-            let file_path = path.unwrap();
-            if file_path.path().is_dir() {
-                continue;
-            }
-
-            info!("asdfsf {:?}", file_path);
-        }
-        assert_eq!(bc.get(&"k1".into()).unwrap().unwrap(), "value4".as_bytes());
-        assert_eq!(bc.get(&"k2".into()).unwrap().unwrap(), "value2".as_bytes());
-        assert_eq!(bc.get(&"k3".into()).unwrap().unwrap(), "value3".as_bytes());
-    }
-
-    #[test]
-    fn test_delete() {
-        let dir = tempfile::tempdir().unwrap();
-        let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
-        bc.put("k1".into(), "value1".as_bytes()).unwrap();
-        bc.put("k2".into(), "value2".as_bytes()).unwrap();
-        bc.put("k3".into(), "value3".as_bytes()).unwrap();
-        bc.put("k1".into(), "value4".as_bytes()).unwrap();
-
-        bc.delete(&"k1".into()).unwrap();
-        assert_eq!(bc.get(&"k1".into()).unwrap(), None);
-
-        bc.delete(&"k2".into()).unwrap();
-        assert_eq!(bc.get(&"k2".into()).unwrap(), None);
-
-        bc.delete(&"k3".into()).unwrap();
-        assert_eq!(bc.get(&"k3".into()).unwrap(), None);
     }
 }

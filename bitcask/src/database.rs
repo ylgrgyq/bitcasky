@@ -674,30 +674,13 @@ impl Iterator for DatabaseIter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcask_tests::common::TestingKV;
     use test_log::test;
+
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: Some(1024),
     };
 
-    struct TestingKV {
-        key: Vec<u8>,
-        value: Vec<u8>,
-    }
-
-    impl TestingKV {
-        fn new(k: &str, v: &str) -> TestingKV {
-            TestingKV {
-                key: k.into(),
-                value: v.into(),
-            }
-        }
-        fn key(&self) -> Vec<u8> {
-            self.key.clone()
-        }
-        fn value(&self) -> Vec<u8> {
-            self.value.clone()
-        }
-    }
     struct TestingRow {
         kv: TestingKV,
         pos: RowPosition,
