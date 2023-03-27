@@ -61,6 +61,10 @@ impl KeyDir {
         self.index.get(key)
     }
 
+    pub fn contains_key(&self, key: &Vec<u8>) -> bool {
+        self.index.contains_key(key)
+    }
+
     pub fn iter(&self) -> KeyDirIterator {
         KeyDirIterator {
             iter: self.index.iter(),

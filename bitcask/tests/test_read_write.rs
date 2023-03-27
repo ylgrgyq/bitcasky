@@ -1,6 +1,7 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use bitcask::bitcask::{Bitcask, BitcaskOptions};
+use log::info;
 use test_log::test;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {

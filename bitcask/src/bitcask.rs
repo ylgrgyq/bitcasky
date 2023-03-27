@@ -1,5 +1,8 @@
+use std::fs;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
+
+use log::info;
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
@@ -141,8 +144,12 @@ impl Bitcask {
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
         let kd = self.keydir.write().unwrap();
-        self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
-        kd.delete(&key);
+
+        if kd.contains_key(key) {
+            self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
+            kd.delete(&key);
+        }
+
         Ok(())
     }
 
