@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum BitcaskError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
+    #[error("Permission Denied: \"{0}\"")]
+    PermissionDenied(String),
     #[error("The parameter: \"{0}\" is invalid for reason: {1}")]
     InvalidParameter(String, String),
     #[error("Failed to parse database file name: {0}")]

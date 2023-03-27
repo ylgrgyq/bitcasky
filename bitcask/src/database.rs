@@ -1,6 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    fs::File,
+    fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -407,6 +407,17 @@ pub struct Database {
     options: DataBaseOptions,
 }
 
+fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
+    fs::create_dir_all(dir)?;
+    if !file_manager::check_directory_is_writable(dir) {
+        return Err(BitcaskError::PermissionDenied(format!(
+            "do not have writable permission for path: {}",
+            dir.display()
+        )));
+    }
+    Ok(())
+}
+
 impl Database {
     pub fn open(
         directory: &Path,
@@ -414,7 +425,7 @@ impl Database {
         options: DataBaseOptions,
     ) -> BitcaskResult<Database> {
         let database_dir: PathBuf = directory.into();
-        std::fs::create_dir_all(database_dir.clone())?;
+        validate_database_directory(&database_dir)?;
         let opened_stable_files = open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);

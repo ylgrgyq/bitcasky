@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
 
+const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
 const DATA_FILE_POSTFIX: &str = ".data";
 const HINT_FILE_POSTFIX: &str = ".hint";
@@ -34,6 +35,34 @@ impl FileType {
 pub struct IdentifiedFile {
     pub file_id: u32,
     pub file: File,
+}
+
+pub fn check_directory_is_writable(base_dir: &Path) -> bool {
+    if !fs::metadata(base_dir)
+        .and_then(|meta| Ok(meta.permissions().readonly()))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    // create a directory deliberately to check we have writable permission for target path
+    let testing_path = base_dir.join(TESTING_DIRECTORY);
+    if testing_path.exists() {
+        if !fs::remove_dir(&testing_path)
+            .and_then(|_| Ok(true))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+
+    if !fs::create_dir(&testing_path)
+        .and_then(|_| fs::remove_dir(testing_path).and_then(|_| Ok(true)))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    true
 }
 
 pub fn create_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<File> {
