@@ -1,8 +1,8 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use bitcask::bitcask::{Bitcask, BitcaskOptions};
-use log::info;
 use test_log::test;
+use walkdir::WalkDir;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 11,
@@ -122,4 +122,27 @@ fn test_delete() {
 
     bc.delete(&"k3".into()).unwrap();
     assert_eq!(bc.get(&"k3".into()).unwrap(), None);
+}
+
+#[test]
+fn test_delete_not_exists_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+
+    bc.delete(&"k1".into()).unwrap();
+    assert_eq!(bc.get(&"k1".into()).unwrap(), None);
+
+    bc.delete(&"k2".into()).unwrap();
+    assert_eq!(bc.get(&"k2".into()).unwrap(), None);
+
+    bc.delete(&"k3".into()).unwrap();
+    assert_eq!(bc.get(&"k3".into()).unwrap(), None);
+
+    assert!(WalkDir::new(&dir.path())
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .map(|e| e.metadata().unwrap())
+        .filter(|m| !m.is_dir())
+        .all(|meta| { meta.len() == 0 }));
 }

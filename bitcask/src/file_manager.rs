@@ -38,7 +38,7 @@ pub struct IdentifiedFile {
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
-    if !fs::metadata(base_dir)
+    if fs::metadata(base_dir)
         .and_then(|meta| Ok(meta.permissions().readonly()))
         .unwrap_or(false)
     {
