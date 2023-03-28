@@ -6,6 +6,9 @@ edition = "2021"
 [[test]]
 name = "test_read_write"
 
+[[test]]
+name = "test_merge"
+
 [dependencies]
 crc = "3.0.0"
 walkdir = "2.3.2"
