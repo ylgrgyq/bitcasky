@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
+use log::info;
+
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;

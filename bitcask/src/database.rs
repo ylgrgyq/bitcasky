@@ -556,6 +556,14 @@ impl Database {
             let f = v.lock().unwrap();
             f.file_id >= max_file_id
         });
+        file_manager::get_valid_data_file_ids(&self.database_dir)
+            .iter()
+            .filter(|id| **id < max_file_id)
+            .for_each(|id| {
+                file_manager::delete_file(&self.database_dir, *id, FileType::DataFile)
+                    .unwrap_or_default()
+            });
+
         Ok(())
     }
 

@@ -129,10 +129,31 @@ pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32,
     Ok(db_files.into_iter().map(|f| (f.file_id, f.file)).collect())
 }
 
+pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
+    get_valid_data_file_paths(base_dir)
+        .iter()
+        .map(|p| parse_file_id_from_data_file(p).unwrap())
+        .collect()
+}
+
+pub fn delete_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<()> {
+    let path = file_type.generate_name(base_dir, file_id);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
 fn open_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
     let file_id = parse_file_id_from_data_file(file_path)?;
     let file = File::options().read(true).open(file_path)?;
     Ok(IdentifiedFile { file_id, file })
+}
+
+fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
+    let binding = file_path.file_name().unwrap().to_string_lossy();
+    let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_POSTFIX.len());
+    file_id_str
+        .parse::<u32>()
+        .map_err(|_| BitcaskError::InvalidDatabaseFileName(binding.to_string()))
 }
 
 fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
@@ -151,14 +172,6 @@ fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
             }
         })
         .collect()
-}
-
-fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
-    let binding = file_path.file_name().unwrap().to_string_lossy();
-    let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_POSTFIX.len());
-    file_id_str
-        .parse::<u32>()
-        .map_err(|_| BitcaskError::InvalidDatabaseFileName(binding.to_string()))
 }
 
 #[cfg(test)]

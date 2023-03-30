@@ -12,7 +12,7 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
 };
 
 #[test]
-fn test_merge() {
+fn test_merge_no_remain() {
     let dir = tempfile::tempdir().unwrap();
     let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
