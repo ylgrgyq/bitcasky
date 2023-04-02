@@ -63,6 +63,13 @@ pub struct FoldResult<T> {
     status: FoldStatus,
 }
 
+pub struct BitcaskStats {
+    pub number_of_data_files: usize,
+    pub number_of_hint_files: usize,
+    pub total_data_size_in_bytes: u64,
+    pub number_of_keys: usize,
+}
+
 pub struct Bitcask {
     keydir: RwLock<KeyDir>,
     file_id_generator: Arc<FileIdGenerator>,
@@ -157,16 +164,33 @@ impl Bitcask {
         let (kd, known_max_file_id) = self.flush_writing_file()?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;
 
-        file_manager::commit_merge_files(self.database.get_database_dir())?;
+        file_manager::commit_merge_files(self.database.get_database_dir(), &file_ids)?;
+
+        info!(target: "Merge", "database merged to files with ids: {:?}", &file_ids);
 
         let kd = self.keydir.write().unwrap();
         for (k, v) in new_kd.into_iter() {
-            kd.put(k, v)
+            kd.checked_put(k, v)
         }
 
-        self.database.load_files(file_ids)?;
+        self.database.load_files(&file_ids)?;
+
+        info!(target: "Merge", "purge files with id smaller than: {}", known_max_file_id);
+
         self.database.purge_outdated_files(known_max_file_id)?;
         Ok(())
+    }
+
+    pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
+        let kd = self.keydir.read().unwrap();
+        let key_size = kd.len();
+        let db_stats = self.database.stats()?;
+        Ok(BitcaskStats {
+            number_of_data_files: db_stats.number_of_data_files,
+            number_of_hint_files: db_stats.number_of_hint_files,
+            total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
+            number_of_keys: key_size,
+        })
     }
 
     fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
@@ -183,6 +207,9 @@ impl Bitcask {
         key_dir_to_write: &KeyDir,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
         let new_kd = KeyDir::new_empty_key_dir();
+        if key_dir_to_write.len() <= 0 {
+            return Ok((vec![], new_kd));
+        }
         let merge_db = Database::open(
             merge_file_dir,
             self.file_id_generator.clone(),

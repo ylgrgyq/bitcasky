@@ -47,11 +47,11 @@ impl KeyDir {
             let pos: RowPosition = *(r.unwrap());
             if pos.tstmp > value.tstmp {
                 let k = general_purpose::STANDARD.encode(&key);
-                warn!(target: "KeyDir", "Found old version value for key in Base64: {} during recovery. Known version: {}, found version: {}", k, pos.tstmp, value.tstmp);
+                warn!(target: "KeyDir", "put old version value for key in Base64: {}. Known version: {}, found version: {}", k, pos.tstmp, value.tstmp);
                 return;
             } else if pos.tstmp == value.tstmp {
                 let k = general_purpose::STANDARD.encode(&key);
-                info!(target: "KeyDir", "Found known version value for key in Base64: {} during recovery. Known version: {}", k, pos.tstmp);
+                info!(target: "KeyDir", "overwrite known version value for key in Base64: {}. Known version: {}", k, pos.tstmp);
             }
         }
         self.index.insert(key, value);
@@ -63,6 +63,10 @@ impl KeyDir {
 
     pub fn contains_key(&self, key: &Vec<u8>) -> bool {
         self.index.contains_key(key)
+    }
+
+    pub fn len(&self) -> usize {
+        self.index.len()
     }
 
     pub fn iter(&self) -> KeyDirIterator {
