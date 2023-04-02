@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -187,7 +188,7 @@ impl Bitcask {
 
         let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (kd, known_max_file_id) = self.flush_writing_file()?;
-        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;
+        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
 
         info!(target: "Merge", "database merged to files with ids: {:?}", &file_ids);
 
@@ -232,8 +233,12 @@ impl Bitcask {
         &self,
         merge_file_dir: &Path,
         key_dir_to_write: &KeyDir,
+        known_max_file_id: u32,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
-        // file_manager::open_file(base_dir, file_id, file_type)
+        let mut merge_meta_file =
+            file_manager::create_file(merge_file_dir, file_manager::FileType::MergeMeta)?;
+        merge_meta_file.write(&known_max_file_id.to_be_bytes())?;
+
         let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
             merge_file_dir,

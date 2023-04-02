@@ -33,6 +33,9 @@ impl FileType {
             Self::HintFile(id) => format!("{}{}", id, HINT_FILE_POSTFIX),
         })
     }
+    fn check_file_belongs_to_type(&self, file_path: &Path) -> bool {
+        false
+    }
 }
 
 pub struct IdentifiedFile {
@@ -109,6 +112,9 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
     for path in paths {
         let file_path = path?;
         if file_path.path().is_dir() {
+            continue;
+        }
+        if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
             continue;
         }
         warn!(target: "FileManager", "Merge file directory:{} is not empty", merge_dir_path.display().to_string());
