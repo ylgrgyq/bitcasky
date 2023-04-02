@@ -32,7 +32,7 @@ impl KeyDir {
                 kd.delete(&item.key);
                 continue;
             }
-            kd.checked_put(item.key, item.row_position);
+            kd.put(item.key, item.row_position);
         }
         return Ok(kd);
     }
@@ -44,14 +44,10 @@ impl KeyDir {
     pub fn checked_put(&self, key: Vec<u8>, value: RowPosition) {
         let r = self.index.get(&key);
         if r.is_some() {
-            let pos: RowPosition = *(r.unwrap());
-            if pos.tstmp > value.tstmp {
-                let k = general_purpose::STANDARD.encode(&key);
-                warn!(target: "KeyDir", "put old version value for key in Base64: {}. Known version: {}, found version: {}", k, pos.tstmp, value.tstmp);
+            let old_pos: RowPosition = *(r.unwrap());
+            // key was written again during merge
+            if value.file_id < old_pos.file_id {
                 return;
-            } else if pos.tstmp == value.tstmp {
-                let k = general_purpose::STANDARD.encode(&key);
-                info!(target: "KeyDir", "overwrite known version value for key in Base64: {}. Known version: {}", k, pos.tstmp);
             }
         }
         self.index.insert(key, value);
