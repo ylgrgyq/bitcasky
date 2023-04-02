@@ -1,4 +1,7 @@
-use bitcask::bitcask::{Bitcask, BitcaskOptions};
+use bitcask::{
+    bitcask::{Bitcask, BitcaskOptions},
+    error::BitcaskError,
+};
 use bitcask_tests::common::get_temporary_directory_path;
 use test_log::test;
 use walkdir::WalkDir;
@@ -8,6 +11,18 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_key_size: 1024,
     max_value_size: 1024,
 };
+
+#[test]
+fn test_open_db_twice() {
+    let dir = get_temporary_directory_path();
+    let _bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc2 = Bitcask::open(&dir, DEFAULT_OPTIONS);
+    assert!(bc2.is_err());
+    match bc2.err() {
+        Some(BitcaskError::LockDirectoryFailed(_)) => assert!(true),
+        _ => assert!(false),
+    }
+}
 
 #[test]
 fn test_read_write_writing_file() {

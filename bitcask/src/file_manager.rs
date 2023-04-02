@@ -4,37 +4,57 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use log::{info, warn};
+use fs2::FileExt;
+use log::{error, info, warn};
 use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
 
 const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
+const LOCK_FILE_POSTFIX: &str = ".lock";
 const DATA_FILE_POSTFIX: &str = ".data";
 const HINT_FILE_POSTFIX: &str = ".hint";
 
 pub enum FileType {
+    LockFile,
     DataFile,
     HintFile,
 }
 
 impl FileType {
     fn get_path_for_file_id(&self, base_dir: &Path, file_id: u32) -> PathBuf {
-        base_dir.join(format!(
-            "{}{}",
-            file_id,
-            match self {
-                Self::DataFile => DATA_FILE_POSTFIX,
-                Self::HintFile => HINT_FILE_POSTFIX,
-            },
-        ))
+        base_dir.join(match self {
+            Self::LockFile => format!("Bitcask{}", LOCK_FILE_POSTFIX),
+            Self::DataFile => format!("{}{}", file_id, DATA_FILE_POSTFIX),
+            Self::HintFile => format!("{}{}", file_id, HINT_FILE_POSTFIX),
+        })
     }
 }
 
 pub struct IdentifiedFile {
     pub file_id: u32,
     pub file: File,
+}
+
+pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
+    let p = FileType::LockFile.get_path_for_file_id(base_dir, 0);
+    let file = File::options()
+        .write(true)
+        .create(true)
+        .read(true)
+        .open(&p)?;
+    match file.try_lock_exclusive() {
+        Ok(_) => return Ok(Some(file)),
+        _ => return Ok(None),
+    }
+}
+
+pub fn unlock_directory(file: &File) {
+    match file.unlock() {
+        Ok(_) => return,
+        Err(e) => error!(target: "FileManager", "Unlock directory failed with reason: {}", e),
+    }
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
