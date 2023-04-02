@@ -5,7 +5,7 @@ use std::{
 };
 
 use fs2::FileExt;
-use log::{error, warn};
+use log::{error, info, warn};
 use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
@@ -43,7 +43,7 @@ pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
         .write(true)
         .create(true)
         .read(true)
-        .open(p)?;
+        .open(&p)?;
     match file.try_lock_exclusive() {
         Ok(_) => return Ok(Some(file)),
         _ => return Ok(None),
@@ -53,7 +53,7 @@ pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
 pub fn unlock_directory(file: &File) {
     match file.unlock() {
         Ok(_) => return,
-        Err(e) => error!(target: "FileManager", "Unlock directory failed. reason: {}", e),
+        Err(e) => error!(target: "FileManager", "Unlock directory failed with reason: {}", e),
     }
 }
 

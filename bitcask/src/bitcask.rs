@@ -64,6 +64,7 @@ pub struct FoldResult<T> {
     status: FoldStatus,
 }
 
+#[derive(Debug)]
 pub struct BitcaskStats {
     pub number_of_data_files: usize,
     pub number_of_hint_files: usize,
@@ -91,7 +92,7 @@ impl Bitcask {
             None => {
                 return Err(BitcaskError::LockDirectoryFailed(
                     directory.display().to_string(),
-                ))
+                ));
             }
         };
 
