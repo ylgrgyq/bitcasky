@@ -393,9 +393,22 @@ impl Iterator for HintFileIterator {
     }
 }
 
+/**
+ * Statistics of a Database.
+ * Some of the metrics may not accurate due to concurrent access.
+ */
 pub struct DatabaseStats {
+    /**
+     * Number of data files in Database
+     */
     pub number_of_data_files: usize,
+    /**
+     * Number of data files in Database
+     */
     pub number_of_hint_files: usize,
+    /**
+     * Data size in bytes of this Database
+     */
     pub total_data_size_in_bytes: u64,
 }
 
@@ -542,6 +555,11 @@ impl Database {
             }
             let data_file =
                 file_manager::open_file(&self.database_dir, *file_id, FileType::DataFile)?;
+            let meta = data_file.file.metadata()?;
+            if meta.len() <= 0 {
+                info!(target: "database", "skip load empty data file with id: {}", &file_id);
+                continue;
+            }
             self.stable_files.insert(
                 *file_id,
                 Mutex::new(StableFile::new(
@@ -607,7 +625,11 @@ impl Database {
     }
 
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
-        let total_data_size_in_bytes: u64 = self
+        let mut writing_file_size: u64 = 0;
+        {
+            writing_file_size = self.writing_file.lock().unwrap().borrow().file_size as u64;
+        }
+        let mut total_data_size_in_bytes: u64 = self
             .stable_files
             .iter()
             .map(|f| {
@@ -617,6 +639,8 @@ impl Database {
             .collect::<Result<Vec<u64>, std::io::Error>>()?
             .iter()
             .sum();
+        total_data_size_in_bytes += writing_file_size;
+
         Ok(DatabaseStats {
             number_of_data_files: self.stable_files.len() + 1,
             number_of_hint_files: 0,

@@ -171,6 +171,7 @@ impl Bitcask {
             kd.checked_put(k, v)
         }
 
+        info!("Asdfsf {:?} {}", &file_ids, known_max_file_id);
         self.database.load_files(&file_ids)?;
         self.database.purge_outdated_files(known_max_file_id)?;
         Ok(())
