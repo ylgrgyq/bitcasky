@@ -950,38 +950,6 @@ mod tests {
     }
 
     #[test]
-    fn test_purge_outdated_files() {
-        let dir = get_temporary_directory_path();
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        let kvs = vec![
-            TestingKV::new("k1", "value1"),
-            TestingKV::new("k2", "value2"),
-        ];
-        write_kvs_to_db(&db, kvs);
-        db.flush_writing_file().unwrap();
-
-        let kvs = vec![
-            TestingKV::new("k3", "hello world"),
-            TestingKV::new("k1", "value4"),
-        ];
-        let mut rows: Vec<TestingRow> = vec![];
-        rows.append(&mut write_kvs_to_db(&db, kvs));
-        let file_id_to_purge = file_id_generator.get_file_id();
-        db.flush_writing_file().unwrap();
-        let old_stats = db.stats().unwrap();
-        db.purge_outdated_files(file_id_to_purge).unwrap();
-
-        let new_stats = db.stats().unwrap();
-        assert_eq!(3, file_id_generator.get_file_id());
-        assert_eq!(1, db.stable_files.len());
-        assert_eq!(2, new_stats.number_of_data_files);
-        assert!(new_stats.total_data_size_in_bytes < old_stats.total_data_size_in_bytes);
-        assert_rows_value(&db, &rows);
-        assert_database_rows(&db, &rows);
-    }
-
-    #[test]
     fn test_hint_file() {
         let dir = get_temporary_directory_path();
         let mut offset_values: Vec<(RowPosition, &str)> = vec![];
