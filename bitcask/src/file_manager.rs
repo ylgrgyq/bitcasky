@@ -102,17 +102,6 @@ pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult
         let to_p = FileType::DataFile.get_path_for_file_id(&base_dir, *file_id);
         fs::rename(from_p, to_p)?;
     }
-    // let paths = fs::read_dir(merge_dir_path.clone())?;
-    // for path in paths {
-    //     let file_path = path?;
-    //     if file_path.path().is_dir() {
-    //         continue;
-    //     }
-    //     let file_id = parse_file_id_from_data_file(&file_path.path());
-    //     let target_path = base_dir.join(file_path.file_name());
-    //     fs::rename(file_path.path(), target_path)?;
-    // }
-
     Ok(())
 }
 
