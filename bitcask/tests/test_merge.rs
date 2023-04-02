@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use bitcask::bitcask::{Bitcask, DEFAULT_BITCASK_OPTIONS};
 use bitcask_tests::common::get_temporary_directory_path;
 use test_log::test;

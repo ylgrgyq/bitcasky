@@ -230,9 +230,6 @@ impl Bitcask {
         key_dir_to_write: &KeyDir,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
         let new_kd = KeyDir::new_empty_key_dir();
-        // if key_dir_to_write.len() <= 0 {
-        //     return Ok((vec![], new_kd));
-        // }
         let merge_db = Database::open(
             merge_file_dir,
             self.file_id_generator.clone(),
