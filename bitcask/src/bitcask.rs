@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -71,6 +72,7 @@ pub struct BitcaskStats {
 }
 
 pub struct Bitcask {
+    directory_lock_file: File,
     keydir: RwLock<KeyDir>,
     file_id_generator: Arc<FileIdGenerator>,
     options: BitcaskOptions,
@@ -84,6 +86,15 @@ impl Bitcask {
         if valid_opt.is_some() {
             return Err(valid_opt.unwrap());
         }
+        let directory_lock_file = match file_manager::lock_directory(directory)? {
+            Some(f) => f,
+            None => {
+                return Err(BitcaskError::LockDirectoryFailed(
+                    directory.display().to_string(),
+                ))
+            }
+        };
+
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let database = Database::open(
             &directory,
@@ -92,6 +103,7 @@ impl Bitcask {
         )?;
         let keydir = KeyDir::new(&database)?;
         Ok(Bitcask {
+            directory_lock_file,
             keydir: RwLock::new(keydir),
             file_id_generator,
             database,
@@ -168,7 +180,6 @@ impl Bitcask {
             return Err(BitcaskError::MergeInProgress());
         }
 
-        let _lock = self.merge_lock.lock().unwrap();
         let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (kd, known_max_file_id) = self.flush_writing_file()?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;
@@ -236,5 +247,11 @@ impl Bitcask {
         merge_db.flush_writing_file()?;
         let file_ids = merge_db.get_file_ids();
         Ok((file_ids, new_kd))
+    }
+}
+
+impl Drop for Bitcask {
+    fn drop(&mut self) {
+        file_manager::unlock_directory(&self.directory_lock_file);
     }
 }

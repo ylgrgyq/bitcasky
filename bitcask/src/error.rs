@@ -18,6 +18,8 @@ pub enum BitcaskError {
     MergeFileDirectoryNotEmpty(String),
     #[error("Another merge is in progress")]
     MergeInProgress(),
+    #[error("Lock directory: {0} failed. Maybe there's another process is using this directory")]
+    LockDirectoryFailed(String),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;
