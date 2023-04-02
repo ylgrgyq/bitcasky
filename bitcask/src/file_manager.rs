@@ -13,21 +13,24 @@ use crate::error::{BitcaskError, BitcaskResult};
 const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
 const LOCK_FILE_POSTFIX: &str = ".lock";
+const MERGE_META_FILE_POSTFIX: &str = ".meta";
 const DATA_FILE_POSTFIX: &str = ".data";
 const HINT_FILE_POSTFIX: &str = ".hint";
 
 pub enum FileType {
     LockFile,
-    DataFile,
-    HintFile,
+    MergeMeta,
+    DataFile(u32),
+    HintFile(u32),
 }
 
 impl FileType {
-    fn get_path_for_file_id(&self, base_dir: &Path, file_id: u32) -> PathBuf {
+    fn get_path_for_file_id(&self, base_dir: &Path) -> PathBuf {
         base_dir.join(match self {
-            Self::LockFile => format!("Bitcask{}", LOCK_FILE_POSTFIX),
-            Self::DataFile => format!("{}{}", file_id, DATA_FILE_POSTFIX),
-            Self::HintFile => format!("{}{}", file_id, HINT_FILE_POSTFIX),
+            Self::LockFile => format!("bitcask{}", LOCK_FILE_POSTFIX),
+            Self::MergeMeta => format!("merge{}", MERGE_META_FILE_POSTFIX),
+            Self::DataFile(id) => format!("{}{}", id, DATA_FILE_POSTFIX),
+            Self::HintFile(id) => format!("{}{}", id, HINT_FILE_POSTFIX),
         })
     }
 }
@@ -39,7 +42,7 @@ pub struct IdentifiedFile {
 
 pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
     fs::create_dir_all(base_dir)?;
-    let p = FileType::LockFile.get_path_for_file_id(base_dir, 0);
+    let p = FileType::LockFile.get_path_for_file_id(base_dir);
     let file = File::options()
         .write(true)
         .create(true)
@@ -86,8 +89,8 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
     true
 }
 
-pub fn create_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<File> {
-    let path = file_type.get_path_for_file_id(base_dir, file_id);
+pub fn create_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<File> {
+    let path = file_type.get_path_for_file_id(base_dir);
     Ok(File::options()
         .write(true)
         .create(true)
@@ -119,16 +122,16 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
 pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
     let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
     for file_id in file_ids {
-        let from_p = FileType::DataFile.get_path_for_file_id(&merge_dir_path, *file_id);
-        let to_p = FileType::DataFile.get_path_for_file_id(&base_dir, *file_id);
+        let from_p = FileType::DataFile(*file_id).get_path_for_file_id(&merge_dir_path);
+        let to_p = FileType::DataFile(*file_id).get_path_for_file_id(&base_dir);
         fs::rename(from_p, to_p)?;
     }
     Ok(())
 }
 
 pub fn change_file_id(base_dir: &Path, from_file_id: u32, to_file_id: u32) -> BitcaskResult<()> {
-    let from_p = FileType::DataFile.get_path_for_file_id(&base_dir, from_file_id);
-    let to_p = FileType::DataFile.get_path_for_file_id(&base_dir, to_file_id);
+    let from_p = FileType::DataFile(from_file_id).get_path_for_file_id(&base_dir);
+    let to_p = FileType::DataFile(to_file_id).get_path_for_file_id(&base_dir);
     fs::rename(from_p, to_p)?;
     Ok(())
 }
@@ -138,7 +141,7 @@ pub fn open_file(
     file_id: u32,
     file_type: FileType,
 ) -> BitcaskResult<IdentifiedFile> {
-    let path = file_type.get_path_for_file_id(base_dir, file_id);
+    let path = file_type.get_path_for_file_id(base_dir);
     let file = File::options().read(true).open(path)?;
     Ok(IdentifiedFile { file_id, file })
 }
@@ -160,7 +163,7 @@ pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
 }
 
 pub fn delete_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<()> {
-    let path = file_type.get_path_for_file_id(base_dir, file_id);
+    let path = file_type.get_path_for_file_id(base_dir);
     fs::remove_file(path)?;
     Ok(())
 }
@@ -237,7 +240,7 @@ mod tests {
     fn test_create_merge_file_dir() {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
-        create_file(&merge_file_path, 0, FileType::DataFile).unwrap();
+        create_file(&merge_file_path, FileType::DataFile(0)).unwrap();
 
         let failed_to_create = create_merge_file_dir(&dir);
         assert!(match failed_to_create.err().unwrap() {
@@ -251,9 +254,9 @@ mod tests {
         let dir_path = get_temporary_directory_path();
 
         let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
-        create_file(&merge_file_path, 0, FileType::DataFile).unwrap();
-        create_file(&merge_file_path, 1, FileType::DataFile).unwrap();
-        create_file(&merge_file_path, 2, FileType::DataFile).unwrap();
+        create_file(&merge_file_path, FileType::DataFile(0)).unwrap();
+        create_file(&merge_file_path, FileType::DataFile(1)).unwrap();
+        create_file(&merge_file_path, FileType::DataFile(2)).unwrap();
 
         assert_eq!(vec![0, 1, 2,], get_data_file_ids_in_dir(&merge_file_path));
         assert!(get_data_file_ids_in_dir(&dir_path).is_empty());

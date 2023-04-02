@@ -64,6 +64,10 @@ pub struct FoldResult<T> {
     status: FoldStatus,
 }
 
+pub struct MergeMeta {
+    known_max_file_id: u32,
+}
+
 #[derive(Debug)]
 pub struct BitcaskStats {
     pub number_of_data_files: usize,
@@ -229,6 +233,7 @@ impl Bitcask {
         merge_file_dir: &Path,
         key_dir_to_write: &KeyDir,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
+        // file_manager::open_file(base_dir, file_id, file_type)
         let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
             merge_file_dir,
