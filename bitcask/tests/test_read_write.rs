@@ -1,6 +1,5 @@
-use std::fs;
-
 use bitcask::bitcask::{Bitcask, BitcaskOptions};
+use bitcask_tests::common::get_temporary_directory_path;
 use test_log::test;
 use walkdir::WalkDir;
 
@@ -12,8 +11,8 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
 
 #[test]
 fn test_read_write_writing_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();
     bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -26,10 +25,10 @@ fn test_read_write_writing_file() {
 
 #[test]
 fn test_recovery() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = get_temporary_directory_path();
     {
         let bc = Bitcask::open(
-            &dir.path(),
+            &dir,
             BitcaskOptions {
                 max_file_size: 100,
                 max_key_size: 1024,
@@ -48,7 +47,7 @@ fn test_recovery() {
         bc.delete(&"k2".into()).unwrap();
     }
     let bc = Bitcask::open(
-        &dir.path(),
+        &dir,
         BitcaskOptions {
             max_file_size: 100,
             max_key_size: 1024,
@@ -69,8 +68,8 @@ fn test_recovery() {
 
 #[test]
 fn test_delete() {
-    let dir = tempfile::tempdir().unwrap();
-    let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();
     bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -88,8 +87,8 @@ fn test_delete() {
 
 #[test]
 fn test_delete_not_exists_key() {
-    let dir = tempfile::tempdir().unwrap();
-    let bc = Bitcask::open(&dir.path(), DEFAULT_OPTIONS).unwrap();
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
 
     bc.delete(&"k1".into()).unwrap();
     assert_eq!(bc.get(&"k1".into()).unwrap(), None);
@@ -100,7 +99,7 @@ fn test_delete_not_exists_key() {
     bc.delete(&"k3".into()).unwrap();
     assert_eq!(bc.get(&"k3".into()).unwrap(), None);
 
-    assert!(WalkDir::new(&dir.path())
+    assert!(WalkDir::new(&dir)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())

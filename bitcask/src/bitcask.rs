@@ -164,14 +164,14 @@ impl Bitcask {
         let (kd, known_max_file_id) = self.flush_writing_file()?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;
 
-        file_manager::commit_merge_files(self.database.get_database_dir())?;
+        file_manager::commit_merge_files(self.database.get_database_dir(), &file_ids)?;
 
         let kd = self.keydir.write().unwrap();
         for (k, v) in new_kd.into_iter() {
-            kd.put(k, v)
+            kd.checked_put(k, v)
         }
 
-        self.database.load_files(file_ids)?;
+        self.database.load_files(&file_ids)?;
         self.database.purge_outdated_files(known_max_file_id)?;
         Ok(())
     }
@@ -202,6 +202,9 @@ impl Bitcask {
         key_dir_to_write: &KeyDir,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
         let new_kd = KeyDir::new_empty_key_dir();
+        if key_dir_to_write.len() <= 0 {
+            return Ok((vec![], new_kd));
+        }
         let merge_db = Database::open(
             merge_file_dir,
             self.file_id_generator.clone(),

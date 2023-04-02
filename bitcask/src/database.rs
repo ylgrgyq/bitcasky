@@ -483,7 +483,10 @@ impl Database {
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
         let writing_file_ref = self.writing_file.lock().unwrap();
-        self.do_flush_writing_file(&writing_file_ref)?;
+        // flush file only when we actually wrote something
+        if writing_file_ref.borrow().file_size > 0 {
+            self.do_flush_writing_file(&writing_file_ref)?;
+        }
         Ok(())
     }
 
@@ -527,7 +530,10 @@ impl Database {
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
-    pub fn load_files(&self, file_ids: Vec<u32>) -> BitcaskResult<()> {
+    pub fn load_files(&self, file_ids: &Vec<u32>) -> BitcaskResult<()> {
+        if file_ids.is_empty() {
+            return Ok(());
+        }
         self.flush_writing_file()?;
 
         for file_id in file_ids {
@@ -535,10 +541,14 @@ impl Database {
                 continue;
             }
             let data_file =
-                file_manager::open_file(&self.database_dir, file_id, FileType::DataFile)?;
+                file_manager::open_file(&self.database_dir, *file_id, FileType::DataFile)?;
             self.stable_files.insert(
-                file_id,
-                Mutex::new(StableFile::new(&self.database_dir, file_id, data_file.file)),
+                *file_id,
+                Mutex::new(StableFile::new(
+                    &self.database_dir,
+                    *file_id,
+                    data_file.file,
+                )),
             );
         }
 
@@ -711,7 +721,7 @@ impl Iterator for DatabaseIter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcask_tests::common::TestingKV;
+    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
 
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
@@ -763,9 +773,9 @@ mod tests {
 
     #[test]
     fn test_read_write_writing_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
+        let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1奥森"),
             TestingKV::new("k2", "value2"),
@@ -779,10 +789,10 @@ mod tests {
 
     #[test]
     fn test_read_write_with_stable_files() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -805,12 +815,11 @@ mod tests {
 
     #[test]
     fn test_recovery() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let file_id_generator = Arc::new(FileIdGenerator::new());
         {
-            let db =
-                Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -818,8 +827,7 @@ mod tests {
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
         {
-            let db =
-                Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k3", "hello world"),
                 TestingKV::new("k1", "value4"),
@@ -827,7 +835,7 @@ mod tests {
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
 
-        let db = Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(3, file_id_generator.get_file_id());
         assert_eq!(2, db.stable_files.len());
         assert_rows_value(&db, &rows);
@@ -837,9 +845,9 @@ mod tests {
     #[test]
     fn test_wrap_file() {
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let db = Database::open(
-            &dir.path(),
+            &dir,
             file_id_generator,
             DataBaseOptions { max_file_size: 100 },
         )
@@ -859,18 +867,17 @@ mod tests {
 
     #[test]
     fn test_load_files() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let old_db =
-            Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let old_db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
         ];
         rows.append(&mut write_kvs_to_db(&old_db, kvs));
         {
-            let merge_path = file_manager::create_merge_file_dir(dir.path()).unwrap();
+            let merge_path = file_manager::create_merge_file_dir(&dir).unwrap();
             let db =
                 Database::open(&merge_path, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
@@ -878,8 +885,8 @@ mod tests {
                 TestingKV::new("k1", "value4"),
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
-            file_manager::commit_merge_files(&dir.path()).unwrap();
-            old_db.load_files(db.get_file_ids()).unwrap();
+            file_manager::commit_merge_files(&dir, &db.get_file_ids()).unwrap();
+            old_db.load_files(&db.get_file_ids()).unwrap();
         }
 
         assert_eq!(3, file_id_generator.get_file_id());
@@ -890,9 +897,9 @@ mod tests {
 
     #[test]
     fn test_purge_outdated_files() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir.path(), file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -922,11 +929,11 @@ mod tests {
 
     #[test]
     fn test_hint_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = get_temporary_directory_path();
         let mut offset_values: Vec<(RowPosition, &str)> = vec![];
         {
             let file_id_generator = Arc::new(FileIdGenerator::new());
-            let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
+            let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
             let kvs = [("k1", "value1"), ("k2", "value2")];
             offset_values.append(
                 &mut kvs
@@ -936,7 +943,7 @@ mod tests {
             );
         }
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir.path(), file_id_generator, DEFAULT_OPTIONS).unwrap();
+        let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
         db.write_hint_file(1);
     }
 }
