@@ -38,6 +38,7 @@ pub struct IdentifiedFile {
 }
 
 pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
+    fs::create_dir_all(base_dir)?;
     let p = FileType::LockFile.get_path_for_file_id(base_dir, 0);
     let file = File::options()
         .write(true)
@@ -125,6 +126,13 @@ pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult
     Ok(())
 }
 
+pub fn change_file_id(base_dir: &Path, from_file_id: u32, to_file_id: u32) -> BitcaskResult<()> {
+    let from_p = FileType::DataFile.get_path_for_file_id(&base_dir, from_file_id);
+    let to_p = FileType::DataFile.get_path_for_file_id(&base_dir, to_file_id);
+    fs::rename(from_p, to_p)?;
+    Ok(())
+}
+
 pub fn open_file(
     base_dir: &Path,
     file_id: u32,
@@ -174,6 +182,7 @@ fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
 fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
     WalkDir::new(base_dir)
         .follow_links(false)
+        .max_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| {

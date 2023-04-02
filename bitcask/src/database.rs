@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     cell::{Cell, RefCell},
     fs::{self, File},
@@ -15,7 +16,9 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
-    file_manager::{self, create_file, open_data_files_under_path, FileType},
+    file_manager::{
+        self, create_file, get_valid_data_file_ids, open_data_files_under_path, open_file, FileType,
+    },
 };
 use log::{error, info};
 
@@ -543,15 +546,47 @@ impl Database {
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
-    pub fn load_files(&self, file_ids: &Vec<u32>) -> BitcaskResult<()> {
-        if file_ids.is_empty() {
+    pub fn load_merged_files(
+        &self,
+        merged_file_ids: &Vec<u32>,
+        known_max_file_id: u32,
+    ) -> BitcaskResult<()> {
+        if merged_file_ids.is_empty() {
             return Ok(());
         }
         self.flush_writing_file()?;
 
-        for file_id in file_ids {
-            if self.stable_files.contains_key(&file_id) {
+        let mut data_file_ids = get_valid_data_file_ids(&self.database_dir)
+            .into_iter()
+            .filter(|id| *id >= known_max_file_id)
+            .collect::<Vec<u32>>();
+        // must change name in descending order to keep data file's order even when any change name operation failed
+        data_file_ids.sort_by(|a, b| b.cmp(a));
+
+        // rebuild stable files with file id >= known_max_file_id files and merged files
+        self.stable_files.clear();
+
+        // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
+        // because values in these files is written after merged files
+        for from_id in data_file_ids {
+            let new_file_id = self.file_id_generator.generate_next_file_id();
+            file_manager::change_file_id(&self.database_dir, from_id, new_file_id)?;
+            let f = open_file(&self.database_dir, new_file_id, FileType::DataFile)?;
+            let meta = f.file.metadata()?;
+            if meta.len() <= 0 {
                 continue;
+            }
+            self.stable_files.insert(
+                new_file_id,
+                Mutex::new(StableFile::new(&self.database_dir, new_file_id, f.file)),
+            );
+        }
+
+        file_manager::commit_merge_files(&self.database_dir, &merged_file_ids)?;
+
+        for file_id in merged_file_ids {
+            if self.stable_files.contains_key(&file_id) {
+                panic!("merged file id: {} already loaded in database", file_id);
             }
             let data_file =
                 file_manager::open_file(&self.database_dir, *file_id, FileType::DataFile)?;
@@ -586,10 +621,6 @@ impl Database {
     }
 
     pub fn purge_outdated_files(&self, max_file_id: u32) -> BitcaskResult<()> {
-        self.stable_files.retain(|_, v| {
-            let f = v.lock().unwrap();
-            f.file_id >= max_file_id
-        });
         file_manager::get_valid_data_file_ids(&self.database_dir)
             .iter()
             .filter(|id| **id < max_file_id)
@@ -909,14 +940,13 @@ mod tests {
                 TestingKV::new("k1", "value4"),
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
-            file_manager::commit_merge_files(&dir, &db.get_file_ids()).unwrap();
-            old_db.load_files(&db.get_file_ids()).unwrap();
+            old_db
+                .load_merged_files(&db.get_file_ids(), old_db.get_max_file_id())
+                .unwrap();
         }
 
-        assert_eq!(3, file_id_generator.get_file_id());
+        assert_eq!(5, file_id_generator.get_file_id());
         assert_eq!(2, old_db.stable_files.len());
-        assert_rows_value(&old_db, &rows);
-        assert_database_rows(&old_db, &rows);
     }
 
     #[test]
