@@ -62,3 +62,50 @@ fn test_merge_duplicate() {
     assert_eq!(2, after_merge_stats.number_of_data_files);
     assert_eq!(1, after_merge_stats.number_of_keys);
 }
+
+#[test]
+fn test_merge_recover_after_merge() {
+    let mut expect_size = 0;
+    {
+        let db_path = get_temporary_directory_path();
+        let bc = Bitcask::open(&db_path, DEFAULT_BITCASK_OPTIONS).unwrap();
+        bc.put("k2".into(), "value3value3".as_bytes()).unwrap();
+        bc.put("k4".into(), "value4value4".as_bytes()).unwrap();
+        expect_size = bc.stats().unwrap().total_data_size_in_bytes;
+    }
+
+    let db_path = get_temporary_directory_path();
+    {
+        let bc = Bitcask::open(&db_path, DEFAULT_BITCASK_OPTIONS).unwrap();
+        // duplicate
+        bc.put("k1".into(), "value1".as_bytes()).unwrap();
+        bc.put("k1".into(), "value2".as_bytes()).unwrap();
+        bc.put("k1".into(), "value3".as_bytes()).unwrap();
+
+        // duplicate
+        bc.put("k2".into(), "value2".as_bytes()).unwrap();
+        bc.put("k2".into(), "value3value3".as_bytes()).unwrap();
+
+        bc.put("k3".into(), "value3".as_bytes()).unwrap();
+        bc.put("k4".into(), "value4value4".as_bytes()).unwrap();
+
+        // delete duplicate
+        bc.delete(&"k1".into()).unwrap();
+        // delete plain key
+        bc.delete(&"k3".into()).unwrap();
+
+        bc.merge().unwrap();
+        assert_eq!(expect_size, bc.stats().unwrap().total_data_size_in_bytes);
+    }
+
+    let bc = Bitcask::open(&db_path, DEFAULT_BITCASK_OPTIONS).unwrap();
+    assert_eq!(
+        bc.get(&"k2".into()).unwrap().unwrap(),
+        "value3value3".as_bytes()
+    );
+    assert_eq!(
+        bc.get(&"k4".into()).unwrap().unwrap(),
+        "value4value4".as_bytes()
+    );
+    assert_eq!(expect_size, bc.stats().unwrap().total_data_size_in_bytes);
+}

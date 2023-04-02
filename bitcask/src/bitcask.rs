@@ -166,13 +166,17 @@ impl Bitcask {
 
         file_manager::commit_merge_files(self.database.get_database_dir(), &file_ids)?;
 
+        info!(target: "Merge", "database merged to files with ids: {:?}", &file_ids);
+
         let kd = self.keydir.write().unwrap();
         for (k, v) in new_kd.into_iter() {
             kd.checked_put(k, v)
         }
 
-        info!("Asdfsf {:?} {}", &file_ids, known_max_file_id);
         self.database.load_files(&file_ids)?;
+
+        info!(target: "Merge", "purge files with id smaller than: {}", known_max_file_id);
+
         self.database.purge_outdated_files(known_max_file_id)?;
         Ok(())
     }

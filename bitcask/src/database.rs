@@ -459,7 +459,7 @@ impl Database {
             .map(|(k, v)| (k, Mutex::new(StableFile::new(&database_dir, k, v))))
             .collect::<DashMap<u32, Mutex<StableFile>>>();
 
-        info!(target: "database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
+        info!(target: "Database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
         Ok(Database {
             writing_file,
             file_id_generator,
@@ -557,7 +557,7 @@ impl Database {
                 file_manager::open_file(&self.database_dir, *file_id, FileType::DataFile)?;
             let meta = data_file.file.metadata()?;
             if meta.len() <= 0 {
-                info!(target: "database", "skip load empty data file with id: {}", &file_id);
+                info!(target: "Database", "skip load empty data file with id: {}", &file_id);
                 continue;
             }
             self.stable_files.insert(
