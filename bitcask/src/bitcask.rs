@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use log::info;
 
@@ -75,6 +75,7 @@ pub struct Bitcask {
     file_id_generator: Arc<FileIdGenerator>,
     options: BitcaskOptions,
     database: Database,
+    merge_lock: Mutex<()>,
 }
 
 impl Bitcask {
@@ -95,6 +96,7 @@ impl Bitcask {
             file_id_generator,
             database,
             options,
+            merge_lock: Mutex::new(()),
         })
     }
 
@@ -160,6 +162,13 @@ impl Bitcask {
     }
 
     pub fn merge(&self) -> BitcaskResult<()> {
+        let lock_ret = self.merge_lock.try_lock();
+
+        if lock_ret.is_err() {
+            return Err(BitcaskError::MergeInProgress());
+        }
+
+        let _lock = self.merge_lock.lock().unwrap();
         let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (kd, known_max_file_id) = self.flush_writing_file()?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;

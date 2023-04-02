@@ -16,6 +16,8 @@ pub enum BitcaskError {
     TargetFileIdNotFound(u32),
     #[error("Merge file directory: {0} is not empty. Maybe last merge is failed. Please remove files in this directory manually")]
     MergeFileDirectoryNotEmpty(String),
+    #[error("Another merge is in progress")]
+    MergeInProgress(),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;
