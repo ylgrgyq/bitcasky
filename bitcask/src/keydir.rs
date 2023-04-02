@@ -65,6 +65,10 @@ impl KeyDir {
         self.index.contains_key(key)
     }
 
+    pub fn len(&self) -> usize {
+        self.index.len()
+    }
+
     pub fn iter(&self) -> KeyDirIterator {
         KeyDirIterator {
             iter: self.index.iter(),

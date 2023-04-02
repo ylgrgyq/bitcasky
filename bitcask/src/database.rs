@@ -393,6 +393,12 @@ impl Iterator for HintFileIterator {
     }
 }
 
+pub struct DatabaseStats {
+    pub number_of_data_files: usize,
+    pub number_of_hint_files: usize,
+    pub total_data_size_in_bytes: u64,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub max_file_size: usize,
@@ -588,6 +594,24 @@ impl Database {
             })
         }));
         hint_file.write_file(boxed_iter)
+    }
+
+    pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
+        let total_data_size_in_bytes: u64 = self
+            .stable_files
+            .iter()
+            .map(|f| {
+                let file = f.value().lock().unwrap();
+                file.file.metadata().and_then(|m| Ok(m.len()))
+            })
+            .collect::<Result<Vec<u64>, std::io::Error>>()?
+            .iter()
+            .sum();
+        Ok(DatabaseStats {
+            number_of_data_files: self.stable_files.len() + 1,
+            number_of_hint_files: 0,
+            total_data_size_in_bytes,
+        })
     }
 
     pub fn close(&self) -> BitcaskResult<()> {
@@ -884,10 +908,14 @@ mod tests {
         rows.append(&mut write_kvs_to_db(&db, kvs));
         let file_id_to_purge = file_id_generator.get_file_id();
         db.flush_writing_file().unwrap();
+        let old_stats = db.stats().unwrap();
         db.purge_outdated_files(file_id_to_purge).unwrap();
 
+        let new_stats = db.stats().unwrap();
         assert_eq!(3, file_id_generator.get_file_id());
         assert_eq!(1, db.stable_files.len());
+        assert_eq!(2, new_stats.number_of_data_files);
+        assert!(new_stats.total_data_size_in_bytes < old_stats.total_data_size_in_bytes);
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }

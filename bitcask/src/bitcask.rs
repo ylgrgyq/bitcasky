@@ -63,6 +63,13 @@ pub struct FoldResult<T> {
     status: FoldStatus,
 }
 
+pub struct BitcaskStats {
+    pub number_of_data_files: usize,
+    pub number_of_hint_files: usize,
+    pub total_data_size_in_bytes: u64,
+    pub number_of_keys: usize,
+}
+
 pub struct Bitcask {
     keydir: RwLock<KeyDir>,
     file_id_generator: Arc<FileIdGenerator>,
@@ -167,6 +174,18 @@ impl Bitcask {
         self.database.load_files(file_ids)?;
         self.database.purge_outdated_files(known_max_file_id)?;
         Ok(())
+    }
+
+    pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
+        let kd = self.keydir.read().unwrap();
+        let key_size = kd.len();
+        let db_stats = self.database.stats()?;
+        Ok(BitcaskStats {
+            number_of_data_files: db_stats.number_of_data_files,
+            number_of_hint_files: db_stats.number_of_hint_files,
+            total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
+            number_of_keys: key_size,
+        })
     }
 
     fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
