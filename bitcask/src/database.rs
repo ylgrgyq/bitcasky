@@ -259,11 +259,7 @@ impl StableFile {
     }
 
     fn iter(&self) -> BitcaskResult<StableFileIter> {
-        let file = file_manager::open_file(
-            &self.database_dir,
-            self.file_id,
-            FileType::DataFile(self.file_id),
-        )?;
+        let file = file_manager::open_file(&self.database_dir, FileType::DataFile(self.file_id))?;
         Ok(StableFileIter {
             stable_file: StableFile::new(&self.database_dir, self.file_id, file.file),
         })
@@ -346,11 +342,7 @@ impl HintFile {
     }
 
     fn iter(&self) -> BitcaskResult<HintFileIterator> {
-        let file = file_manager::open_file(
-            &self.database_dir,
-            self.file_id,
-            FileType::HintFile(self.file_id),
-        )?;
+        let file = file_manager::open_file(&self.database_dir, FileType::HintFile(self.file_id))?;
         Ok(HintFileIterator {
             file: HintFile::new(&self.database_dir, self.file_id, file.file),
         })
@@ -530,8 +522,13 @@ impl Database {
 
         let files: BitcaskResult<Vec<StableFile>> = file_ids
             .iter()
-            .map(|id| file_manager::open_file(&self.database_dir, *id, FileType::DataFile(*id)))
-            .map(|f| f.and_then(|f| Ok(StableFile::new(&self.database_dir, f.file_id, f.file))))
+            .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile(*id)))
+            .map(|f| {
+                f.and_then(|f| match f.file_type {
+                    FileType::DataFile(id) => Ok(StableFile::new(&self.database_dir, id, f.file)),
+                    _ => unreachable!(),
+                })
+            })
             .collect();
         let mut opened_stable_files = files?;
         opened_stable_files.sort_by_key(|e| e.file_id);
@@ -579,11 +576,7 @@ impl Database {
         for from_id in data_file_ids {
             let new_file_id = self.file_id_generator.generate_next_file_id();
             file_manager::change_file_id(&self.database_dir, from_id, new_file_id)?;
-            let f = open_file(
-                &self.database_dir,
-                new_file_id,
-                FileType::DataFile(new_file_id),
-            )?;
+            let f = open_file(&self.database_dir, FileType::DataFile(new_file_id))?;
             let meta = f.file.metadata()?;
             if meta.len() <= 0 {
                 continue;
@@ -600,11 +593,8 @@ impl Database {
             if self.stable_files.contains_key(&file_id) {
                 panic!("merged file id: {} already loaded in database", file_id);
             }
-            let data_file = file_manager::open_file(
-                &self.database_dir,
-                *file_id,
-                FileType::DataFile(*file_id),
-            )?;
+            let data_file =
+                file_manager::open_file(&self.database_dir, FileType::DataFile(*file_id))?;
             let meta = data_file.file.metadata()?;
             if meta.len() <= 0 {
                 info!(target: "Database", "skip load empty data file with id: {}", &file_id);
@@ -652,8 +642,7 @@ impl Database {
             file_manager::create_file(&self.database_dir, FileType::HintFile(file_id))?;
         let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
 
-        let data_file =
-            file_manager::open_file(&self.database_dir, file_id, FileType::DataFile(file_id))?;
+        let data_file = file_manager::open_file(&self.database_dir, FileType::DataFile(file_id))?;
         let stable_file_iter =
             StableFile::new(&self.database_dir, file_id, data_file.file).iter()?;
 

@@ -25,7 +25,7 @@ pub enum FileType {
 }
 
 impl FileType {
-    fn get_path_for_file_id(&self, base_dir: &Path) -> PathBuf {
+    fn get_path(&self, base_dir: &Path) -> PathBuf {
         base_dir.join(match self {
             Self::LockFile => format!("bitcask{}", LOCK_FILE_POSTFIX),
             Self::MergeMeta => format!("merge{}", MERGE_META_FILE_POSTFIX),
@@ -36,13 +36,13 @@ impl FileType {
 }
 
 pub struct IdentifiedFile {
-    pub file_id: u32,
+    pub file_type: FileType,
     pub file: File,
 }
 
 pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
     fs::create_dir_all(base_dir)?;
-    let p = FileType::LockFile.get_path_for_file_id(base_dir);
+    let p = FileType::LockFile.get_path(base_dir);
     let file = File::options()
         .write(true)
         .create(true)
@@ -90,7 +90,7 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
 }
 
 pub fn create_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<File> {
-    let path = file_type.get_path_for_file_id(base_dir);
+    let path = file_type.get_path(base_dir);
     Ok(File::options()
         .write(true)
         .create(true)
@@ -122,37 +122,39 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
 pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
     let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
     for file_id in file_ids {
-        let from_p = FileType::DataFile(*file_id).get_path_for_file_id(&merge_dir_path);
-        let to_p = FileType::DataFile(*file_id).get_path_for_file_id(&base_dir);
+        let from_p = FileType::DataFile(*file_id).get_path(&merge_dir_path);
+        let to_p = FileType::DataFile(*file_id).get_path(&base_dir);
         fs::rename(from_p, to_p)?;
     }
     Ok(())
 }
 
 pub fn change_file_id(base_dir: &Path, from_file_id: u32, to_file_id: u32) -> BitcaskResult<()> {
-    let from_p = FileType::DataFile(from_file_id).get_path_for_file_id(&base_dir);
-    let to_p = FileType::DataFile(to_file_id).get_path_for_file_id(&base_dir);
+    let from_p = FileType::DataFile(from_file_id).get_path(&base_dir);
+    let to_p = FileType::DataFile(to_file_id).get_path(&base_dir);
     fs::rename(from_p, to_p)?;
     Ok(())
 }
 
-pub fn open_file(
-    base_dir: &Path,
-    file_id: u32,
-    file_type: FileType,
-) -> BitcaskResult<IdentifiedFile> {
-    let path = file_type.get_path_for_file_id(base_dir);
+pub fn open_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<IdentifiedFile> {
+    let path = file_type.get_path(base_dir);
     let file = File::options().read(true).open(path)?;
-    Ok(IdentifiedFile { file_id, file })
+    Ok(IdentifiedFile { file_type, file })
 }
 
 pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
     let file_entries = get_valid_data_file_paths(base_dir);
     let db_files = file_entries
         .iter()
-        .map(|f| open_file_by_path(f))
+        .map(|f| open_data_file_by_path(f))
         .collect::<BitcaskResult<Vec<IdentifiedFile>>>()?;
-    Ok(db_files.into_iter().map(|f| (f.file_id, f.file)).collect())
+    Ok(db_files
+        .into_iter()
+        .map(|f| match f.file_type {
+            FileType::DataFile(id) => (id, f.file),
+            _ => unreachable!(),
+        })
+        .collect())
 }
 
 pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
@@ -163,15 +165,18 @@ pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
 }
 
 pub fn delete_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<()> {
-    let path = file_type.get_path_for_file_id(base_dir);
+    let path = file_type.get_path(base_dir);
     fs::remove_file(path)?;
     Ok(())
 }
 
-fn open_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
+fn open_data_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
     let file_id = parse_file_id_from_data_file(file_path)?;
     let file = File::options().read(true).open(file_path)?;
-    Ok(IdentifiedFile { file_id, file })
+    Ok(IdentifiedFile {
+        file_type: FileType::DataFile(file_id),
+        file,
+    })
 }
 
 fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
