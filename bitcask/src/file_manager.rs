@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
+use bytes::{Buf, Bytes};
 use fs2::FileExt;
-use log::{error, info, warn};
+use log::{error, warn};
 use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
@@ -101,8 +103,12 @@ pub fn create_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<File> 
         .open(path)?)
 }
 
+pub fn merge_file_dir(base_dir: &Path) -> PathBuf {
+    base_dir.join(MERGE_FILES_DIRECTORY)
+}
+
 pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
-    let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
+    let merge_dir_path = merge_file_dir(base_dir);
 
     if !merge_dir_path.exists() {
         fs::create_dir(merge_dir_path.clone())?;
@@ -126,12 +132,32 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
 }
 
 pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
-    let merge_dir_path = base_dir.join(MERGE_FILES_DIRECTORY);
+    let merge_dir_path = merge_file_dir(base_dir);
     for file_id in file_ids {
         let from_p = FileType::DataFile(*file_id).get_path(&merge_dir_path);
         let to_p = FileType::DataFile(*file_id).get_path(&base_dir);
         fs::rename(from_p, to_p)?;
     }
+    Ok(())
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub struct MergeMeta {
+    pub known_max_file_id: u32,
+}
+
+pub fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
+    let mut merge_meta_file = open_file(&merge_file_dir, FileType::MergeMeta)?;
+    let mut buf = vec![0; 4];
+    merge_meta_file.file.read_exact(&mut buf)?;
+    let mut bs = Bytes::from(buf);
+    let known_max_file_id = bs.get_u32();
+    Ok(MergeMeta { known_max_file_id })
+}
+
+pub fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
+    let mut merge_meta_file = create_file(&merge_file_dir, FileType::MergeMeta)?;
+    merge_meta_file.write(&merge_meta.known_max_file_id.to_be_bytes())?;
     Ok(())
 }
 
@@ -277,5 +303,17 @@ mod tests {
         assert!(is_empty_dir(&merge_file_path).unwrap());
 
         assert_eq!(vec![0, 1, 2,], get_data_file_ids_in_dir(&dir_path));
+    }
+
+    #[test]
+    fn test_read_write_merge_meta() {
+        let dir_path = get_temporary_directory_path();
+        let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
+        let expect_meta = MergeMeta {
+            known_max_file_id: 10101,
+        };
+        write_merge_meta(&merge_file_path, expect_meta).unwrap();
+        let actual_meta = read_merge_meta(&merge_file_path).unwrap();
+        assert_eq!(expect_meta, actual_meta);
     }
 }
