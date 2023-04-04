@@ -8,7 +8,7 @@ use log::info;
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
-use crate::file_manager;
+use crate::file_manager::{self, MergeMeta};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
@@ -63,10 +63,6 @@ enum FoldStatus {
 pub struct FoldResult<T> {
     accumulator: T,
     status: FoldStatus,
-}
-
-pub struct MergeMeta {
-    known_max_file_id: u32,
 }
 
 #[derive(Debug)]
@@ -235,9 +231,7 @@ impl Bitcask {
         key_dir_to_write: &KeyDir,
         known_max_file_id: u32,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
-        let mut merge_meta_file =
-            file_manager::create_file(merge_file_dir, file_manager::FileType::MergeMeta)?;
-        merge_meta_file.write(&known_max_file_id.to_be_bytes())?;
+        file_manager::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
 
         let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(

@@ -141,6 +141,11 @@ pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult
     Ok(())
 }
 
+pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
+    fs::remove_dir_all(base_dir)?;
+    Ok(())
+}
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct MergeMeta {
     pub known_max_file_id: u32,
@@ -196,7 +201,7 @@ pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
         .collect()
 }
 
-pub fn delete_file(base_dir: &Path, file_id: u32, file_type: FileType) -> BitcaskResult<()> {
+pub fn delete_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<()> {
     let path = file_type.get_path(base_dir);
     fs::remove_file(path)?;
     Ok(())
@@ -303,6 +308,16 @@ mod tests {
         assert!(is_empty_dir(&merge_file_path).unwrap());
 
         assert_eq!(vec![0, 1, 2,], get_data_file_ids_in_dir(&dir_path));
+    }
+
+    #[test]
+    fn test_clear_dir() {
+        let dir = get_temporary_directory_path();
+        let merge_file_path = create_merge_file_dir(&dir).unwrap();
+        create_file(&merge_file_path, FileType::DataFile(0)).unwrap();
+
+        clear_dir(&merge_file_path).unwrap();
+        assert!(!merge_file_path.exists());
     }
 
     #[test]
