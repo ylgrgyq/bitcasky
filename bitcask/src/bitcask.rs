@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -201,7 +200,7 @@ impl Bitcask {
 
         info!(target: "Merge", "purge files with id smaller than: {}", known_max_file_id);
 
-        self.database.purge_outdated_files(known_max_file_id)?;
+        file_manager::purge_outdated_files(&self.database.database_dir, known_max_file_id)?;
         Ok(())
     }
 

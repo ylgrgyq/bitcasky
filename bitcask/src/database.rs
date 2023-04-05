@@ -422,7 +422,7 @@ pub struct DataBaseOptions {
 
 #[derive(Debug)]
 pub struct Database {
-    database_dir: PathBuf,
+    pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
     writing_file: Mutex<RefCell<WritingFile>>,
     stable_files: DashMap<u32, Mutex<StableFile>>,
@@ -440,6 +440,68 @@ fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
     Ok(())
 }
 
+fn shift_data_files(
+    database_dir: &Path,
+    known_max_file_id: u32,
+    file_id_generator: &Arc<FileIdGenerator>,
+) -> BitcaskResult<Vec<u32>> {
+    let mut data_file_ids = get_valid_data_file_ids(database_dir)
+        .into_iter()
+        .filter(|id| *id >= known_max_file_id)
+        .collect::<Vec<u32>>();
+    // must change name in descending order to keep data file's order even when any change name operation failed
+    data_file_ids.sort_by(|a, b| b.cmp(a));
+
+    // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
+    // because values in these files is written after merged files
+    let mut new_file_ids = vec![];
+    for from_id in data_file_ids {
+        let new_file_id = file_id_generator.generate_next_file_id();
+        file_manager::change_file_id(database_dir, from_id, new_file_id)?;
+        new_file_ids.push(new_file_id);
+    }
+    Ok(new_file_ids)
+}
+
+fn recover_merge(
+    database_dir: &Path,
+    file_id_generator: &Arc<FileIdGenerator>,
+) -> BitcaskResult<()> {
+    let merge_file_dir = file_manager::merge_file_dir(database_dir);
+
+    if !merge_file_dir.exists() {
+        return Ok(());
+    }
+
+    let mut merge_data_file_ids = file_manager::get_valid_data_file_ids(&merge_file_dir);
+    if merge_data_file_ids.is_empty() {
+        return Ok(());
+    }
+
+    merge_data_file_ids.sort();
+    let merge_meta = file_manager::read_merge_meta(&merge_file_dir)?;
+    if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
+        return Err(BitcaskError::RecoverMergeFailed(format!(
+            "Invalid file id {} in MergeMeta file. Min file ids in Merge directory is between {}",
+            merge_meta.known_max_file_id,
+            *merge_data_file_ids.first().unwrap(),
+        )));
+    }
+
+    file_id_generator.update_file_id(*merge_data_file_ids.last().unwrap());
+
+    shift_data_files(
+        database_dir,
+        merge_meta.known_max_file_id,
+        file_id_generator,
+    )?;
+    file_manager::commit_merge_files(database_dir, &merge_data_file_ids)?;
+
+    file_manager::purge_outdated_files(database_dir, merge_meta.known_max_file_id)?;
+
+    Ok(())
+}
+
 impl Database {
     pub fn open(
         directory: &Path,
@@ -448,6 +510,12 @@ impl Database {
     ) -> BitcaskResult<Database> {
         let database_dir: PathBuf = directory.into();
         validate_database_directory(&database_dir)?;
+
+        let recover_ret = recover_merge(&database_dir, &file_id_generator);
+        if recover_ret.is_err() {
+            // clear Merge directory when recover merge failed
+            file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
+        }
 
         let opened_stable_files = open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
@@ -562,7 +630,11 @@ impl Database {
         }
         self.flush_writing_file()?;
 
-        let data_file_ids = self.shift_data_files(known_max_file_id)?;
+        let data_file_ids = shift_data_files(
+            &self.database_dir,
+            known_max_file_id,
+            &self.file_id_generator,
+        )?;
 
         // rebuild stable files with file id >= known_max_file_id files and merged files
         self.stable_files.clear();
@@ -593,18 +665,6 @@ impl Database {
             .collect();
         ids.push(writing_file_id);
         ids
-    }
-
-    pub fn purge_outdated_files(&self, max_file_id: u32) -> BitcaskResult<()> {
-        file_manager::get_valid_data_file_ids(&self.database_dir)
-            .iter()
-            .filter(|id| **id < max_file_id)
-            .for_each(|id| {
-                file_manager::delete_file(&self.database_dir, FileType::DataFile(*id))
-                    .unwrap_or_default()
-            });
-
-        Ok(())
     }
 
     pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
@@ -660,25 +720,6 @@ impl Database {
         Ok(())
     }
 
-    fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
-        let mut data_file_ids = get_valid_data_file_ids(&self.database_dir)
-            .into_iter()
-            .filter(|id| *id >= known_max_file_id)
-            .collect::<Vec<u32>>();
-        // must change name in descending order to keep data file's order even when any change name operation failed
-        data_file_ids.sort_by(|a, b| b.cmp(a));
-
-        // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
-        // because values in these files is written after merged files
-        let mut new_file_ids = vec![];
-        for from_id in data_file_ids {
-            let new_file_id = self.file_id_generator.generate_next_file_id();
-            file_manager::change_file_id(&self.database_dir, from_id, new_file_id)?;
-            new_file_ids.push(new_file_id);
-        }
-        Ok(new_file_ids)
-    }
-
     fn open_stable_file(&self, file_id: u32) -> BitcaskResult<()> {
         let data_file = open_file(&self.database_dir, FileType::DataFile(file_id))?;
         let meta = data_file.file.metadata()?;
@@ -690,34 +731,6 @@ impl Database {
             file_id,
             Mutex::new(StableFile::new(&self.database_dir, file_id, data_file.file)),
         );
-        Ok(())
-    }
-
-    fn recover_merge(&self) -> BitcaskResult<()> {
-        let merge_file_dir = file_manager::merge_file_dir(&self.database_dir);
-
-        if !merge_file_dir.exists() {
-            return Ok(());
-        }
-
-        let mut merge_data_file_ids = file_manager::get_valid_data_file_ids(&merge_file_dir);
-        if merge_data_file_ids.is_empty() {
-            return Ok(());
-        }
-
-        merge_data_file_ids.sort();
-        let merge_meta = file_manager::read_merge_meta(&merge_file_dir)?;
-        if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
-            return Err(BitcaskError::RecoverMergeFailed(format!(
-                "Invalid file id {} in MergeMeta file. Min file ids in Merge directory is between {}",
-                merge_meta.known_max_file_id,
-                *merge_data_file_ids.first().unwrap(),
-            )));
-        }
-
-        self.shift_data_files(merge_meta.known_max_file_id)?;
-        file_manager::commit_merge_files(&self.database_dir, &merge_data_file_ids)?;
-
         Ok(())
     }
 

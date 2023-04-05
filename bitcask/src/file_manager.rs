@@ -207,6 +207,15 @@ pub fn delete_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<()> {
     Ok(())
 }
 
+pub fn purge_outdated_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
+    get_valid_data_file_ids(base_dir)
+        .iter()
+        .filter(|id| **id < max_file_id)
+        .for_each(|id| delete_file(base_dir, FileType::DataFile(*id)).unwrap_or_default());
+
+    Ok(())
+}
+
 fn open_data_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
     let file_id = parse_file_id_from_data_file(file_path)?;
     let file = File::options().read(true).open(file_path)?;
