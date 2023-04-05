@@ -457,7 +457,7 @@ fn shift_data_files(
     let mut new_file_ids = vec![];
     for from_id in data_file_ids {
         let new_file_id = file_id_generator.generate_next_file_id();
-        file_manager::change_file_id(database_dir, from_id, new_file_id)?;
+        file_manager::change_data_file_id(database_dir, from_id, new_file_id)?;
         new_file_ids.push(new_file_id);
     }
     Ok(new_file_ids)
@@ -497,7 +497,7 @@ fn recover_merge(
     )?;
     file_manager::commit_merge_files(database_dir, &merge_data_file_ids)?;
 
-    file_manager::purge_outdated_files(database_dir, merge_meta.known_max_file_id)?;
+    file_manager::purge_outdated_data_files(database_dir, merge_meta.known_max_file_id)?;
 
     Ok(())
 }

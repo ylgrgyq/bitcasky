@@ -103,6 +103,23 @@ pub fn create_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<File> 
         .open(path)?)
 }
 
+pub fn open_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<IdentifiedFile> {
+    let path = file_type.get_path(base_dir);
+    let file = File::options().read(true).open(path)?;
+    Ok(IdentifiedFile { file_type, file })
+}
+
+pub fn delete_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<()> {
+    let path = file_type.get_path(base_dir);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
+    fs::remove_dir_all(base_dir)?;
+    Ok(())
+}
+
 pub fn merge_file_dir(base_dir: &Path) -> PathBuf {
     base_dir.join(MERGE_FILES_DIRECTORY)
 }
@@ -141,11 +158,6 @@ pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult
     Ok(())
 }
 
-pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
-    fs::remove_dir_all(base_dir)?;
-    Ok(())
-}
-
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct MergeMeta {
     pub known_max_file_id: u32,
@@ -166,17 +178,15 @@ pub fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> Bitcask
     Ok(())
 }
 
-pub fn change_file_id(base_dir: &Path, from_file_id: u32, to_file_id: u32) -> BitcaskResult<()> {
+pub fn change_data_file_id(
+    base_dir: &Path,
+    from_file_id: u32,
+    to_file_id: u32,
+) -> BitcaskResult<()> {
     let from_p = FileType::DataFile(from_file_id).get_path(&base_dir);
     let to_p = FileType::DataFile(to_file_id).get_path(&base_dir);
     fs::rename(from_p, to_p)?;
     Ok(())
-}
-
-pub fn open_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<IdentifiedFile> {
-    let path = file_type.get_path(base_dir);
-    let file = File::options().read(true).open(path)?;
-    Ok(IdentifiedFile { file_type, file })
 }
 
 pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
@@ -201,13 +211,7 @@ pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
         .collect()
 }
 
-pub fn delete_file(base_dir: &Path, file_type: FileType) -> BitcaskResult<()> {
-    let path = file_type.get_path(base_dir);
-    fs::remove_file(path)?;
-    Ok(())
-}
-
-pub fn purge_outdated_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
+pub fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
     get_valid_data_file_ids(base_dir)
         .iter()
         .filter(|id| **id < max_file_id)
@@ -288,6 +292,16 @@ mod tests {
     }
 
     #[test]
+    fn test_clear_dir() {
+        let dir = get_temporary_directory_path();
+        let merge_file_path = create_merge_file_dir(&dir).unwrap();
+        create_file(&merge_file_path, FileType::DataFile(0)).unwrap();
+
+        clear_dir(&merge_file_path).unwrap();
+        assert!(!merge_file_path.exists());
+    }
+
+    #[test]
     fn test_create_merge_file_dir() {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
@@ -317,16 +331,6 @@ mod tests {
         assert!(is_empty_dir(&merge_file_path).unwrap());
 
         assert_eq!(vec![0, 1, 2,], get_data_file_ids_in_dir(&dir_path));
-    }
-
-    #[test]
-    fn test_clear_dir() {
-        let dir = get_temporary_directory_path();
-        let merge_file_path = create_merge_file_dir(&dir).unwrap();
-        create_file(&merge_file_path, FileType::DataFile(0)).unwrap();
-
-        clear_dir(&merge_file_path).unwrap();
-        assert!(!merge_file_path.exists());
     }
 
     #[test]

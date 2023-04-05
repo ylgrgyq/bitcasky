@@ -200,7 +200,7 @@ impl Bitcask {
 
         info!(target: "Merge", "purge files with id smaller than: {}", known_max_file_id);
 
-        file_manager::purge_outdated_files(&self.database.database_dir, known_max_file_id)?;
+        file_manager::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
         Ok(())
     }
 
