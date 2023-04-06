@@ -20,7 +20,7 @@ use crate::{
         self, create_file, get_valid_data_file_ids, open_data_files_under_path, open_file, FileType,
     },
 };
-use log::{error, info};
+use log::{error, info, warn};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -481,11 +481,10 @@ fn recover_merge(
     merge_data_file_ids.sort();
     let merge_meta = file_manager::read_merge_meta(&merge_file_dir)?;
     if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
-        return Err(BitcaskError::RecoverMergeFailed(format!(
-            "Invalid file id {} in MergeMeta file. Min file ids in Merge directory is between {}",
+        return Err(BitcaskError::InvalidMergeDataFile(
             merge_meta.known_max_file_id,
             *merge_data_file_ids.first().unwrap(),
-        )));
+        ));
     }
 
     file_id_generator.update_file_id(*merge_data_file_ids.last().unwrap());
@@ -495,9 +494,18 @@ fn recover_merge(
         merge_meta.known_max_file_id,
         file_id_generator,
     )?;
+
     file_manager::commit_merge_files(database_dir, &merge_data_file_ids)?;
 
     file_manager::purge_outdated_data_files(database_dir, merge_meta.known_max_file_id)?;
+
+    let clear_ret = file_manager::clear_dir(&merge_file_dir);
+    if clear_ret.is_err() {
+        warn!(
+            "clear merge directory failed after merge recovered. {}",
+            clear_ret.unwrap_err()
+        );
+    }
 
     Ok(())
 }
@@ -513,8 +521,18 @@ impl Database {
 
         let recover_ret = recover_merge(&database_dir, &file_id_generator);
         if recover_ret.is_err() {
-            // clear Merge directory when recover merge failed
-            file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
+            match recover_ret.as_ref().unwrap_err() {
+                BitcaskError::InvalidMergeDataFile(_, _) => {
+                    warn!(
+                        "recover merge under path:{} failed. {}",
+                        directory.display(),
+                        recover_ret.unwrap_err()
+                    );
+                    // clear Merge directory when recover merge failed
+                    file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
+                }
+                _ => return Err(recover_ret.unwrap_err()),
+            }
         }
 
         let opened_stable_files = open_data_files_under_path(&database_dir)?;
@@ -824,6 +842,8 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
+    use crate::file_manager::MergeMeta;
+
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
@@ -947,6 +967,106 @@ mod tests {
     }
 
     #[test]
+    fn test_recover_merge_with_only_merge_meta() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        let merge_meta = MergeMeta {
+            known_max_file_id: 101,
+        };
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_eq!(2, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_recover_merge_with_invalid_merge_meta() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        {
+            // write something to data file in merge dir
+            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
+                .unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            write_kvs_to_db(&db, kvs);
+        }
+
+        let merge_meta = MergeMeta {
+            known_max_file_id: file_id_generator.generate_next_file_id(),
+        };
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_eq!(4, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+        assert!(!merge_file_dir.exists());
+    }
+
+    #[test]
+    fn test_recover_merge() {
+        let dir = get_temporary_directory_path();
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            write_kvs_to_db(&db, kvs);
+        }
+        let merge_meta = MergeMeta {
+            known_max_file_id: file_id_generator.generate_next_file_id(),
+        };
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let mut rows: Vec<TestingRow> = vec![];
+        {
+            // write something to data file in merge dir
+            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
+                .unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value3"),
+                TestingKV::new("k2", "value4"),
+                TestingKV::new("k3", "value5"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_eq!(4, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+        assert!(!merge_file_dir.exists());
+    }
+
+    #[test]
     fn test_wrap_file() {
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let dir = get_temporary_directory_path();
@@ -970,7 +1090,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_files() {
+    fn test_load_merged_files() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let file_id_generator = Arc::new(FileIdGenerator::new());

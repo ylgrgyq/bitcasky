@@ -181,8 +181,8 @@ impl Bitcask {
             return Err(BitcaskError::MergeInProgress());
         }
 
-        let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (kd, known_max_file_id) = self.flush_writing_file()?;
+        let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
 
         info!(target: "Merge", "database merged to files with ids: {:?}", &file_ids);
