@@ -521,13 +521,14 @@ impl Database {
 
         let recover_ret = recover_merge(&database_dir, &file_id_generator);
         if recover_ret.is_err() {
+            let merge_dir = file_manager::merge_file_dir(&database_dir);
+            warn!(
+                "recover merge under path: {} failed with error: \"{}\"",
+                merge_dir.display(),
+                recover_ret.as_ref().unwrap_err()
+            );
             match recover_ret.as_ref().unwrap_err() {
                 BitcaskError::InvalidMergeDataFile(_, _) => {
-                    warn!(
-                        "recover merge under path:{} failed. {}",
-                        directory.display(),
-                        recover_ret.unwrap_err()
-                    );
                     // clear Merge directory when recover merge failed
                     file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
                 }
@@ -1064,6 +1065,46 @@ mod tests {
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
         assert!(!merge_file_dir.exists());
+    }
+
+    #[test]
+    fn test_recover_merge_failed_with_unexpeded_error() {
+        let dir = get_temporary_directory_path();
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let mut rows: Vec<TestingRow> = vec![];
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+        let merge_meta = MergeMeta {
+            known_max_file_id: file_id_generator.generate_next_file_id(),
+        };
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        {
+            // write something to data file in merge dir
+            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
+                .unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value3"),
+                TestingKV::new("k2", "value4"),
+            ];
+            write_kvs_to_db(&db, kvs);
+        }
+
+        // change one data file under merge directory to readonly
+        // so this file cannot recover and move to base directory
+        let meta = fs::metadata(&merge_file_dir).unwrap();
+        let mut perms = meta.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&merge_file_dir, perms).unwrap();
+
+        let ret = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS);
+        assert!(ret.is_err());
     }
 
     #[test]
