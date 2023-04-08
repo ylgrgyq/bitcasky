@@ -7,7 +7,7 @@ use log::info;
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
-use crate::file_manager;
+use crate::file_manager::{self, MergeMeta};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
@@ -181,9 +181,9 @@ impl Bitcask {
             return Err(BitcaskError::MergeInProgress());
         }
 
-        let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (kd, known_max_file_id) = self.flush_writing_file()?;
-        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd)?;
+        let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
+        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
 
         info!(target: "Merge", "database merged to files with ids: {:?}", &file_ids);
 
@@ -200,7 +200,7 @@ impl Bitcask {
 
         info!(target: "Merge", "purge files with id smaller than: {}", known_max_file_id);
 
-        self.database.purge_outdated_files(known_max_file_id)?;
+        file_manager::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
         Ok(())
     }
 
@@ -228,7 +228,10 @@ impl Bitcask {
         &self,
         merge_file_dir: &Path,
         key_dir_to_write: &KeyDir,
+        known_max_file_id: u32,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
+        file_manager::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
+
         let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
             merge_file_dir,

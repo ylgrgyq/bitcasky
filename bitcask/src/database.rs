@@ -20,7 +20,7 @@ use crate::{
         self, create_file, get_valid_data_file_ids, open_data_files_under_path, open_file, FileType,
     },
 };
-use log::{error, info};
+use log::{error, info, warn};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -143,7 +143,7 @@ struct WritingFile {
 
 impl WritingFile {
     fn new(database_dir: &Path, file_id: u32) -> BitcaskResult<WritingFile> {
-        let data_file = create_file(&database_dir, file_id, FileType::DataFile)?;
+        let data_file = create_file(&database_dir, FileType::DataFile(file_id))?;
         Ok(WritingFile {
             file_id,
             data_file,
@@ -259,7 +259,7 @@ impl StableFile {
     }
 
     fn iter(&self) -> BitcaskResult<StableFileIter> {
-        let file = file_manager::open_file(&self.database_dir, self.file_id, FileType::DataFile)?;
+        let file = file_manager::open_file(&self.database_dir, FileType::DataFile(self.file_id))?;
         Ok(StableFileIter {
             stable_file: StableFile::new(&self.database_dir, self.file_id, file.file),
         })
@@ -342,7 +342,7 @@ impl HintFile {
     }
 
     fn iter(&self) -> BitcaskResult<HintFileIterator> {
-        let file = file_manager::open_file(&self.database_dir, self.file_id, FileType::HintFile)?;
+        let file = file_manager::open_file(&self.database_dir, FileType::HintFile(self.file_id))?;
         Ok(HintFileIterator {
             file: HintFile::new(&self.database_dir, self.file_id, file.file),
         })
@@ -422,7 +422,7 @@ pub struct DataBaseOptions {
 
 #[derive(Debug)]
 pub struct Database {
-    database_dir: PathBuf,
+    pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
     writing_file: Mutex<RefCell<WritingFile>>,
     stable_files: DashMap<u32, Mutex<StableFile>>,
@@ -440,6 +440,76 @@ fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
     Ok(())
 }
 
+fn shift_data_files(
+    database_dir: &Path,
+    known_max_file_id: u32,
+    file_id_generator: &Arc<FileIdGenerator>,
+) -> BitcaskResult<Vec<u32>> {
+    let mut data_file_ids = get_valid_data_file_ids(database_dir)
+        .into_iter()
+        .filter(|id| *id >= known_max_file_id)
+        .collect::<Vec<u32>>();
+    // must change name in descending order to keep data file's order even when any change name operation failed
+    data_file_ids.sort_by(|a, b| b.cmp(a));
+
+    // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
+    // because values in these files is written after merged files
+    let mut new_file_ids = vec![];
+    for from_id in data_file_ids {
+        let new_file_id = file_id_generator.generate_next_file_id();
+        file_manager::change_data_file_id(database_dir, from_id, new_file_id)?;
+        new_file_ids.push(new_file_id);
+    }
+    Ok(new_file_ids)
+}
+
+fn recover_merge(
+    database_dir: &Path,
+    file_id_generator: &Arc<FileIdGenerator>,
+) -> BitcaskResult<()> {
+    let merge_file_dir = file_manager::merge_file_dir(database_dir);
+
+    if !merge_file_dir.exists() {
+        return Ok(());
+    }
+
+    let mut merge_data_file_ids = file_manager::get_valid_data_file_ids(&merge_file_dir);
+    if merge_data_file_ids.is_empty() {
+        return Ok(());
+    }
+
+    merge_data_file_ids.sort();
+    let merge_meta = file_manager::read_merge_meta(&merge_file_dir)?;
+    if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
+        return Err(BitcaskError::InvalidMergeDataFile(
+            merge_meta.known_max_file_id,
+            *merge_data_file_ids.first().unwrap(),
+        ));
+    }
+
+    file_id_generator.update_file_id(*merge_data_file_ids.last().unwrap());
+
+    shift_data_files(
+        database_dir,
+        merge_meta.known_max_file_id,
+        file_id_generator,
+    )?;
+
+    file_manager::commit_merge_files(database_dir, &merge_data_file_ids)?;
+
+    file_manager::purge_outdated_data_files(database_dir, merge_meta.known_max_file_id)?;
+
+    let clear_ret = file_manager::clear_dir(&merge_file_dir);
+    if clear_ret.is_err() {
+        warn!(
+            "clear merge directory failed after merge recovered. {}",
+            clear_ret.unwrap_err()
+        );
+    }
+
+    Ok(())
+}
+
 impl Database {
     pub fn open(
         directory: &Path,
@@ -448,6 +518,24 @@ impl Database {
     ) -> BitcaskResult<Database> {
         let database_dir: PathBuf = directory.into();
         validate_database_directory(&database_dir)?;
+
+        let recover_ret = recover_merge(&database_dir, &file_id_generator);
+        if recover_ret.is_err() {
+            let merge_dir = file_manager::merge_file_dir(&database_dir);
+            warn!(
+                "recover merge under path: {} failed with error: \"{}\"",
+                merge_dir.display(),
+                recover_ret.as_ref().unwrap_err()
+            );
+            match recover_ret.as_ref().unwrap_err() {
+                BitcaskError::InvalidMergeDataFile(_, _) => {
+                    // clear Merge directory when recover merge failed
+                    file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
+                }
+                _ => return Err(recover_ret.unwrap_err()),
+            }
+        }
+
         let opened_stable_files = open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);
@@ -522,8 +610,13 @@ impl Database {
 
         let files: BitcaskResult<Vec<StableFile>> = file_ids
             .iter()
-            .map(|id| file_manager::open_file(&self.database_dir, *id, FileType::DataFile))
-            .map(|f| f.and_then(|f| Ok(StableFile::new(&self.database_dir, f.file_id, f.file))))
+            .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile(*id)))
+            .map(|f| {
+                f.and_then(|f| match f.file_type {
+                    FileType::DataFile(id) => Ok(StableFile::new(&self.database_dir, id, f.file)),
+                    _ => unreachable!(),
+                })
+            })
             .collect();
         let mut opened_stable_files = files?;
         opened_stable_files.sort_by_key(|e| e.file_id);
@@ -556,30 +649,17 @@ impl Database {
         }
         self.flush_writing_file()?;
 
-        let mut data_file_ids = get_valid_data_file_ids(&self.database_dir)
-            .into_iter()
-            .filter(|id| *id >= known_max_file_id)
-            .collect::<Vec<u32>>();
-        // must change name in descending order to keep data file's order even when any change name operation failed
-        data_file_ids.sort_by(|a, b| b.cmp(a));
+        let data_file_ids = shift_data_files(
+            &self.database_dir,
+            known_max_file_id,
+            &self.file_id_generator,
+        )?;
 
         // rebuild stable files with file id >= known_max_file_id files and merged files
         self.stable_files.clear();
 
-        // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
-        // because values in these files is written after merged files
-        for from_id in data_file_ids {
-            let new_file_id = self.file_id_generator.generate_next_file_id();
-            file_manager::change_file_id(&self.database_dir, from_id, new_file_id)?;
-            let f = open_file(&self.database_dir, new_file_id, FileType::DataFile)?;
-            let meta = f.file.metadata()?;
-            if meta.len() <= 0 {
-                continue;
-            }
-            self.stable_files.insert(
-                new_file_id,
-                Mutex::new(StableFile::new(&self.database_dir, new_file_id, f.file)),
-            );
+        for file_id in data_file_ids {
+            self.open_stable_file(file_id)?;
         }
 
         file_manager::commit_merge_files(&self.database_dir, &merged_file_ids)?;
@@ -588,21 +668,7 @@ impl Database {
             if self.stable_files.contains_key(&file_id) {
                 panic!("merged file id: {} already loaded in database", file_id);
             }
-            let data_file =
-                file_manager::open_file(&self.database_dir, *file_id, FileType::DataFile)?;
-            let meta = data_file.file.metadata()?;
-            if meta.len() <= 0 {
-                info!(target: "Database", "skip load empty data file with id: {}", &file_id);
-                continue;
-            }
-            self.stable_files.insert(
-                *file_id,
-                Mutex::new(StableFile::new(
-                    &self.database_dir,
-                    *file_id,
-                    data_file.file,
-                )),
-            );
+            self.open_stable_file(*file_id)?;
         }
 
         Ok(())
@@ -620,24 +686,12 @@ impl Database {
         ids
     }
 
-    pub fn purge_outdated_files(&self, max_file_id: u32) -> BitcaskResult<()> {
-        file_manager::get_valid_data_file_ids(&self.database_dir)
-            .iter()
-            .filter(|id| **id < max_file_id)
-            .for_each(|id| {
-                file_manager::delete_file(&self.database_dir, *id, FileType::DataFile)
-                    .unwrap_or_default()
-            });
-
-        Ok(())
-    }
-
     pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
         let row_hint_file =
-            file_manager::create_file(&self.database_dir, file_id, FileType::HintFile)?;
+            file_manager::create_file(&self.database_dir, FileType::HintFile(file_id))?;
         let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
 
-        let data_file = file_manager::open_file(&self.database_dir, file_id, FileType::DataFile)?;
+        let data_file = file_manager::open_file(&self.database_dir, FileType::DataFile(file_id))?;
         let stable_file_iter =
             StableFile::new(&self.database_dir, file_id, data_file.file).iter()?;
 
@@ -682,6 +736,20 @@ impl Database {
     pub fn close(&self) -> BitcaskResult<()> {
         let writing_file_ref = self.writing_file.lock().unwrap();
         writing_file_ref.borrow_mut().flush()?;
+        Ok(())
+    }
+
+    fn open_stable_file(&self, file_id: u32) -> BitcaskResult<()> {
+        let data_file = open_file(&self.database_dir, FileType::DataFile(file_id))?;
+        let meta = data_file.file.metadata()?;
+        if meta.len() <= 0 {
+            info!(target: "Database", "skip load empty data file with id: {}", &file_id);
+            return Ok(());
+        }
+        self.stable_files.insert(
+            file_id,
+            Mutex::new(StableFile::new(&self.database_dir, file_id, data_file.file)),
+        );
         Ok(())
     }
 
@@ -775,6 +843,8 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
+    use crate::file_manager::MergeMeta;
+
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
@@ -898,6 +968,146 @@ mod tests {
     }
 
     #[test]
+    fn test_recover_merge_with_only_merge_meta() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        let merge_meta = MergeMeta {
+            known_max_file_id: 101,
+        };
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_eq!(2, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_recover_merge_with_invalid_merge_meta() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        {
+            // write something to data file in merge dir
+            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
+                .unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            write_kvs_to_db(&db, kvs);
+        }
+
+        let merge_meta = MergeMeta {
+            known_max_file_id: file_id_generator.generate_next_file_id(),
+        };
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_eq!(4, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+        assert!(!merge_file_dir.exists());
+    }
+
+    #[test]
+    fn test_recover_merge() {
+        let dir = get_temporary_directory_path();
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            write_kvs_to_db(&db, kvs);
+        }
+        let merge_meta = MergeMeta {
+            known_max_file_id: file_id_generator.generate_next_file_id(),
+        };
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let mut rows: Vec<TestingRow> = vec![];
+        {
+            // write something to data file in merge dir
+            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
+                .unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value3"),
+                TestingKV::new("k2", "value4"),
+                TestingKV::new("k3", "value5"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+
+        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        assert_eq!(4, file_id_generator.get_file_id());
+        assert_eq!(1, db.stable_files.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+        assert!(!merge_file_dir.exists());
+    }
+
+    #[test]
+    fn test_recover_merge_failed_with_unexpeded_error() {
+        let dir = get_temporary_directory_path();
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let mut rows: Vec<TestingRow> = vec![];
+        {
+            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value1"),
+                TestingKV::new("k2", "value2"),
+            ];
+            rows.append(&mut write_kvs_to_db(&db, kvs));
+        }
+        let merge_meta = MergeMeta {
+            known_max_file_id: file_id_generator.generate_next_file_id(),
+        };
+        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        {
+            // write something to data file in merge dir
+            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
+                .unwrap();
+            let kvs = vec![
+                TestingKV::new("k1", "value3"),
+                TestingKV::new("k2", "value4"),
+            ];
+            write_kvs_to_db(&db, kvs);
+        }
+
+        // change one data file under merge directory to readonly
+        // so this file cannot recover and move to base directory
+        let meta = fs::metadata(&merge_file_dir).unwrap();
+        let mut perms = meta.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&merge_file_dir, perms).unwrap();
+
+        let ret = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS);
+        assert!(ret.is_err());
+    }
+
+    #[test]
     fn test_wrap_file() {
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let dir = get_temporary_directory_path();
@@ -921,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_files() {
+    fn test_load_merged_files() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let file_id_generator = Arc::new(FileIdGenerator::new());
@@ -947,38 +1157,6 @@ mod tests {
 
         assert_eq!(5, file_id_generator.get_file_id());
         assert_eq!(2, old_db.stable_files.len());
-    }
-
-    #[test]
-    fn test_purge_outdated_files() {
-        let dir = get_temporary_directory_path();
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        let kvs = vec![
-            TestingKV::new("k1", "value1"),
-            TestingKV::new("k2", "value2"),
-        ];
-        write_kvs_to_db(&db, kvs);
-        db.flush_writing_file().unwrap();
-
-        let kvs = vec![
-            TestingKV::new("k3", "hello world"),
-            TestingKV::new("k1", "value4"),
-        ];
-        let mut rows: Vec<TestingRow> = vec![];
-        rows.append(&mut write_kvs_to_db(&db, kvs));
-        let file_id_to_purge = file_id_generator.get_file_id();
-        db.flush_writing_file().unwrap();
-        let old_stats = db.stats().unwrap();
-        db.purge_outdated_files(file_id_to_purge).unwrap();
-
-        let new_stats = db.stats().unwrap();
-        assert_eq!(3, file_id_generator.get_file_id());
-        assert_eq!(1, db.stable_files.len());
-        assert_eq!(2, new_stats.number_of_data_files);
-        assert!(new_stats.total_data_size_in_bytes < old_stats.total_data_size_in_bytes);
-        assert_rows_value(&db, &rows);
-        assert_database_rows(&db, &rows);
     }
 
     #[test]

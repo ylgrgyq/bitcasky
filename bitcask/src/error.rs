@@ -20,6 +20,8 @@ pub enum BitcaskError {
     MergeInProgress(),
     #[error("Lock directory: {0} failed. Maybe there's another process is using this directory")]
     LockDirectoryFailed(String),
+    #[error("Invalid file id {0} in MergeMeta file. Min file ids in Merge directory is {1}")]
+    InvalidMergeDataFile(u32, u32),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;

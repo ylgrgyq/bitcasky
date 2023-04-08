@@ -1,5 +1,7 @@
 use std::{ops::Add, sync::Mutex};
 
+use log::info;
+
 #[derive(Debug)]
 pub struct FileIdGenerator {
     file_id: Mutex<u32>,
@@ -22,12 +24,10 @@ impl FileIdGenerator {
     pub fn update_file_id(&self, known_max_file_id: u32) {
         let mut id = self.file_id.lock().unwrap();
         if known_max_file_id < *id {
-            panic!(
-                "cannot decrease file id from {} to {}",
-                *id, known_max_file_id
-            )
+            return;
         }
         *id = known_max_file_id;
+        info!(target: "FileIdGenerator", "update file id to {}", *id);
     }
 
     pub fn get_file_id(&self) -> u32 {
