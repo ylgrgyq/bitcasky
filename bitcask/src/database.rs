@@ -2,7 +2,7 @@ use core::panic;
 use std::{
     cell::{Cell, RefCell},
     fs::{self, File},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{ErrorKind, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -194,14 +194,21 @@ struct StableFile {
     database_dir: PathBuf,
     file_id: u32,
     file: File,
+    tolerate_data_file_corrption: bool,
 }
 
 impl StableFile {
-    fn new(database_dir: &PathBuf, file_id: u32, file: File) -> StableFile {
+    fn new(
+        database_dir: &PathBuf,
+        file_id: u32,
+        file: File,
+        tolerate_data_file_corrption: bool,
+    ) -> StableFile {
         StableFile {
             database_dir: database_dir.clone(),
             file_id,
             file,
+            tolerate_data_file_corrption,
         }
     }
 
@@ -212,7 +219,9 @@ impl StableFile {
     fn read_next_row(&mut self) -> BitcaskResult<RowToRead> {
         let value_offset = self.file.seek(SeekFrom::Current(0))?;
         let mut header_buf = vec![0; DATA_FILE_KEY_OFFSET];
-        self.file.read_exact(&mut header_buf)?;
+        self.file
+            .read_exact(&mut header_buf)
+            .map_err(|e| self.io_error_to_bitcask_error(e, "Data header unexpected EOF"))?;
 
         let header_bs = Bytes::from(header_buf);
         let expected_crc = header_bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
@@ -230,7 +239,10 @@ impl StableFile {
             .get_u64() as usize;
 
         let mut kv_buf = vec![0; key_size + value_size];
-        self.file.read_exact(&mut kv_buf)?;
+        self.file
+            .read_exact(&mut kv_buf)
+            .map_err(|e| self.io_error_to_bitcask_error(e, "Data unexpected EOF"))?;
+
         let kv_bs = Bytes::from(kv_buf);
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
@@ -261,8 +273,26 @@ impl StableFile {
     fn iter(&self) -> BitcaskResult<StableFileIter> {
         let file = file_manager::open_file(&self.database_dir, FileType::DataFile(self.file_id))?;
         Ok(StableFileIter {
-            stable_file: StableFile::new(&self.database_dir, self.file_id, file.file),
+            stable_file: StableFile::new(
+                &self.database_dir,
+                self.file_id,
+                file.file,
+                self.tolerate_data_file_corrption,
+            ),
         })
+    }
+
+    fn io_error_to_bitcask_error(&self, e: std::io::Error, hint: &str) -> BitcaskError {
+        match e.kind() {
+            ErrorKind::UnexpectedEof => {
+                return BitcaskError::DataFileCorrupted(
+                    self.database_dir.display().to_string(),
+                    self.file_id,
+                    hint.into(),
+                );
+            }
+            _ => return BitcaskError::IoError(e),
+        }
     }
 }
 
@@ -275,13 +305,15 @@ impl Iterator for StableFileIter {
     type Item = BitcaskResult<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.stable_file.read_next_row() {
-            Err(BitcaskError::IoError(e)) => match e.kind() {
-                std::io::ErrorKind::UnexpectedEof => {
+        let ret = self.stable_file.read_next_row();
+        match ret {
+            Err(BitcaskError::DataFileCorrupted(dir, file_id, hint)) => {
+                if self.stable_file.tolerate_data_file_corrption {
+                    error!(target: "Database", "Tolerate corrupted data file with file id {} under path {} corrupted. Corrupted hint: {}", file_id, dir, hint);
                     return None;
                 }
-                _ => return Some(Err(BitcaskError::IoError(e))),
-            },
+                return Some(Err(BitcaskError::DataFileCorrupted(dir, file_id, hint)));
+            }
             r => return Some(r),
         }
     }
@@ -418,6 +450,7 @@ pub struct DatabaseStats {
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub max_file_size: usize,
+    pub tolerate_data_file_corruption: bool,
 }
 
 #[derive(Debug)]
@@ -547,7 +580,17 @@ impl Database {
         )?));
         let stable_files = opened_stable_files
             .into_iter()
-            .map(|(k, v)| (k, Mutex::new(StableFile::new(&database_dir, k, v))))
+            .map(|(k, v)| {
+                (
+                    k,
+                    Mutex::new(StableFile::new(
+                        &database_dir,
+                        k,
+                        v,
+                        options.tolerate_data_file_corruption,
+                    )),
+                )
+            })
             .collect::<DashMap<u32, Mutex<StableFile>>>();
 
         info!(target: "Database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
@@ -613,7 +656,12 @@ impl Database {
             .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile(*id)))
             .map(|f| {
                 f.and_then(|f| match f.file_type {
-                    FileType::DataFile(id) => Ok(StableFile::new(&self.database_dir, id, f.file)),
+                    FileType::DataFile(id) => Ok(StableFile::new(
+                        &self.database_dir,
+                        id,
+                        f.file,
+                        self.options.tolerate_data_file_corruption,
+                    )),
                     _ => unreachable!(),
                 })
             })
@@ -692,8 +740,13 @@ impl Database {
         let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
 
         let data_file = file_manager::open_file(&self.database_dir, FileType::DataFile(file_id))?;
-        let stable_file_iter =
-            StableFile::new(&self.database_dir, file_id, data_file.file).iter()?;
+        let stable_file_iter = StableFile::new(
+            &self.database_dir,
+            file_id,
+            data_file.file,
+            self.options.tolerate_data_file_corruption,
+        )
+        .iter()?;
 
         let boxed_iter = Box::new(stable_file_iter.map(|ret| {
             ret.and_then(|row| {
@@ -748,7 +801,12 @@ impl Database {
         }
         self.stable_files.insert(
             file_id,
-            Mutex::new(StableFile::new(&self.database_dir, file_id, data_file.file)),
+            Mutex::new(StableFile::new(
+                &self.database_dir,
+                file_id,
+                data_file.file,
+                self.options.tolerate_data_file_corruption,
+            )),
         );
         Ok(())
     }
@@ -779,7 +837,12 @@ impl Database {
         let (file_id, file) = old_file.transit_to_readonly()?;
         self.stable_files.insert(
             file_id,
-            Mutex::new(StableFile::new(&self.database_dir, file_id, file)),
+            Mutex::new(StableFile::new(
+                &self.database_dir,
+                file_id,
+                file,
+                self.options.tolerate_data_file_corruption,
+            )),
         );
         Ok(())
     }
@@ -851,6 +914,7 @@ mod tests {
 
     const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: 1024,
+        tolerate_data_file_corruption: true,
     };
 
     struct TestingRow {
@@ -1114,7 +1178,10 @@ mod tests {
         let db = Database::open(
             &dir,
             file_id_generator,
-            DataBaseOptions { max_file_size: 100 },
+            DataBaseOptions {
+                max_file_size: 100,
+                tolerate_data_file_corruption: true,
+            },
         )
         .unwrap();
         let kvs = vec![

@@ -15,6 +15,7 @@ pub const DEFAULT_BITCASK_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 128 * 1024 * 1024,
     max_key_size: 64,
     max_value_size: 100 * 1024,
+    tolerate_data_file_corrption: true,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +23,7 @@ pub struct BitcaskOptions {
     pub max_file_size: usize,
     pub max_key_size: usize,
     pub max_value_size: usize,
+    pub tolerate_data_file_corrption: bool,
 }
 
 impl BitcaskOptions {
@@ -50,6 +52,7 @@ impl BitcaskOptions {
     fn get_database_options(&self) -> DataBaseOptions {
         return DataBaseOptions {
             max_file_size: self.max_file_size,
+            tolerate_data_file_corruption: self.tolerate_data_file_corrption,
         };
     }
 }

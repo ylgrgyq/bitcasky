@@ -10,6 +10,7 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 11,
     max_key_size: 1024,
     max_value_size: 1024,
+    tolerate_data_file_corrption: true,
 };
 
 #[test]
@@ -48,6 +49,7 @@ fn test_recovery() {
                 max_file_size: 100,
                 max_key_size: 1024,
                 max_value_size: 1024,
+                tolerate_data_file_corrption: true,
             },
         )
         .unwrap();
@@ -67,6 +69,7 @@ fn test_recovery() {
             max_file_size: 100,
             max_key_size: 1024,
             max_value_size: 1024,
+            tolerate_data_file_corrption: true,
         },
     )
     .unwrap();
