@@ -292,6 +292,9 @@ mod tests {
     }
 
     #[test]
+    fn test_sdf() {}
+
+    #[test]
     fn test_clear_dir() {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();

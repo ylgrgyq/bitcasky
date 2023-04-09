@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     cell::{Cell, RefCell},
     fs::{self, File},
@@ -160,6 +159,7 @@ struct WritingFile {
     file_size: usize,
 }
 
+#[mockall::automock]
 impl WritingFile {
     fn new(database_dir: &PathBuf, file_id: u32) -> BitcaskResult<WritingFile> {
         let data_file = create_file(&database_dir, FileType::DataFile(file_id))?;
@@ -171,7 +171,7 @@ impl WritingFile {
         })
     }
 
-    fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowPosition> {
+    fn write_row<'a>(&mut self, row: RowToWrite<'a>) -> BitcaskResult<RowPosition> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&*data_to_write).map_err(|e| {
@@ -222,6 +222,7 @@ struct StableFile {
     database_dir: PathBuf,
     file_id: u32,
     file: File,
+    file_size: u64,
     tolerate_data_file_corrption: bool,
 }
 
@@ -231,21 +232,27 @@ impl StableFile {
         file_id: u32,
         file: File,
         tolerate_data_file_corrption: bool,
-    ) -> StableFile {
-        StableFile {
+    ) -> BitcaskResult<StableFile> {
+        let meta = file.metadata()?;
+        Ok(StableFile {
             database_dir: database_dir.clone(),
             file_id,
             file,
+            file_size: meta.len(),
             tolerate_data_file_corrption,
-        }
+        })
     }
 
     fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
     }
 
-    fn read_next_row(&mut self) -> BitcaskResult<RowToRead> {
+    fn read_next_row(&mut self) -> BitcaskResult<Option<RowToRead>> {
         let value_offset = self.file.seek(SeekFrom::Current(0))?;
+        if value_offset >= self.file_size {
+            return Ok(None);
+        }
+
         let mut header_buf = vec![0; DATA_FILE_KEY_OFFSET];
         self.file.read_exact(&mut header_buf).map_err(|e| {
             io_error_to_bitcask_error(
@@ -296,7 +303,7 @@ impl StableFile {
             ));
         }
 
-        Ok(RowToRead {
+        Ok(Some(RowToRead {
             key: kv_bs.slice(0..key_size).into(),
             value: kv_bs.slice(key_size..).into(),
             row_position: RowPosition {
@@ -305,19 +312,18 @@ impl StableFile {
                 row_size: DATA_FILE_KEY_OFFSET + key_size + value_size,
                 tstmp,
             },
-        })
+        }))
     }
 
     fn iter(&self) -> BitcaskResult<StableFileIter> {
         let file = file_manager::open_file(&self.database_dir, FileType::DataFile(self.file_id))?;
-        Ok(StableFileIter {
-            stable_file: StableFile::new(
-                &self.database_dir,
-                self.file_id,
-                file.file,
-                self.tolerate_data_file_corrption,
-            ),
-        })
+        let stable_file = StableFile::new(
+            &self.database_dir,
+            self.file_id,
+            file.file,
+            self.tolerate_data_file_corrption,
+        )?;
+        Ok(StableFileIter { stable_file })
     }
 }
 
@@ -331,15 +337,20 @@ impl Iterator for StableFileIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let ret = self.stable_file.read_next_row();
-        match &ret {
-            Err(BitcaskError::DataFileCorrupted(dir, file_id, hint)) => {
-                if self.stable_file.tolerate_data_file_corrption {
-                    error!(target: "Database", "Tolerate corrupted data file with file id {} under path {} corrupted. Corrupted hint: {}", file_id, dir, hint);
-                    return None;
+        match ret {
+            Ok(o) => o.and_then(|s| Some(Ok(s))),
+            Err(e) => {
+                match &e {
+                    BitcaskError::DataFileCorrupted(dir, file_id, hint) => {
+                        if self.stable_file.tolerate_data_file_corrption {
+                            error!(target: "Database", "Tolerate corrupted data file with file id {} under path {} corrupted. Corrupted hint: {}", file_id, dir, hint);
+                            return None;
+                        }
+                    }
+                    _ => {}
                 }
-                return Some(ret);
+                return Some(Err(e));
             }
-            _ => return Some(ret),
         }
     }
 }
@@ -606,17 +617,10 @@ impl Database {
         let stable_files = opened_stable_files
             .into_iter()
             .map(|(k, v)| {
-                (
-                    k,
-                    Mutex::new(StableFile::new(
-                        &database_dir,
-                        k,
-                        v,
-                        options.tolerate_data_file_corruption,
-                    )),
-                )
+                StableFile::new(&database_dir, k, v, options.tolerate_data_file_corruption)
+                    .and_then(|stable_file| Ok((k, Mutex::new(stable_file))))
             })
-            .collect::<DashMap<u32, Mutex<StableFile>>>();
+            .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
 
         info!(target: "Database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
         Ok(Database {
@@ -681,12 +685,13 @@ impl Database {
             .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile(*id)))
             .map(|f| {
                 f.and_then(|f| match f.file_type {
-                    FileType::DataFile(id) => Ok(StableFile::new(
+                    FileType::DataFile(id) => StableFile::new(
                         &self.database_dir,
                         id,
                         f.file,
                         self.options.tolerate_data_file_corruption,
-                    )),
+                    )
+                    .and_then(|s| Ok(s)),
                     _ => unreachable!(),
                 })
             })
@@ -739,7 +744,7 @@ impl Database {
 
         for file_id in merged_file_ids {
             if self.stable_files.contains_key(&file_id) {
-                panic!("merged file id: {} already loaded in database", file_id);
+                core::panic!("merged file id: {} already loaded in database", file_id);
             }
             self.open_stable_file(*file_id)?;
         }
@@ -770,7 +775,7 @@ impl Database {
             file_id,
             data_file.file,
             self.options.tolerate_data_file_corruption,
-        )
+        )?
         .iter()?;
 
         let boxed_iter = Box::new(stable_file_iter.map(|ret| {
@@ -824,15 +829,13 @@ impl Database {
             info!(target: "Database", "skip load empty data file with id: {}", &file_id);
             return Ok(());
         }
-        self.stable_files.insert(
+        let stable_file = StableFile::new(
+            &self.database_dir,
             file_id,
-            Mutex::new(StableFile::new(
-                &self.database_dir,
-                file_id,
-                data_file.file,
-                self.options.tolerate_data_file_corruption,
-            )),
-        );
+            data_file.file,
+            self.options.tolerate_data_file_corruption,
+        )?;
+        self.stable_files.insert(file_id, Mutex::new(stable_file));
         Ok(())
     }
 
@@ -871,15 +874,13 @@ impl Database {
         let mut old_file = writing_file_ref.replace(next_writing_file);
         old_file.flush()?;
         let (file_id, file) = old_file.transit_to_readonly()?;
-        self.stable_files.insert(
+        let stable_file = StableFile::new(
+            &self.database_dir,
             file_id,
-            Mutex::new(StableFile::new(
-                &self.database_dir,
-                file_id,
-                file,
-                self.options.tolerate_data_file_corruption,
-            )),
-        );
+            file,
+            self.options.tolerate_data_file_corruption,
+        )?;
+        self.stable_files.insert(file_id, Mutex::new(stable_file));
         Ok(())
     }
 
@@ -1010,6 +1011,16 @@ mod tests {
         let rows = write_kvs_to_db(&db, kvs);
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_write_data_failed() {
+        let dir = get_temporary_directory_path();
+        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
+        let kv = TestingKV::new("k1", "value1");
+
+        let ret = db.write(&kv.key(), &kv.value());
     }
 
     #[test]
