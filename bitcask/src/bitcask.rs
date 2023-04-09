@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
-use log::info;
+use log::{error, info};
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
@@ -79,6 +79,7 @@ pub struct Bitcask {
     options: BitcaskOptions,
     database: Database,
     merge_lock: Mutex<()>,
+    is_error: Mutex<Option<String>>,
 }
 
 impl Bitcask {
@@ -110,6 +111,7 @@ impl Bitcask {
             database,
             options,
             merge_lock: Mutex::new(()),
+            is_error: Mutex::new(None),
         })
     }
 
@@ -127,13 +129,22 @@ impl Bitcask {
             ));
         }
 
+        self.check_db_error()?;
+
         let kd = self.keydir.write().unwrap();
-        let ret = self.database.write(&key, value)?;
+        let ret = self.database.write(&key, value).map_err(|e| {
+            self.mark_db_error(e.to_string());
+            error!(target: "BitcaskPut", "put data failed with error: {}", &e);
+            e
+        })?;
+
         kd.put(key, ret);
         Ok(())
     }
 
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
+        self.check_db_error()?;
+
         let row_pos = {
             self.keydir
                 .read()
@@ -164,6 +175,7 @@ impl Bitcask {
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
+        self.check_db_error()?;
         let kd = self.keydir.write().unwrap();
 
         if kd.contains_key(key) {
@@ -175,6 +187,8 @@ impl Bitcask {
     }
 
     pub fn merge(&self) -> BitcaskResult<()> {
+        self.check_db_error()?;
+
         let lock_ret = self.merge_lock.try_lock();
 
         if lock_ret.is_err() {
@@ -185,20 +199,25 @@ impl Bitcask {
         let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
 
-        info!(target: "Merge", "database merged to files with ids: {:?}", &file_ids);
+        info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
 
         {
             // stop read/write
             let kd = self.keydir.write().unwrap();
             self.database
-                .load_merged_files(&file_ids, known_max_file_id)?;
+                .load_merged_files(&file_ids, known_max_file_id)
+                .map_err(|e| {
+                    self.mark_db_error(e.to_string());
+                    error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
+                    e
+                })?;
 
             for (k, v) in new_kd.into_iter() {
                 kd.checked_put(k, v)
             }
         }
 
-        info!(target: "Merge", "purge files with id smaller than: {}", known_max_file_id);
+        info!(target: "BitcaskMerge", "purge files with id smaller than: {}", known_max_file_id);
 
         file_manager::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
         Ok(())
@@ -214,6 +233,19 @@ impl Bitcask {
             total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
             number_of_keys: key_size,
         })
+    }
+
+    fn mark_db_error(&self, error_string: String) {
+        let mut err = self.is_error.lock().expect("lock db is error mutex failed");
+        *err = Some(error_string)
+    }
+
+    fn check_db_error(&self) -> Result<(), BitcaskError> {
+        let err = self.is_error.lock().expect("lock db is error mutex failed");
+        if err.is_some() {
+            return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
+        }
+        return Ok(());
     }
 
     fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
