@@ -130,21 +130,41 @@ fn read_value_from_file(
     Ok(ret)
 }
 
+fn io_error_to_bitcask_error(
+    database_dir: &Path,
+    file_id: u32,
+    e: std::io::Error,
+    hint: &str,
+) -> BitcaskError {
+    match e.kind() {
+        ErrorKind::UnexpectedEof => {
+            return BitcaskError::DataFileCorrupted(
+                database_dir.display().to_string(),
+                file_id,
+                hint.into(),
+            );
+        }
+        _ => return BitcaskError::IoError(e),
+    }
+}
+
 trait BitcaskDataFile {
     fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>>;
 }
 
 #[derive(Debug)]
 struct WritingFile {
+    database_dir: PathBuf,
     file_id: u32,
     data_file: File,
     file_size: usize,
 }
 
 impl WritingFile {
-    fn new(database_dir: &Path, file_id: u32) -> BitcaskResult<WritingFile> {
+    fn new(database_dir: &PathBuf, file_id: u32) -> BitcaskResult<WritingFile> {
         let data_file = create_file(&database_dir, FileType::DataFile(file_id))?;
         Ok(WritingFile {
+            database_dir: database_dir.clone(),
             file_id,
             data_file,
             file_size: 0,
@@ -154,7 +174,15 @@ impl WritingFile {
     fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowPosition> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
-        self.data_file.write_all(&*data_to_write)?;
+        self.data_file.write_all(&*data_to_write).map_err(|e| {
+            io_error_to_bitcask_error(
+                &self.database_dir,
+                self.file_id,
+                e,
+                "Write data file may partially failed",
+            )
+        })?;
+
         self.file_size += data_to_write.len();
         Ok(RowPosition {
             file_id: self.file_id,
@@ -219,9 +247,14 @@ impl StableFile {
     fn read_next_row(&mut self) -> BitcaskResult<RowToRead> {
         let value_offset = self.file.seek(SeekFrom::Current(0))?;
         let mut header_buf = vec![0; DATA_FILE_KEY_OFFSET];
-        self.file
-            .read_exact(&mut header_buf)
-            .map_err(|e| self.io_error_to_bitcask_error(e, "Data header unexpected EOF"))?;
+        self.file.read_exact(&mut header_buf).map_err(|e| {
+            io_error_to_bitcask_error(
+                &self.database_dir,
+                self.file_id,
+                e,
+                "Read data header got unexpected EOF",
+            )
+        })?;
 
         let header_bs = Bytes::from(header_buf);
         let expected_crc = header_bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
@@ -239,9 +272,14 @@ impl StableFile {
             .get_u64() as usize;
 
         let mut kv_buf = vec![0; key_size + value_size];
-        self.file
-            .read_exact(&mut kv_buf)
-            .map_err(|e| self.io_error_to_bitcask_error(e, "Data unexpected EOF"))?;
+        self.file.read_exact(&mut kv_buf).map_err(|e| {
+            io_error_to_bitcask_error(
+                &self.database_dir,
+                self.file_id,
+                e,
+                "Read data got unexpected EOF",
+            )
+        })?;
 
         let kv_bs = Bytes::from(kv_buf);
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
@@ -281,19 +319,6 @@ impl StableFile {
             ),
         })
     }
-
-    fn io_error_to_bitcask_error(&self, e: std::io::Error, hint: &str) -> BitcaskError {
-        match e.kind() {
-            ErrorKind::UnexpectedEof => {
-                return BitcaskError::DataFileCorrupted(
-                    self.database_dir.display().to_string(),
-                    self.file_id,
-                    hint.into(),
-                );
-            }
-            _ => return BitcaskError::IoError(e),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -306,15 +331,15 @@ impl Iterator for StableFileIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let ret = self.stable_file.read_next_row();
-        match ret {
+        match &ret {
             Err(BitcaskError::DataFileCorrupted(dir, file_id, hint)) => {
                 if self.stable_file.tolerate_data_file_corrption {
                     error!(target: "Database", "Tolerate corrupted data file with file id {} under path {} corrupted. Corrupted hint: {}", file_id, dir, hint);
                     return None;
                 }
-                return Some(Err(BitcaskError::DataFileCorrupted(dir, file_id, hint)));
+                return Some(ret);
             }
-            r => return Some(r),
+            _ => return Some(ret),
         }
     }
 }
@@ -817,7 +842,18 @@ impl Database {
             self.do_flush_writing_file(&writing_file_ref)?;
         }
         let mut writing_file = writing_file_ref.borrow_mut();
-        writing_file.write_row(row)
+        let write_row_ret = writing_file.write_row(row);
+        if self.options.tolerate_data_file_corruption {
+            match write_row_ret {
+                Err(BitcaskError::DataFileCorrupted(_, _, _)) => {
+                    // tolerate data file corruption, so when write data file failed
+                    // we switch to a new data file
+                    self.do_flush_writing_file(&writing_file_ref)?;
+                }
+                _ => {}
+            }
+        }
+        return write_row_ret;
     }
 
     fn check_file_overflow(

@@ -136,8 +136,16 @@ impl Bitcask {
 
         let kd = self.keydir.write().unwrap();
         let ret = self.database.write(&key, value).map_err(|e| {
-            self.mark_db_error(e.to_string());
             error!(target: "BitcaskPut", "put data failed with error: {}", &e);
+
+            if match e {
+                BitcaskError::DataFileCorrupted(_, _, _) => {
+                    !self.options.tolerate_data_file_corrption
+                }
+                _ => true,
+            } {
+                self.mark_db_error(e.to_string());
+            }
             e
         })?;
 
