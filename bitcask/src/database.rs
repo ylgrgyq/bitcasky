@@ -161,7 +161,7 @@ struct WritingFile {
 
 #[mockall::automock]
 impl WritingFile {
-    fn new(database_dir: &PathBuf, file_id: u32) -> BitcaskResult<WritingFile> {
+    fn new(database_dir: &PathBuf, file_id: u32) -> BitcaskResult<Self> {
         let data_file = create_file(&database_dir, FileType::DataFile(file_id))?;
         Ok(WritingFile {
             database_dir: database_dir.clone(),
@@ -232,7 +232,7 @@ impl StableFile {
         file_id: u32,
         file: File,
         tolerate_data_file_corrption: bool,
-    ) -> BitcaskResult<StableFile> {
+    ) -> BitcaskResult<Self> {
         let meta = file.metadata()?;
         Ok(StableFile {
             database_dir: database_dir.clone(),
@@ -389,7 +389,7 @@ struct HintFile {
 }
 
 impl HintFile {
-    fn new(database_dir: &PathBuf, file_id: u32, file: File) -> HintFile {
+    fn new(database_dir: &PathBuf, file_id: u32, file: File) -> Self {
         HintFile {
             database_dir: database_dir.clone(),
             file_id,
@@ -489,15 +489,6 @@ pub struct DataBaseOptions {
     pub tolerate_data_file_corruption: bool,
 }
 
-#[derive(Debug)]
-pub struct Database {
-    pub database_dir: PathBuf,
-    file_id_generator: Arc<FileIdGenerator>,
-    writing_file: Mutex<RefCell<WritingFile>>,
-    stable_files: DashMap<u32, Mutex<StableFile>>,
-    options: DataBaseOptions,
-}
-
 fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
     fs::create_dir_all(dir)?;
     if !file_manager::check_directory_is_writable(dir) {
@@ -577,6 +568,15 @@ fn recover_merge(
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct Database {
+    pub database_dir: PathBuf,
+    file_id_generator: Arc<FileIdGenerator>,
+    writing_file: Mutex<RefCell<WritingFile>>,
+    stable_files: DashMap<u32, Mutex<StableFile>>,
+    options: DataBaseOptions,
 }
 
 impl Database {
@@ -906,7 +906,7 @@ pub struct DatabaseIter {
 }
 
 impl DatabaseIter {
-    fn new(mut iters: Vec<StableFileIter>) -> DatabaseIter {
+    fn new(mut iters: Vec<StableFileIter>) -> Self {
         if iters.is_empty() {
             return DatabaseIter {
                 remain_iters: iters,
@@ -960,7 +960,7 @@ mod tests {
     }
 
     impl TestingRow {
-        fn new(kv: TestingKV, pos: RowPosition) -> TestingRow {
+        fn new(kv: TestingKV, pos: RowPosition) -> Self {
             TestingRow { kv, pos }
         }
     }
@@ -1011,16 +1011,6 @@ mod tests {
         let rows = write_kvs_to_db(&db, kvs);
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
-    }
-
-    #[test]
-    fn test_write_data_failed() {
-        let dir = get_temporary_directory_path();
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
-        let kv = TestingKV::new("k1", "value1");
-
-        let ret = db.write(&kv.key(), &kv.value());
     }
 
     #[test]
