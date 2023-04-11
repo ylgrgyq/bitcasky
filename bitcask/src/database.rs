@@ -2,8 +2,9 @@ use std::{
     cell::{Cell, RefCell},
     fs::{self, File},
     io::{ErrorKind, Read, Seek, SeekFrom, Write},
+    mem,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
     vec,
 };
@@ -574,7 +575,7 @@ fn recover_merge(
 pub struct Database {
     pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
-    writing_file: Mutex<RefCell<WritingFile>>,
+    writing_file: Mutex<WritingFile>,
     stable_files: DashMap<u32, Mutex<StableFile>>,
     options: DataBaseOptions,
 }
@@ -610,10 +611,10 @@ impl Database {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);
             file_id_generator.update_file_id(*writing_file_id);
         }
-        let writing_file = Mutex::new(RefCell::new(WritingFile::new(
+        let writing_file = Mutex::new(WritingFile::new(
             &database_dir,
             file_id_generator.generate_next_file_id(),
-        )?));
+        )?);
         let stable_files = opened_stable_files
             .into_iter()
             .map(|(k, v)| {
@@ -638,8 +639,7 @@ impl Database {
 
     pub fn get_max_file_id(&self) -> u32 {
         let writing_file_ref = self.writing_file.lock().unwrap();
-        let writing_file = writing_file_ref.borrow();
-        writing_file.file_id
+        writing_file_ref.file_id
     }
 
     pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
@@ -658,10 +658,10 @@ impl Database {
     }
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
-        let writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock().unwrap();
         // flush file only when we actually wrote something
-        if writing_file_ref.borrow().file_size > 0 {
-            self.do_flush_writing_file(&writing_file_ref)?;
+        if writing_file_ref.file_size > 0 {
+            self.do_flush_writing_file(&mut writing_file_ref)?;
         }
         Ok(())
     }
@@ -670,7 +670,7 @@ impl Database {
         let mut file_ids: Vec<u32>;
         {
             let writing_file = self.writing_file.lock().unwrap();
-            let writing_file_id = writing_file.borrow().file_id;
+            let writing_file_id = writing_file.file_id;
 
             file_ids = self
                 .stable_files
@@ -705,10 +705,9 @@ impl Database {
 
     pub fn read_value(&self, row_position: &RowPosition) -> BitcaskResult<Vec<u8>> {
         {
-            let writing_file_ref = self.writing_file.lock().unwrap();
-            let mut writing_file = writing_file_ref.borrow_mut();
-            if row_position.file_id == writing_file.file_id {
-                return writing_file.read_value(row_position.row_offset, row_position.row_size);
+            let mut writing_file_ref = self.writing_file.lock().unwrap();
+            if row_position.file_id == writing_file_ref.file_id {
+                return writing_file_ref.read_value(row_position.row_offset, row_position.row_size);
             }
         }
 
@@ -754,7 +753,7 @@ impl Database {
 
     pub fn get_file_ids(&self) -> Vec<u32> {
         let writing_file_ref = self.writing_file.lock().unwrap();
-        let writing_file_id = writing_file_ref.borrow().file_id;
+        let writing_file_id = writing_file_ref.file_id;
         let mut ids: Vec<u32> = self
             .stable_files
             .iter()
@@ -795,7 +794,7 @@ impl Database {
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
         let mut writing_file_size: u64 = 0;
         {
-            writing_file_size = self.writing_file.lock().unwrap().borrow().file_size as u64;
+            writing_file_size = self.writing_file.lock().unwrap().file_size as u64;
         }
         let mut total_data_size_in_bytes: u64 = self
             .stable_files
@@ -817,8 +816,8 @@ impl Database {
     }
 
     pub fn close(&self) -> BitcaskResult<()> {
-        let writing_file_ref = self.writing_file.lock().unwrap();
-        writing_file_ref.borrow_mut().flush()?;
+        let mut writing_file_ref = self.writing_file.lock().unwrap();
+        writing_file_ref.flush()?;
         Ok(())
     }
 
@@ -840,18 +839,17 @@ impl Database {
     }
 
     fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowPosition> {
-        let writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock().unwrap();
         if self.check_file_overflow(&writing_file_ref, &row) {
-            self.do_flush_writing_file(&writing_file_ref)?;
+            self.do_flush_writing_file(&mut writing_file_ref)?;
         }
-        let mut writing_file = writing_file_ref.borrow_mut();
-        let write_row_ret = writing_file.write_row(row);
+        let write_row_ret = writing_file_ref.write_row(row);
         if self.options.tolerate_data_file_corruption {
             match write_row_ret {
                 Err(BitcaskError::DataFileCorrupted(_, _, _)) => {
                     // tolerate data file corruption, so when write data file failed
                     // we switch to a new data file
-                    self.do_flush_writing_file(&writing_file_ref)?;
+                    self.do_flush_writing_file(&mut writing_file_ref)?;
                 }
                 _ => {}
             }
@@ -861,17 +859,19 @@ impl Database {
 
     fn check_file_overflow(
         &self,
-        writing_file_ref: &RefCell<WritingFile>,
+        writing_file_ref: &MutexGuard<WritingFile>,
         row: &RowToWrite,
     ) -> bool {
-        let writing_file = writing_file_ref.borrow();
-        row.size + writing_file.file_size > self.options.max_file_size
+        row.size + writing_file_ref.file_size > self.options.max_file_size
     }
 
-    fn do_flush_writing_file(&self, writing_file_ref: &RefCell<WritingFile>) -> BitcaskResult<()> {
+    fn do_flush_writing_file(
+        &self,
+        writing_file_ref: &mut MutexGuard<WritingFile>,
+    ) -> BitcaskResult<()> {
         let next_file_id = self.file_id_generator.generate_next_file_id();
         let next_writing_file = WritingFile::new(&self.database_dir, next_file_id)?;
-        let mut old_file = writing_file_ref.replace(next_writing_file);
+        let mut old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_file.flush()?;
         let (file_id, file) = old_file.transit_to_readonly()?;
         let stable_file = StableFile::new(
