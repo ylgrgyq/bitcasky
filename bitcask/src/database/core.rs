@@ -18,13 +18,15 @@ use crate::{
 };
 use log::{error, info, warn};
 
+// #[cfg(test)]
+// use super::mocks::MockWritingFile as WritingFile;
+// #[cfg(not(test))]
+use super::writing_file::WritingFile;
 use super::{
     common::{RowPosition, RowToRead, RowToWrite},
     hint::{HintFile, RowHint},
     stable_file::{StableFile, StableFileIter},
-    writing_file::WritingFile,
 };
-
 /**
  * Statistics of a Database.
  * Some of the metrics may not accurate due to concurrent access.
@@ -199,7 +201,7 @@ impl Database {
 
     pub fn get_max_file_id(&self) -> u32 {
         let writing_file_ref = self.writing_file.lock().unwrap();
-        writing_file_ref.file_id
+        writing_file_ref.file_id()
     }
 
     pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
@@ -220,7 +222,7 @@ impl Database {
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
         let mut writing_file_ref = self.writing_file.lock().unwrap();
         // flush file only when we actually wrote something
-        if writing_file_ref.file_size > 0 {
+        if writing_file_ref.file_size() > 0 {
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
         Ok(())
@@ -230,7 +232,7 @@ impl Database {
         let mut file_ids: Vec<u32>;
         {
             let writing_file = self.writing_file.lock().unwrap();
-            let writing_file_id = writing_file.file_id;
+            let writing_file_id = writing_file.file_id();
 
             file_ids = self
                 .stable_files
@@ -266,7 +268,7 @@ impl Database {
     pub fn read_value(&self, row_position: &RowPosition) -> BitcaskResult<Vec<u8>> {
         {
             let mut writing_file_ref = self.writing_file.lock().unwrap();
-            if row_position.file_id == writing_file_ref.file_id {
+            if row_position.file_id == writing_file_ref.file_id() {
                 return writing_file_ref.read_value(row_position.row_offset, row_position.row_size);
             }
         }
@@ -313,7 +315,7 @@ impl Database {
 
     pub fn get_file_ids(&self) -> Vec<u32> {
         let writing_file_ref = self.writing_file.lock().unwrap();
-        let writing_file_id = writing_file_ref.file_id;
+        let writing_file_id = writing_file_ref.file_id();
         let mut ids: Vec<u32> = self
             .stable_files
             .iter()
@@ -354,7 +356,7 @@ impl Database {
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
         let mut writing_file_size: u64 = 0;
         {
-            writing_file_size = self.writing_file.lock().unwrap().file_size as u64;
+            writing_file_size = self.writing_file.lock().unwrap().file_size() as u64;
         }
         let mut total_data_size_in_bytes: u64 = self
             .stable_files
@@ -422,7 +424,7 @@ impl Database {
         writing_file_ref: &MutexGuard<WritingFile>,
         row: &RowToWrite,
     ) -> bool {
-        row.size + writing_file_ref.file_size > self.options.max_file_size
+        row.size + writing_file_ref.file_size() > self.options.max_file_size
     }
 
     fn do_flush_writing_file(

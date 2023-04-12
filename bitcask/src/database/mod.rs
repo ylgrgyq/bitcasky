@@ -11,3 +11,6 @@ mod constants;
 mod stable_file;
 
 mod hint;
+
+#[cfg(test)]
+mod mocks;

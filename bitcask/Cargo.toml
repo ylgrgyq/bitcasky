@@ -18,10 +18,9 @@ dashmap = "5.4.0"
 base64 = "0.21.0"
 log = "0.4.17"
 fs2 = "0.4.3"
-mockall = "0.11.4"
 
 [dev-dependencies]
 test-log = "0.2.11"
 env_logger = "*"
-mockall_double = "0.3.0"
+mockall = "0.11.4"
 bitcask-tests = { version="0.1.0", path = "../bitcask-tests" }

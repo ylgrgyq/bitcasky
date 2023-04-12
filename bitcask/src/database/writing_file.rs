@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{Seek, SeekFrom, Write},
     path::PathBuf,
 };
 
@@ -14,9 +14,9 @@ use super::common::{io_error_to_bitcask_error, read_value_from_file, RowPosition
 #[derive(Debug)]
 pub struct WritingFile {
     database_dir: PathBuf,
-    pub file_id: u32,
+    file_id: u32,
     data_file: File,
-    pub file_size: usize,
+    file_size: usize,
 }
 
 impl WritingFile {
@@ -28,6 +28,14 @@ impl WritingFile {
             data_file,
             file_size: 0,
         })
+    }
+
+    pub fn file_id(&self) -> u32 {
+        self.file_id
+    }
+
+    pub fn file_size(&self) -> usize {
+        self.file_size
     }
 
     pub fn write_row<'a>(&mut self, row: RowToWrite<'a>) -> BitcaskResult<RowPosition> {
