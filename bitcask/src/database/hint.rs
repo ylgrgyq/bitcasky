@@ -69,7 +69,8 @@ impl HintFile {
     }
 
     fn iter(&self) -> BitcaskResult<HintFileIterator> {
-        let file = file_manager::open_file(&self.database_dir, FileType::HintFile(self.file_id))?;
+        let file =
+            file_manager::open_file(&self.database_dir, FileType::HintFile, Some(self.file_id))?;
         Ok(HintFileIterator {
             file: HintFile::new(&self.database_dir, self.file_id, file.file),
         })

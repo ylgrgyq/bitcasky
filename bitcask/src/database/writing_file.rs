@@ -21,7 +21,7 @@ pub struct WritingFile {
 
 impl WritingFile {
     pub fn new(database_dir: &PathBuf, file_id: u32) -> BitcaskResult<Self> {
-        let data_file = create_file(&database_dir, FileType::DataFile(file_id))?;
+        let data_file = create_file(&database_dir, FileType::DataFile, Some(file_id))?;
         Ok(WritingFile {
             database_dir: database_dir.clone(),
             file_id,

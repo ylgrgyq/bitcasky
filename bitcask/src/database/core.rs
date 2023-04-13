@@ -18,9 +18,6 @@ use crate::{
 };
 use log::{error, info, warn};
 
-// #[cfg(test)]
-// use super::mocks::MockWritingFile as WritingFile;
-// #[cfg(not(test))]
 use super::writing_file::WritingFile;
 use super::{
     common::{RowPosition, RowToRead, RowToWrite},
@@ -244,12 +241,12 @@ impl Database {
 
         let files: BitcaskResult<Vec<StableFile>> = file_ids
             .iter()
-            .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile(*id)))
+            .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile, Some(*id)))
             .map(|f| {
                 f.and_then(|f| match f.file_type {
-                    FileType::DataFile(id) => StableFile::new(
+                    FileType::DataFile => StableFile::new(
                         &self.database_dir,
-                        id,
+                        f.file_id.unwrap(),
                         f.file,
                         self.options.tolerate_data_file_corruption,
                     )
@@ -327,10 +324,11 @@ impl Database {
 
     pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
         let row_hint_file =
-            file_manager::create_file(&self.database_dir, FileType::HintFile(file_id))?;
+            file_manager::create_file(&self.database_dir, FileType::HintFile, Some(file_id))?;
         let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
 
-        let data_file = file_manager::open_file(&self.database_dir, FileType::DataFile(file_id))?;
+        let data_file =
+            file_manager::open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         let stable_file_iter = StableFile::new(
             &self.database_dir,
             file_id,
@@ -384,7 +382,7 @@ impl Database {
     }
 
     fn open_stable_file(&self, file_id: u32) -> BitcaskResult<()> {
-        let data_file = open_file(&self.database_dir, FileType::DataFile(file_id))?;
+        let data_file = open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         let meta = data_file.file.metadata()?;
         if meta.len() <= 0 {
             info!(target: "Database", "skip load empty data file with id: {}", &file_id);
@@ -505,8 +503,9 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
-    use crate::file_manager::MergeMeta;
+    use crate::{database::writing_file, file_manager::MergeMeta};
 
+    use super::super::mocks::MockWritingFile;
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
