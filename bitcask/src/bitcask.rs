@@ -28,20 +28,20 @@ pub struct BitcaskOptions {
 
 impl BitcaskOptions {
     fn validate(&self) -> Option<BitcaskError> {
-        if self.max_file_size <= 0 {
-            Some(BitcaskError::InvalidParameter(
+        if self.max_file_size == 0 {
+            return Some(BitcaskError::InvalidParameter(
                 "max_file_size".into(),
                 "need a positive value".into(),
             ));
         }
-        if self.max_key_size <= 0 {
-            Some(BitcaskError::InvalidParameter(
+        if self.max_key_size == 0 {
+            return Some(BitcaskError::InvalidParameter(
                 "max_key_size".into(),
                 "need a positive value".into(),
             ));
         }
-        if self.max_value_size <= 0 {
-            Some(BitcaskError::InvalidParameter(
+        if self.max_value_size == 0 {
+            return Some(BitcaskError::InvalidParameter(
                 "max_value_size".into(),
                 "need a positive value".into(),
             ));
@@ -50,10 +50,10 @@ impl BitcaskOptions {
     }
 
     fn get_database_options(&self) -> DataBaseOptions {
-        return DataBaseOptions {
+        DataBaseOptions {
             max_file_size: self.max_file_size,
             tolerate_data_file_corruption: self.tolerate_data_file_corrption,
-        };
+        }
     }
 }
 
@@ -88,8 +88,8 @@ pub struct Bitcask {
 impl Bitcask {
     pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
         let valid_opt = options.validate();
-        if valid_opt.is_some() {
-            return Err(valid_opt.unwrap());
+        if let Some(e) = valid_opt {
+            return Err(e);
         }
         let directory_lock_file = match file_manager::lock_directory(directory)? {
             Some(f) => f,
@@ -102,7 +102,7 @@ impl Bitcask {
 
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let database = Database::open(
-            &directory,
+            directory,
             file_id_generator.clone(),
             options.get_database_options(),
         )?;
@@ -161,7 +161,7 @@ impl Bitcask {
                 .read()
                 .unwrap()
                 .get(key)
-                .and_then(|r| Some(r.value().clone()))
+                .map(|r| r.value().clone())
         };
 
         match row_pos {
@@ -191,7 +191,7 @@ impl Bitcask {
 
         if kd.contains_key(key) {
             self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
-            kd.delete(&key);
+            kd.delete(key);
         }
 
         Ok(())
@@ -256,7 +256,7 @@ impl Bitcask {
         if err.is_some() {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
-        return Ok(());
+        Ok(())
     }
 
     fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {

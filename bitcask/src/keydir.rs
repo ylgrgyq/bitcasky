@@ -3,7 +3,6 @@ use dashmap::{
     mapref::{multiple::RefMulti, one::Ref},
     DashMap,
 };
-use log::{info, warn};
 
 use crate::{
     database::{Database, RowPosition},
@@ -33,7 +32,7 @@ impl KeyDir {
             }
             kd.put(item.key, item.row_position);
         }
-        return Ok(kd);
+        Ok(kd)
     }
 
     pub fn put(&self, key: Vec<u8>, value: RowPosition) {
@@ -42,8 +41,8 @@ impl KeyDir {
 
     pub fn checked_put(&self, key: Vec<u8>, value: RowPosition) {
         let r = self.index.get(&key);
-        if r.is_some() {
-            let old_pos: RowPosition = *(r.unwrap());
+        if let Some(pos) = r {
+            let old_pos: RowPosition = *(pos);
             // key was written again during merge
             if value.file_id < old_pos.file_id {
                 return;

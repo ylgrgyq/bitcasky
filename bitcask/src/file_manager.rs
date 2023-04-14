@@ -8,7 +8,7 @@ use std::{
 
 use bytes::{Buf, Bytes};
 use fs2::FileExt;
-use log::{error, info, warn};
+use log::{error, warn};
 use walkdir::WalkDir;
 
 use crate::error::{BitcaskError, BitcaskResult};
@@ -20,7 +20,7 @@ const MERGE_META_FILE_EXTENSION: &str = "meta";
 const DATA_FILE_EXTENSION: &str = "data";
 const HINT_FILE_EXTENSION: &str = "hint";
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum FileType {
     Unknown,
     LockFile,
@@ -70,21 +70,21 @@ pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
         .read(true)
         .open(&p)?;
     match file.try_lock_exclusive() {
-        Ok(_) => return Ok(Some(file)),
-        _ => return Ok(None),
+        Ok(_) => Ok(Some(file)),
+        _ => Ok(None),
     }
 }
 
 pub fn unlock_directory(file: &File) {
     match file.unlock() {
-        Ok(_) => return,
+        Ok(_) => (),
         Err(e) => error!(target: "FileManager", "Unlock directory failed with reason: {}", e),
     }
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
     if fs::metadata(base_dir)
-        .and_then(|meta| Ok(meta.permissions().readonly()))
+        .map(|meta| meta.permissions().readonly())
         .unwrap_or(false)
     {
         return false;
@@ -92,17 +92,12 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
 
     // create a directory deliberately to check we have writable permission for target path
     let testing_path = base_dir.join(TESTING_DIRECTORY);
-    if testing_path.exists() {
-        if !fs::remove_dir(&testing_path)
-            .and_then(|_| Ok(true))
-            .unwrap_or(false)
-        {
-            return false;
-        }
+    if testing_path.exists() && !fs::remove_dir(&testing_path).map(|_| true).unwrap_or(false) {
+        return false;
     }
 
     if !fs::create_dir(&testing_path)
-        .and_then(|_| fs::remove_dir(testing_path).and_then(|_| Ok(true)))
+        .and_then(|_| fs::remove_dir(testing_path).map(|_| true))
         .unwrap_or(false)
     {
         return false;
@@ -184,19 +179,19 @@ pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult
     let merge_dir_path = merge_file_dir(base_dir);
     for file_id in file_ids {
         let from_p = FileType::DataFile.get_path(&merge_dir_path, Some(*file_id));
-        let to_p = FileType::DataFile.get_path(&base_dir, Some(*file_id));
+        let to_p = FileType::DataFile.get_path(base_dir, Some(*file_id));
         fs::rename(from_p, to_p)?;
     }
     Ok(())
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct MergeMeta {
     pub known_max_file_id: u32,
 }
 
 pub fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
-    let mut merge_meta_file = open_file(&merge_file_dir, FileType::MergeMeta, None)?;
+    let mut merge_meta_file = open_file(merge_file_dir, FileType::MergeMeta, None)?;
     let mut buf = vec![0; 4];
     merge_meta_file.file.read_exact(&mut buf)?;
     let mut bs = Bytes::from(buf);
@@ -205,8 +200,8 @@ pub fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
 }
 
 pub fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
-    let mut merge_meta_file = create_file(&merge_file_dir, FileType::MergeMeta, None)?;
-    merge_meta_file.write(&merge_meta.known_max_file_id.to_be_bytes())?;
+    let mut merge_meta_file = create_file(merge_file_dir, FileType::MergeMeta, None)?;
+    merge_meta_file.write_all(&merge_meta.known_max_file_id.to_be_bytes())?;
     Ok(())
 }
 
@@ -215,8 +210,8 @@ pub fn change_data_file_id(
     from_file_id: u32,
     to_file_id: u32,
 ) -> BitcaskResult<()> {
-    let from_p = FileType::DataFile.get_path(&base_dir, Some(from_file_id));
-    let to_p = FileType::DataFile.get_path(&base_dir, Some(to_file_id));
+    let from_p = FileType::DataFile.get_path(base_dir, Some(from_file_id));
+    let to_p = FileType::DataFile.get_path(base_dir, Some(to_file_id));
     fs::rename(from_p, to_p)?;
     Ok(())
 }

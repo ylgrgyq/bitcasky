@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
-    path::PathBuf,
+    path::{Path, PathBuf},
     vec,
 };
 
@@ -12,7 +12,7 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     file_manager::{self, FileType},
 };
-use log::{error, info, warn};
+use log::error;
 
 use super::{
     common::{io_error_to_bitcask_error, read_value_from_file, RowPosition, RowToRead},
@@ -33,14 +33,14 @@ pub struct StableFile {
 
 impl StableFile {
     pub fn new(
-        database_dir: &PathBuf,
+        database_dir: &Path,
         file_id: u32,
         file: File,
         tolerate_data_file_corrption: bool,
     ) -> BitcaskResult<Self> {
         let meta = file.metadata()?;
         Ok(StableFile {
-            database_dir: database_dir.clone(),
+            database_dir: database_dir.to_path_buf(),
             file_id,
             file,
             file_size: meta.len(),
@@ -144,16 +144,13 @@ impl Iterator for StableFileIter {
     fn next(&mut self) -> Option<Self::Item> {
         let ret = self.stable_file.read_next_row();
         match ret {
-            Ok(o) => o.and_then(|s| Some(Ok(s))),
+            Ok(o) => o.map(|s| Ok(s)),
             Err(e) => {
-                match &e {
-                    BitcaskError::DataFileCorrupted(dir, file_id, hint) => {
-                        if self.stable_file.tolerate_data_file_corrption {
-                            error!(target: "Database", "Tolerate corrupted data file with file id {} under path {} corrupted. Corrupted hint: {}", file_id, dir, hint);
-                            return None;
-                        }
+                if let BitcaskError::DataFileCorrupted(dir, file_id, hint) = &e {
+                    if self.stable_file.tolerate_data_file_corrption {
+                        error!(target: "Database", "Tolerate corrupted data file with file id {} under path {} corrupted. Corrupted hint: {}", file_id, dir, hint);
+                        return None;
                     }
-                    _ => {}
                 }
                 return Some(Err(e));
             }

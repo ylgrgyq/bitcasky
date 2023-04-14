@@ -149,19 +149,19 @@ impl Database {
         validate_database_directory(&database_dir)?;
 
         let recover_ret = recover_merge(&database_dir, &file_id_generator);
-        if recover_ret.is_err() {
+        if let Err(err) = recover_ret {
             let merge_dir = file_manager::merge_file_dir(&database_dir);
             warn!(
                 "recover merge under path: {} failed with error: \"{}\"",
                 merge_dir.display(),
-                recover_ret.as_ref().unwrap_err()
+                err
             );
-            match recover_ret.as_ref().unwrap_err() {
+            match err {
                 BitcaskError::InvalidMergeDataFile(_, _) => {
                     // clear Merge directory when recover merge failed
                     file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
                 }
-                _ => return Err(recover_ret.unwrap_err()),
+                _ => return Err(err),
             }
         }
 
@@ -178,7 +178,7 @@ impl Database {
             .into_iter()
             .map(|(k, v)| {
                 StableFile::new(&database_dir, k, v, options.tolerate_data_file_corruption)
-                    .and_then(|stable_file| Ok((k, Mutex::new(stable_file))))
+                    .map(|stable_file| (k, Mutex::new(stable_file)))
             })
             .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
 
@@ -384,7 +384,7 @@ impl Database {
     fn open_stable_file(&self, file_id: u32) -> BitcaskResult<()> {
         let data_file = open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         let meta = data_file.file.metadata()?;
-        if meta.len() <= 0 {
+        if meta.len() == 0 {
             info!(target: "Database", "skip load empty data file with id: {}", &file_id);
             return Ok(());
         }

@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     vec,
 };
 
@@ -48,9 +48,9 @@ pub struct HintFile {
 }
 
 impl HintFile {
-    pub fn new(database_dir: &PathBuf, file_id: u32, file: File) -> Self {
+    pub fn new(database_dir: &Path, file_id: u32, file: File) -> Self {
         HintFile {
-            database_dir: database_dir.clone(),
+            database_dir: database_dir.to_path_buf(),
             file_id,
             file,
         }
@@ -63,7 +63,7 @@ impl HintFile {
         let hints: BitcaskResult<Vec<RowHint>> = iter.collect();
         for hint in hints? {
             let data_to_write = hint.to_bytes();
-            self.file.write_all(&*data_to_write)?;
+            self.file.write_all(&data_to_write)?;
         }
         Ok(())
     }
@@ -114,12 +114,10 @@ impl Iterator for HintFileIterator {
     fn next(&mut self) -> Option<Self::Item> {
         match self.file.read_next_hint() {
             Err(BitcaskError::IoError(e)) => match e.kind() {
-                std::io::ErrorKind::UnexpectedEof => {
-                    return None;
-                }
-                _ => return Some(Err(BitcaskError::IoError(e))),
+                std::io::ErrorKind::UnexpectedEof => None,
+                _ => Some(Err(BitcaskError::IoError(e))),
             },
-            r => return Some(r),
+            r => Some(r),
         }
     }
 }
