@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Seek, SeekFrom, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use crate::{
@@ -20,10 +20,10 @@ pub struct WritingFile {
 }
 
 impl WritingFile {
-    pub fn new(database_dir: &PathBuf, file_id: u32) -> BitcaskResult<Self> {
-        let data_file = create_file(&database_dir, FileType::DataFile, Some(file_id))?;
+    pub fn new(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+        let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
         Ok(WritingFile {
-            database_dir: database_dir.clone(),
+            database_dir: database_dir.to_path_buf(),
             file_id,
             data_file,
             file_size: 0,
@@ -38,10 +38,10 @@ impl WritingFile {
         self.file_size
     }
 
-    pub fn write_row<'a>(&mut self, row: RowToWrite<'a>) -> BitcaskResult<RowPosition> {
+    pub fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowPosition> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
-        self.data_file.write_all(&*data_to_write).map_err(|e| {
+        self.data_file.write_all(&data_to_write).map_err(|e| {
             io_error_to_bitcask_error(
                 &self.database_dir,
                 self.file_id,

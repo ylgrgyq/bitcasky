@@ -144,7 +144,7 @@ impl Iterator for StableFileIter {
     fn next(&mut self) -> Option<Self::Item> {
         let ret = self.stable_file.read_next_row();
         match ret {
-            Ok(o) => o.map(|s| Ok(s)),
+            Ok(o) => o.map(Ok),
             Err(e) => {
                 if let BitcaskError::DataFileCorrupted(dir, file_id, hint) = &e {
                     if self.stable_file.tolerate_data_file_corrption {
@@ -152,7 +152,7 @@ impl Iterator for StableFileIter {
                         return None;
                     }
                 }
-                return Some(Err(e));
+                Some(Err(e))
             }
         }
     }

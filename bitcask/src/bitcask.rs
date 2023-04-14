@@ -156,13 +156,7 @@ impl Bitcask {
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         self.check_db_error()?;
 
-        let row_pos = {
-            self.keydir
-                .read()
-                .unwrap()
-                .get(key)
-                .map(|r| r.value().clone())
-        };
+        let row_pos = { self.keydir.read().unwrap().get(key).map(|r| *r.value()) };
 
         match row_pos {
             Some(e) => {

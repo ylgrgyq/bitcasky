@@ -44,7 +44,7 @@ impl<'a> RowToWrite<'a> {
         ck.update(&timestamp.to_be_bytes());
         ck.update(&key_size.to_be_bytes());
         ck.update(&value_size.to_be_bytes());
-        ck.update(&key);
+        ck.update(key);
         ck.update(value);
         RowToWrite {
             crc: ck.finalize(),
@@ -83,11 +83,11 @@ pub fn io_error_to_bitcask_error(
                 hint.into(),
             );
         }
-        _ => return BitcaskError::IoError(e),
+        _ => BitcaskError::IoError(e),
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowPosition {
     pub file_id: u32,
     pub row_offset: u64,

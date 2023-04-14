@@ -202,7 +202,7 @@ impl Database {
     }
 
     pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
-        let row = RowToWrite::new(&key, value);
+        let row = RowToWrite::new(key, value);
         self.do_write(row)
     }
 
@@ -212,7 +212,7 @@ impl Database {
         value: &[u8],
         timestamp: u64,
     ) -> BitcaskResult<RowPosition> {
-        let row = RowToWrite::new_with_timestamp(&key, value, timestamp);
+        let row = RowToWrite::new_with_timestamp(key, value, timestamp);
         self.do_write(row)
     }
 
@@ -249,8 +249,7 @@ impl Database {
                         f.file_id.unwrap(),
                         f.file,
                         self.options.tolerate_data_file_corruption,
-                    )
-                    .and_then(|s| Ok(s)),
+                    ),
                     _ => unreachable!(),
                 })
             })
@@ -298,10 +297,10 @@ impl Database {
             self.open_stable_file(file_id)?;
         }
 
-        file_manager::commit_merge_files(&self.database_dir, &merged_file_ids)?;
+        file_manager::commit_merge_files(&self.database_dir, merged_file_ids)?;
 
         for file_id in merged_file_ids {
-            if self.stable_files.contains_key(&file_id) {
+            if self.stable_files.contains_key(file_id) {
                 core::panic!("merged file id: {} already loaded in database", file_id);
             }
             self.open_stable_file(*file_id)?;
@@ -338,21 +337,19 @@ impl Database {
         .iter()?;
 
         let boxed_iter = Box::new(stable_file_iter.map(|ret| {
-            ret.and_then(|row| {
-                Ok(RowHint {
-                    timestamp: row.row_position.tstmp,
-                    key_size: row.key.len(),
-                    value_size: row.value.len(),
-                    row_offset: row.row_position.row_offset,
-                    key: row.key,
-                })
+            ret.map(|row| RowHint {
+                timestamp: row.row_position.tstmp,
+                key_size: row.key.len(),
+                value_size: row.value.len(),
+                row_offset: row.row_position.row_offset,
+                key: row.key,
             })
         }));
         hint_file.write_file(boxed_iter)
     }
 
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
-        let mut writing_file_size: u64 = 0;
+        let writing_file_size: u64;
         {
             writing_file_size = self.writing_file.lock().unwrap().file_size() as u64;
         }
@@ -405,16 +402,13 @@ impl Database {
         }
         let write_row_ret = writing_file_ref.write_row(row);
         if self.options.tolerate_data_file_corruption {
-            match write_row_ret {
-                Err(BitcaskError::DataFileCorrupted(_, _, _)) => {
-                    // tolerate data file corruption, so when write data file failed
-                    // we switch to a new data file
-                    self.do_flush_writing_file(&mut writing_file_ref)?;
-                }
-                _ => {}
+            if let Err(BitcaskError::DataFileCorrupted(_, _, _)) = write_row_ret {
+                // tolerate data file corruption, so when write data file failed
+                // we switch to a new data file
+                self.do_flush_writing_file(&mut writing_file_ref)?;
             }
         }
-        return write_row_ret;
+        write_row_ret
     }
 
     fn check_file_overflow(
@@ -468,16 +462,16 @@ pub struct DatabaseIter {
 impl DatabaseIter {
     fn new(mut iters: Vec<StableFileIter>) -> Self {
         if iters.is_empty() {
-            return DatabaseIter {
+            DatabaseIter {
                 remain_iters: iters,
                 current_iter: Cell::new(None),
-            };
+            }
         } else {
             let current_iter = iters.pop();
-            return DatabaseIter {
+            DatabaseIter {
                 remain_iters: iters,
                 current_iter: Cell::new(current_iter),
-            };
+            }
         }
     }
 }
