@@ -264,7 +264,7 @@ fn open_data_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
 
 fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
     let binding = file_path.file_name().unwrap().to_string_lossy();
-    let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_EXTENSION.len());
+    let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_EXTENSION.len() - 1);
     file_id_str
         .parse::<u32>()
         .map_err(|_| BitcaskError::InvalidDatabaseFileName(binding.to_string()))
