@@ -12,9 +12,7 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
-    file_manager::{
-        self, get_valid_data_file_ids, open_data_files_under_path, open_file, FileType,
-    },
+    fs::{self as SelfFs, FileType},
 };
 use log::{error, info, warn};
 
@@ -51,7 +49,7 @@ pub struct DataBaseOptions {
 
 fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
     fs::create_dir_all(dir)?;
-    if !file_manager::check_directory_is_writable(dir) {
+    if !SelfFs::check_directory_is_writable(dir) {
         return Err(BitcaskError::PermissionDenied(format!(
             "do not have writable permission for path: {}",
             dir.display()
@@ -65,7 +63,7 @@ fn shift_data_files(
     known_max_file_id: u32,
     file_id_generator: &Arc<FileIdGenerator>,
 ) -> BitcaskResult<Vec<u32>> {
-    let mut data_file_ids = get_valid_data_file_ids(database_dir)
+    let mut data_file_ids = SelfFs::get_valid_data_file_ids(database_dir)
         .into_iter()
         .filter(|id| *id >= known_max_file_id)
         .collect::<Vec<u32>>();
@@ -77,7 +75,7 @@ fn shift_data_files(
     let mut new_file_ids = vec![];
     for from_id in data_file_ids {
         let new_file_id = file_id_generator.generate_next_file_id();
-        file_manager::change_data_file_id(database_dir, from_id, new_file_id)?;
+        SelfFs::change_data_file_id(database_dir, from_id, new_file_id)?;
         new_file_ids.push(new_file_id);
     }
     Ok(new_file_ids)
@@ -87,19 +85,19 @@ fn recover_merge(
     database_dir: &Path,
     file_id_generator: &Arc<FileIdGenerator>,
 ) -> BitcaskResult<()> {
-    let merge_file_dir = file_manager::merge_file_dir(database_dir);
+    let merge_file_dir = SelfFs::merge_file_dir(database_dir);
 
     if !merge_file_dir.exists() {
         return Ok(());
     }
 
-    let mut merge_data_file_ids = file_manager::get_valid_data_file_ids(&merge_file_dir);
+    let mut merge_data_file_ids = SelfFs::get_valid_data_file_ids(&merge_file_dir);
     if merge_data_file_ids.is_empty() {
         return Ok(());
     }
 
     merge_data_file_ids.sort();
-    let merge_meta = file_manager::read_merge_meta(&merge_file_dir)?;
+    let merge_meta = SelfFs::read_merge_meta(&merge_file_dir)?;
     if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
         return Err(BitcaskError::InvalidMergeDataFile(
             merge_meta.known_max_file_id,
@@ -115,11 +113,11 @@ fn recover_merge(
         file_id_generator,
     )?;
 
-    file_manager::commit_merge_files(database_dir, &merge_data_file_ids)?;
+    SelfFs::commit_merge_files(database_dir, &merge_data_file_ids)?;
 
-    file_manager::purge_outdated_data_files(database_dir, merge_meta.known_max_file_id)?;
+    SelfFs::purge_outdated_data_files(database_dir, merge_meta.known_max_file_id)?;
 
-    let clear_ret = file_manager::clear_dir(&merge_file_dir);
+    let clear_ret = SelfFs::clear_dir(&merge_file_dir);
     if clear_ret.is_err() {
         warn!(
             "clear merge directory failed after merge recovered. {}",
@@ -150,7 +148,7 @@ impl Database {
 
         let recover_ret = recover_merge(&database_dir, &file_id_generator);
         if let Err(err) = recover_ret {
-            let merge_dir = file_manager::merge_file_dir(&database_dir);
+            let merge_dir = SelfFs::merge_file_dir(&database_dir);
             warn!(
                 "recover merge under path: {} failed with error: \"{}\"",
                 merge_dir.display(),
@@ -159,13 +157,13 @@ impl Database {
             match err {
                 BitcaskError::InvalidMergeDataFile(_, _) => {
                     // clear Merge directory when recover merge failed
-                    file_manager::clear_dir(&file_manager::merge_file_dir(&database_dir))?;
+                    SelfFs::clear_dir(&SelfFs::merge_file_dir(&database_dir))?;
                 }
                 _ => return Err(err),
             }
         }
 
-        let opened_stable_files = open_data_files_under_path(&database_dir)?;
+        let opened_stable_files = SelfFs::open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);
             file_id_generator.update_file_id(*writing_file_id);
@@ -241,7 +239,7 @@ impl Database {
 
         let files: BitcaskResult<Vec<StableFile>> = file_ids
             .iter()
-            .map(|id| file_manager::open_file(&self.database_dir, FileType::DataFile, Some(*id)))
+            .map(|id| SelfFs::open_file(&self.database_dir, FileType::DataFile, Some(*id)))
             .map(|f| {
                 f.and_then(|f| match f.file_type {
                     FileType::DataFile => StableFile::new(
@@ -297,7 +295,7 @@ impl Database {
             self.open_stable_file(file_id)?;
         }
 
-        file_manager::commit_merge_files(&self.database_dir, merged_file_ids)?;
+        SelfFs::commit_merge_files(&self.database_dir, merged_file_ids)?;
 
         for file_id in merged_file_ids {
             if self.stable_files.contains_key(file_id) {
@@ -323,11 +321,10 @@ impl Database {
 
     pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
         let row_hint_file =
-            file_manager::create_file(&self.database_dir, FileType::HintFile, Some(file_id))?;
+            SelfFs::create_file(&self.database_dir, FileType::HintFile, Some(file_id))?;
         let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
 
-        let data_file =
-            file_manager::open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
+        let data_file = SelfFs::open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         let stable_file_iter = StableFile::new(
             &self.database_dir,
             file_id,
@@ -379,7 +376,7 @@ impl Database {
     }
 
     fn open_stable_file(&self, file_id: u32) -> BitcaskResult<()> {
-        let data_file = open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
+        let data_file = SelfFs::open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         let meta = data_file.file.metadata()?;
         if meta.len() == 0 {
             info!(target: "Database", "skip load empty data file with id: {}", &file_id);
@@ -497,7 +494,7 @@ impl Iterator for DatabaseIter {
 
 #[cfg(test)]
 mod tests {
-    use crate::{database::writing_file, file_manager::MergeMeta};
+    use crate::{database::writing_file, fs::MergeMeta};
 
     use super::super::mocks::MockWritingFile;
     use super::*;
@@ -636,11 +633,11 @@ mod tests {
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
-        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        let merge_file_dir = SelfFs::create_merge_file_dir(&dir).unwrap();
         let merge_meta = MergeMeta {
             known_max_file_id: 101,
         };
-        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        SelfFs::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(2, file_id_generator.get_file_id());
         assert_eq!(1, db.stable_files.len());
@@ -661,7 +658,7 @@ mod tests {
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
-        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
+        let merge_file_dir = SelfFs::create_merge_file_dir(&dir).unwrap();
         {
             // write something to data file in merge dir
             let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
@@ -676,7 +673,7 @@ mod tests {
         let merge_meta = MergeMeta {
             known_max_file_id: file_id_generator.generate_next_file_id(),
         };
-        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        SelfFs::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(4, file_id_generator.get_file_id());
         assert_eq!(1, db.stable_files.len());
@@ -700,8 +697,8 @@ mod tests {
         let merge_meta = MergeMeta {
             known_max_file_id: file_id_generator.generate_next_file_id(),
         };
-        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
-        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let merge_file_dir = SelfFs::create_merge_file_dir(&dir).unwrap();
+        SelfFs::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
         let mut rows: Vec<TestingRow> = vec![];
         {
             // write something to data file in merge dir
@@ -739,8 +736,8 @@ mod tests {
         let merge_meta = MergeMeta {
             known_max_file_id: file_id_generator.generate_next_file_id(),
         };
-        let merge_file_dir = file_manager::create_merge_file_dir(&dir).unwrap();
-        file_manager::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let merge_file_dir = SelfFs::create_merge_file_dir(&dir).unwrap();
+        SelfFs::write_merge_meta(&merge_file_dir, merge_meta).unwrap();
         {
             // write something to data file in merge dir
             let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
@@ -801,7 +798,7 @@ mod tests {
         ];
         rows.append(&mut write_kvs_to_db(&old_db, kvs));
         {
-            let merge_path = file_manager::create_merge_file_dir(&dir).unwrap();
+            let merge_path = SelfFs::create_merge_file_dir(&dir).unwrap();
             let db =
                 Database::open(&merge_path, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![

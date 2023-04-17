@@ -11,75 +11,18 @@ use fs2::FileExt;
 use log::{error, warn};
 use walkdir::WalkDir;
 
-use crate::error::{BitcaskError, BitcaskResult};
+use crate::{
+    error::{BitcaskError, BitcaskResult},
+    fs::FileType,
+};
 
 const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
-const LOCK_FILE_EXTENSION: &str = "lock";
-const MERGE_META_FILE_EXTENSION: &str = "meta";
-const DATA_FILE_EXTENSION: &str = "data";
-const HINT_FILE_EXTENSION: &str = "hint";
-
-#[derive(PartialEq, Eq, Debug)]
-pub enum FileType {
-    Unknown,
-    LockFile,
-    MergeMeta,
-    DataFile,
-    HintFile,
-}
-
-impl FileType {
-    pub fn get_path(&self, base_dir: &Path, file_id: Option<u32>) -> PathBuf {
-        base_dir.join(match self {
-            Self::LockFile => format!("bitcask.{}", LOCK_FILE_EXTENSION),
-            Self::MergeMeta => format!("merge.{}", MERGE_META_FILE_EXTENSION),
-            Self::DataFile => format!("{}.{}", file_id.unwrap(), DATA_FILE_EXTENSION),
-            Self::HintFile => format!("{}.{}", file_id.unwrap(), HINT_FILE_EXTENSION),
-            Self::Unknown => panic!("get path for unknown data type"),
-        })
-    }
-
-    fn check_file_belongs_to_type(&self, file_path: &Path) -> bool {
-        let ft = match file_path.extension() {
-            None => FileType::Unknown,
-            Some(os_str) => match os_str.to_str() {
-                Some(LOCK_FILE_EXTENSION) => FileType::LockFile,
-                Some(MERGE_META_FILE_EXTENSION) => FileType::MergeMeta,
-                Some(DATA_FILE_EXTENSION) => FileType::DataFile,
-                Some(HINT_FILE_EXTENSION) => FileType::HintFile,
-                _ => FileType::Unknown,
-            },
-        };
-        *self == ft
-    }
-}
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
     pub file: File,
     pub file_id: Option<u32>,
-}
-
-pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
-    fs::create_dir_all(base_dir)?;
-    let p = FileType::LockFile.get_path(base_dir, None);
-    let file = File::options()
-        .write(true)
-        .create(true)
-        .read(true)
-        .open(&p)?;
-    match file.try_lock_exclusive() {
-        Ok(_) => Ok(Some(file)),
-        _ => Ok(None),
-    }
-}
-
-pub fn unlock_directory(file: &File) {
-    match file.unlock() {
-        Ok(_) => (),
-        Err(e) => error!(target: "FileManager", "Unlock directory failed with reason: {}", e),
-    }
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
@@ -234,7 +177,7 @@ pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32,
 pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
     get_valid_data_file_paths(base_dir)
         .iter()
-        .map(|p| parse_file_id_from_data_file(p).unwrap())
+        .map(|p| FileType::DataFile.parse_file_id_from_file_name(p).unwrap())
         .collect()
 }
 
@@ -248,21 +191,19 @@ pub fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskRe
 }
 
 fn open_data_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
-    let file_id = parse_file_id_from_data_file(file_path)?;
-    let file = File::options().read(true).open(file_path)?;
-    Ok(IdentifiedFile {
-        file_type: FileType::DataFile,
-        file,
-        file_id: Some(file_id),
-    })
-}
-
-fn parse_file_id_from_data_file(file_path: &Path) -> BitcaskResult<u32> {
-    let binding = file_path.file_name().unwrap().to_string_lossy();
-    let (file_id_str, _) = binding.split_at(binding.len() - DATA_FILE_EXTENSION.len() - 1);
-    file_id_str
-        .parse::<u32>()
-        .map_err(|_| BitcaskError::InvalidDatabaseFileName(binding.to_string()))
+    if let Some(file_id) = FileType::DataFile.parse_file_id_from_file_name(file_path) {
+        let file = File::options().read(true).open(file_path)?;
+        return Ok(IdentifiedFile {
+            file_type: FileType::DataFile,
+            file,
+            file_id: Some(file_id),
+        });
+    }
+    let file_name = file_path
+        .file_name()
+        .map(|s| s.to_str().unwrap_or(""))
+        .unwrap_or("");
+    Err(BitcaskError::InvalidFileName(file_name.into()))
 }
 
 fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
@@ -273,8 +214,11 @@ fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let file_name = e.file_name().to_string_lossy();
-            if file_name.ends_with(DATA_FILE_EXTENSION)
-                && parse_file_id_from_data_file(e.path()).is_ok()
+            if FileType::DataFile.check_file_belongs_to_type(e.path())
+                && FileType::DataFile
+                    .parse_file_id_from_file_name(e.path())
+                    .map(|_| true)
+                    .unwrap_or(false)
             {
                 Some(e.into_path())
             } else {
@@ -313,35 +257,13 @@ mod tests {
                 continue;
             }
 
-            let id = parse_file_id_from_data_file(&file_path.path()).unwrap();
+            let id = FileType::DataFile
+                .parse_file_id_from_file_name(&file_path.path())
+                .unwrap();
             actual_file_ids.push(id);
         }
         actual_file_ids.sort();
         actual_file_ids
-    }
-
-    #[test]
-    fn test_file_type() {
-        let dir = get_temporary_directory_path();
-
-        let p = FileType::LockFile.get_path(&dir, None);
-        assert!(FileType::LockFile.check_file_belongs_to_type(&p));
-        let p = FileType::HintFile.get_path(&dir, Some(123));
-        assert!(FileType::HintFile.check_file_belongs_to_type(&p));
-        let p = FileType::DataFile.get_path(&dir, Some(100));
-        assert!(FileType::DataFile.check_file_belongs_to_type(&p));
-        let p = FileType::MergeMeta.get_path(&dir, Some(100));
-        assert!(FileType::MergeMeta.check_file_belongs_to_type(&p));
-
-        assert!(!FileType::LockFile.check_file_belongs_to_type(&dir.join("")));
-        assert!(!FileType::DataFile.check_file_belongs_to_type(&dir.join("")));
-        assert!(!FileType::HintFile.check_file_belongs_to_type(&dir.join("")));
-        assert!(!FileType::MergeMeta.check_file_belongs_to_type(&dir.join("")));
-
-        assert!(!FileType::LockFile.check_file_belongs_to_type(&dir.join(".abc")));
-        assert!(!FileType::DataFile.check_file_belongs_to_type(&dir.join(".abc")));
-        assert!(!FileType::HintFile.check_file_belongs_to_type(&dir.join(".abc")));
-        assert!(!FileType::MergeMeta.check_file_belongs_to_type(&dir.join(".abc")));
     }
 
     #[test]

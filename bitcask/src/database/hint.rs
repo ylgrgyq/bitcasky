@@ -9,7 +9,7 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
-    file_manager::{self, FileType},
+    fs::{self, FileType},
 };
 
 use super::constants::{KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE};
@@ -69,8 +69,7 @@ impl HintFile {
     }
 
     fn iter(&self) -> BitcaskResult<HintFileIterator> {
-        let file =
-            file_manager::open_file(&self.database_dir, FileType::HintFile, Some(self.file_id))?;
+        let file = fs::open_file(&self.database_dir, FileType::HintFile, Some(self.file_id))?;
         Ok(HintFileIterator {
             file: HintFile::new(&self.database_dir, self.file_id, file.file),
         })

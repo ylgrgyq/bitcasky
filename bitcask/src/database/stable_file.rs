@@ -10,7 +10,7 @@ use crc::{Crc, CRC_32_CKSUM};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
-    file_manager::{self, FileType},
+    fs::{self, FileType},
 };
 use log::error;
 
@@ -121,8 +121,7 @@ impl StableFile {
     }
 
     pub fn iter(&self) -> BitcaskResult<StableFileIter> {
-        let file =
-            file_manager::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
+        let file = fs::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
         let stable_file = StableFile::new(
             &self.database_dir,
             self.file_id,

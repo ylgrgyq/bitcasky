@@ -7,7 +7,7 @@ use log::{error, info};
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
-use crate::file_manager::{self, MergeMeta};
+use crate::fs::{self, MergeMeta};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
@@ -91,7 +91,7 @@ impl Bitcask {
         if let Some(e) = valid_opt {
             return Err(e);
         }
-        let directory_lock_file = match file_manager::lock_directory(directory)? {
+        let directory_lock_file = match fs::lock_directory(directory)? {
             Some(f) => f,
             None => {
                 return Err(BitcaskError::LockDirectoryFailed(
@@ -201,7 +201,7 @@ impl Bitcask {
         }
 
         let (kd, known_max_file_id) = self.flush_writing_file()?;
-        let dir_path = file_manager::create_merge_file_dir(self.database.get_database_dir())?;
+        let dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
 
         info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
@@ -224,7 +224,7 @@ impl Bitcask {
 
         info!(target: "BitcaskMerge", "purge files with id smaller than: {}", known_max_file_id);
 
-        file_manager::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
+        fs::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
         Ok(())
     }
 
@@ -267,7 +267,7 @@ impl Bitcask {
         key_dir_to_write: &KeyDir,
         known_max_file_id: u32,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
-        file_manager::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
+        fs::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
 
         let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
@@ -292,6 +292,6 @@ impl Bitcask {
 
 impl Drop for Bitcask {
     fn drop(&mut self) {
-        file_manager::unlock_directory(&self.directory_lock_file);
+        fs::unlock_directory(&self.directory_lock_file);
     }
 }

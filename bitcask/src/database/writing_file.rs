@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     error::BitcaskResult,
-    file_manager::{create_file, FileType},
+    fs::{create_file, FileType},
 };
 
 use super::common::{io_error_to_bitcask_error, read_value_from_file, RowPosition, RowToWrite};
