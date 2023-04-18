@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::path::PathBuf;
 
 pub struct TestingKV {
@@ -23,4 +24,8 @@ impl TestingKV {
 pub fn get_temporary_directory_path() -> PathBuf {
     let dir = tempfile::tempdir().unwrap();
     dir.into_path()
+}
+
+pub fn generate_random_testing_kvs(key_size: usize, value_size: usize, kvs_len: usize) {
+    let mut rng = rand::thread_rng();
 }

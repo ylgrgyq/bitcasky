@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -7,8 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use fs2::FileExt;
-use log::{error, warn};
+use log::warn;
 use walkdir::WalkDir;
 
 use crate::{
