@@ -1,6 +1,7 @@
 pub mod bitcask;
-mod database;
 pub mod error;
+
+mod database;
 mod file_id;
 mod fs;
 mod keydir;

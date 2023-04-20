@@ -11,8 +11,8 @@ use test_log::test;
 use walkdir::WalkDir;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-    max_file_size: 11,
-    max_key_size: 1024,
+    max_file_size: 10 * 1024,
+    max_key_size: 64,
     max_value_size: 1024,
     tolerate_data_file_corrption: true,
 };
@@ -44,12 +44,11 @@ fn test_read_write_writing_file() {
 }
 
 #[test]
-fn test_random_read_write() {
-    let mut gen = RandomTestingDataGenerator::new(64, 64);
-    let ops = gen.generate_testing_operations(10000);
-
+fn test_random_put_and_delete() {
+    let mut gen = RandomTestingDataGenerator::new(64, 512);
+    let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, BitcaskOptions::default()).unwrap();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     for op in ops.operations() {
         match op.operator() {
             TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
@@ -64,47 +63,22 @@ fn test_random_read_write() {
 
 #[test]
 fn test_recovery() {
+    let mut gen = RandomTestingDataGenerator::new(64, 512);
+    let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
     {
-        let bc = Bitcask::open(
-            &dir,
-            BitcaskOptions {
-                max_file_size: 100,
-                max_key_size: 1024,
-                max_value_size: 1024,
-                tolerate_data_file_corrption: true,
-            },
-        )
-        .unwrap();
-        bc.put("k1".into(), "value1_value1_value1".as_bytes())
-            .unwrap();
-        bc.put("k2".into(), "value2_value2_value2".as_bytes())
-            .unwrap();
-        bc.put("k3".into(), "value3_value3_value3".as_bytes())
-            .unwrap();
-        bc.put("k1".into(), "value4_value4_value4".as_bytes())
-            .unwrap();
-        bc.delete(&"k2".into()).unwrap();
+        let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+        for op in ops.operations() {
+            match op.operator() {
+                TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
+                TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
+            }
+        }
     }
-    let bc = Bitcask::open(
-        &dir,
-        BitcaskOptions {
-            max_file_size: 100,
-            max_key_size: 1024,
-            max_value_size: 1024,
-            tolerate_data_file_corrption: true,
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        bc.get(&"k1".into()).unwrap().unwrap(),
-        "value4_value4_value4".as_bytes()
-    );
-    assert_eq!(bc.get(&"k2".into()).unwrap(), None,);
-    assert_eq!(
-        bc.get(&"k3".into()).unwrap().unwrap(),
-        "value3_value3_value3".as_bytes()
-    );
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    for op in ops.squash() {
+        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+    }
 }
 
 #[test]
