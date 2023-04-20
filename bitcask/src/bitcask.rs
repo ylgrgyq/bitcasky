@@ -11,13 +11,6 @@ use crate::fs::{self, MergeMeta};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
-pub const DEFAULT_BITCASK_OPTIONS: BitcaskOptions = BitcaskOptions {
-    max_file_size: 128 * 1024 * 1024,
-    max_key_size: 64,
-    max_value_size: 100 * 1024,
-    tolerate_data_file_corrption: true,
-};
-
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
     pub max_file_size: usize,
@@ -53,6 +46,17 @@ impl BitcaskOptions {
         DataBaseOptions {
             max_file_size: self.max_file_size,
             tolerate_data_file_corruption: self.tolerate_data_file_corrption,
+        }
+    }
+}
+
+impl Default for BitcaskOptions {
+    fn default() -> Self {
+        Self {
+            max_file_size: 128 * 1024 * 1024,
+            max_key_size: 64,
+            max_value_size: 100 * 1024,
+            tolerate_data_file_corrption: true,
         }
     }
 }

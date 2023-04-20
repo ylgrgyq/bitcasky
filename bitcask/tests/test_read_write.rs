@@ -1,8 +1,12 @@
+use std::path::Path;
+
 use bitcask::{
     bitcask::{Bitcask, BitcaskOptions},
     error::BitcaskError,
 };
-use bitcask_tests::common::get_temporary_directory_path;
+use bitcask_tests::common::{
+    get_temporary_directory_path, RandomTestingDataGenerator, TestingOperator,
+};
 use test_log::test;
 use walkdir::WalkDir;
 
@@ -37,6 +41,25 @@ fn test_read_write_writing_file() {
     assert_eq!(bc.get(&"k1".into()).unwrap().unwrap(), "value4".as_bytes());
     assert_eq!(bc.get(&"k2".into()).unwrap().unwrap(), "value2".as_bytes());
     assert_eq!(bc.get(&"k3".into()).unwrap().unwrap(), "value3".as_bytes());
+}
+
+#[test]
+fn test_random_read_write() {
+    let mut gen = RandomTestingDataGenerator::new(64, 64);
+    let ops = gen.generate_testing_operations(10000);
+
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, BitcaskOptions::default()).unwrap();
+    for op in ops.operations() {
+        match op.operator() {
+            TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
+            TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
+        }
+    }
+
+    for op in ops.squash() {
+        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+    }
 }
 
 #[test]
