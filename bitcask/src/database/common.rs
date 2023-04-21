@@ -16,6 +16,14 @@ use super::constants::{
     VALUE_SIZE_SIZE,
 };
 
+pub trait Encoder<T> {
+    fn encode(obj: T) -> Bytes;
+}
+
+pub trait Decoder<T> {
+    fn decode(bytes: Bytes) -> T;
+}
+
 #[derive(Debug)]
 pub struct RowToWrite<'a> {
     pub crc: u32,

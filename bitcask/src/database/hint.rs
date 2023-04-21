@@ -120,3 +120,9 @@ impl Iterator for HintFileIterator {
         }
     }
 }
+
+pub struct HintFileWriter {}
+
+impl HintFileWriter {
+    pub fn write_hint_file(&self, data_file_id: u32) {}
+}

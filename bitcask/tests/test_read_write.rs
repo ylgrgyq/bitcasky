@@ -5,7 +5,7 @@ use bitcask::{
     error::BitcaskError,
 };
 use bitcask_tests::common::{
-    get_temporary_directory_path, RandomTestingDataGenerator, TestingOperator,
+    get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
 use test_log::test;
 use walkdir::WalkDir;
@@ -16,6 +16,15 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_value_size: 1024,
     tolerate_data_file_corrption: true,
 };
+
+fn load_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
+    for op in ops.operations() {
+        match op.operator() {
+            TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
+            TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
+        }
+    }
+}
 
 #[test]
 fn test_open_db_twice() {
@@ -49,12 +58,7 @@ fn test_random_put_and_delete() {
     let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
-    for op in ops.operations() {
-        match op.operator() {
-            TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
-            TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
-        }
-    }
+    load_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
         assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
@@ -68,12 +72,7 @@ fn test_recovery() {
     let dir = get_temporary_directory_path();
     {
         let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
-        for op in ops.operations() {
-            match op.operator() {
-                TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
-                TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
-            }
-        }
+        load_testing_operations(&bc, &ops);
     }
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     for op in ops.squash() {
