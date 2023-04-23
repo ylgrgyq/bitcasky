@@ -16,6 +16,7 @@ use crate::{
 
 const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
+const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
@@ -86,6 +87,20 @@ pub fn delete_file(
 pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
     fs::remove_dir_all(base_dir)?;
     Ok(())
+}
+
+pub fn create_hint_file_tmp_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
+    let p = hint_file_tmp_dir(base_dir);
+
+    if !p.exists() {
+        fs::create_dir(p.clone())?;
+    }
+
+    Ok(p)
+}
+
+pub fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
+    base_dir.join(HINT_FILES_TMP_DIRECTORY)
 }
 
 pub fn merge_file_dir(base_dir: &Path) -> PathBuf {

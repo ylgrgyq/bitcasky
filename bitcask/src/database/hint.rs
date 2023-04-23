@@ -2,7 +2,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
-    vec,
+    thread, vec,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -11,8 +11,12 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     fs::{self, FileType},
 };
+use crossbeam_channel::{unbounded, Sender};
 
-use super::constants::{KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE};
+use super::{
+    constants::{KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE},
+    stable_file::StableFile,
+};
 
 pub struct RowHint {
     pub timestamp: u64,
@@ -121,8 +125,52 @@ impl Iterator for HintFileIterator {
     }
 }
 
-pub struct HintFileWriter {}
+pub struct HintFileWriter {
+    database_dir: PathBuf,
+}
 
 impl HintFileWriter {
-    pub fn write_hint_file(&self, data_file_id: u32) {}
+    pub fn new(base_dir: PathBuf) -> Sender<u32> {
+        let (sender, receiver) = unbounded();
+
+        let hint_writer = HintFileWriter {
+            database_dir: base_dir,
+        };
+
+        thread::spawn(move || loop {
+            match receiver.recv() {
+                Ok(file_id) => {
+                    hint_writer.write_hint_file(file_id);
+                }
+                Err(_) => {
+                    return;
+                }
+            }
+        });
+
+        sender
+    }
+
+    pub fn write_hint_file(&self, data_file_id: u32) -> BitcaskResult<()> {
+        let data_file = fs::open_file(&self.database_dir, FileType::DataFile, Some(data_file_id))?;
+        let stable_file = StableFile::new(&self.database_dir, data_file_id, data_file.file, false)?;
+        let data_itr = stable_file.iter()?;
+        let hint_itr = data_itr.map(|ret| {
+            ret.and_then(|r| {
+                Ok(RowHint {
+                    timestamp: r.row_position.tstmp,
+                    key_size: r.key.len(),
+                    value_size: r.value.len(),
+                    row_offset: r.row_position.row_offset,
+                    key: r.key,
+                })
+            })
+        });
+
+        let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(&self.database_dir)?;
+        let f = fs::create_file(&hint_file_tmp_dir, FileType::HintFile, Some(data_file_id))?;
+        let mut hint_file = HintFile::new(&self.database_dir, data_file_id, f);
+        hint_file.write_file(Box::new(hint_itr));
+        todo!()
+    }
 }

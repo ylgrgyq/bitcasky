@@ -19,6 +19,7 @@ base64 = "0.21.0"
 log = "0.4.17"
 fs2 = "0.4.3"
 crossbeam = "0.8.2"
+crossbeam-channel = "0.5.8"
 
 [dev-dependencies]
 test-log = "0.2.11"
