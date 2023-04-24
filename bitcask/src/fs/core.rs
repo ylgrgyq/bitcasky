@@ -103,6 +103,14 @@ pub fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
     base_dir.join(HINT_FILES_TMP_DIRECTORY)
 }
 
+pub fn commit_hint_files(base_dir: &Path, file_id: u32) -> BitcaskResult<()> {
+    let hint_dir_path = hint_file_tmp_dir(base_dir);
+    let from_p = FileType::HintFile.get_path(&hint_dir_path, Some(file_id));
+    let to_p = FileType::HintFile.get_path(base_dir, Some(file_id));
+    fs::rename(from_p, to_p)?;
+    Ok(())
+}
+
 pub fn merge_file_dir(base_dir: &Path) -> PathBuf {
     base_dir.join(MERGE_FILES_DIRECTORY)
 }
@@ -226,7 +234,6 @@ fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| {
-            let file_name = e.file_name().to_string_lossy();
             if FileType::DataFile.check_file_belongs_to_type(e.path())
                 && FileType::DataFile
                     .parse_file_id_from_file_name(e.path())

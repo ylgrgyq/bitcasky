@@ -6,6 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
+use log::error;
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
@@ -130,7 +131,7 @@ pub struct HintFileWriter {
 }
 
 impl HintFileWriter {
-    pub fn new(base_dir: PathBuf) -> Sender<u32> {
+    pub fn start(base_dir: PathBuf) -> Sender<u32> {
         let (sender, receiver) = unbounded();
 
         let hint_writer = HintFileWriter {
@@ -140,7 +141,9 @@ impl HintFileWriter {
         thread::spawn(move || loop {
             match receiver.recv() {
                 Ok(file_id) => {
-                    hint_writer.write_hint_file(file_id);
+                    if let Err(e) = hint_writer.write_hint_file(file_id) {
+                        error!(target: "Hint", "write hint file failed {}", e);
+                    }
                 }
                 Err(_) => {
                     return;
@@ -156,21 +159,20 @@ impl HintFileWriter {
         let stable_file = StableFile::new(&self.database_dir, data_file_id, data_file.file, false)?;
         let data_itr = stable_file.iter()?;
         let hint_itr = data_itr.map(|ret| {
-            ret.and_then(|r| {
-                Ok(RowHint {
-                    timestamp: r.row_position.tstmp,
-                    key_size: r.key.len(),
-                    value_size: r.value.len(),
-                    row_offset: r.row_position.row_offset,
-                    key: r.key,
-                })
+            ret.map(|r| RowHint {
+                timestamp: r.row_position.tstmp,
+                key_size: r.key.len(),
+                value_size: r.value.len(),
+                row_offset: r.row_position.row_offset,
+                key: r.key,
             })
         });
 
         let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(&self.database_dir)?;
         let f = fs::create_file(&hint_file_tmp_dir, FileType::HintFile, Some(data_file_id))?;
         let mut hint_file = HintFile::new(&self.database_dir, data_file_id, f);
-        hint_file.write_file(Box::new(hint_itr));
-        todo!()
+        hint_file.write_file(Box::new(hint_itr))?;
+
+        fs::commit_hint_files(&self.database_dir, data_file_id)
     }
 }

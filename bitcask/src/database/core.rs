@@ -7,9 +7,11 @@ use std::{
     vec,
 };
 
+use crossbeam_channel::Sender;
 use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
+    database::hint::HintFileWriter,
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
@@ -135,6 +137,7 @@ pub struct Database {
     writing_file: Mutex<WritingFile>,
     stable_files: DashMap<u32, Mutex<StableFile>>,
     options: DataBaseOptions,
+    hint_file_writer: Sender<u32>,
 }
 
 impl Database {
@@ -180,6 +183,7 @@ impl Database {
             })
             .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
 
+        let hint_file_writer = HintFileWriter::start(database_dir.clone());
         info!(target: "Database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
         Ok(Database {
             writing_file,
@@ -187,6 +191,7 @@ impl Database {
             database_dir,
             stable_files,
             options,
+            hint_file_writer,
         })
     }
 
@@ -432,6 +437,9 @@ impl Database {
             self.options.tolerate_data_file_corruption,
         )?;
         self.stable_files.insert(file_id, Mutex::new(stable_file));
+        if let Err(e) = self.hint_file_writer.send(file_id) {
+            error!(target: "", "send file id: {} to hint file writer failed with error {}", file_id, e);
+        }
         Ok(())
     }
 
