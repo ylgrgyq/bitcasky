@@ -115,7 +115,7 @@ impl StableFile {
                 file_id: self.file_id,
                 row_offset: value_offset,
                 row_size: DATA_FILE_KEY_OFFSET + key_size + value_size,
-                tstmp,
+                timestamp: tstmp,
             },
         }))
     }

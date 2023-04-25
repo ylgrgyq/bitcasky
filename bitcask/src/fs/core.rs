@@ -80,7 +80,9 @@ pub fn delete_file(
     file_id: Option<u32>,
 ) -> BitcaskResult<()> {
     let path = file_type.get_path(base_dir, file_id);
-    fs::remove_file(path)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
     Ok(())
 }
 
@@ -206,8 +208,10 @@ pub fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskRe
     get_valid_data_file_ids(base_dir)
         .iter()
         .filter(|id| **id < max_file_id)
-        .for_each(|id| delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default());
-
+        .for_each(|id| {
+            delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default();
+            delete_file(base_dir, FileType::HintFile, Some(*id)).unwrap_or_default();
+        });
     Ok(())
 }
 

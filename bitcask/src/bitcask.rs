@@ -74,9 +74,9 @@ pub struct FoldResult<T> {
 #[derive(Debug)]
 pub struct BitcaskStats {
     pub number_of_data_files: usize,
-    pub number_of_hint_files: usize,
     pub total_data_size_in_bytes: u64,
     pub number_of_keys: usize,
+    pub number_of_pending_hint_files: usize,
 }
 
 pub struct Bitcask {
@@ -238,7 +238,7 @@ impl Bitcask {
         let db_stats = self.database.stats()?;
         Ok(BitcaskStats {
             number_of_data_files: db_stats.number_of_data_files,
-            number_of_hint_files: db_stats.number_of_hint_files,
+            number_of_pending_hint_files: db_stats.number_of_pending_hint_files,
             total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
             number_of_keys: key_size,
         })
@@ -284,7 +284,7 @@ impl Bitcask {
             let k = r.key();
             let v = self.database.read_value(r.value())?;
             if !is_tombstone(&v) {
-                let pos = merge_db.write_with_timestamp(k, &v, r.value().tstmp)?;
+                let pos = merge_db.write_with_timestamp(k, &v, r.value().timestamp)?;
                 new_kd.checked_put(k.clone(), pos)
             }
         }

@@ -7,7 +7,6 @@ use dashmap::{
 use crate::{
     database::{Database, RowPosition},
     error::BitcaskResult,
-    utils::is_tombstone,
 };
 
 #[derive(Clone)]
@@ -24,13 +23,19 @@ impl KeyDir {
     pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
         let kd = KeyDir { index };
-        for ret in database.iter()? {
+        for ret in database.recovery_iter()? {
             let item = ret?;
-            if is_tombstone(&item.value) {
+            if item.is_tombstone {
                 kd.delete(&item.key);
                 continue;
             }
-            kd.put(item.key, item.row_position);
+            let row_pos = RowPosition {
+                file_id: item.file_id,
+                row_offset: item.row_offset,
+                row_size: item.row_size,
+                timestamp: item.timestamp,
+            };
+            kd.put(item.key, row_pos);
         }
         Ok(kd)
     }

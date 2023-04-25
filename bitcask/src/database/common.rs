@@ -100,7 +100,7 @@ pub struct RowPosition {
     pub file_id: u32,
     pub row_offset: u64,
     pub row_size: usize,
-    pub tstmp: u64,
+    pub timestamp: u64,
 }
 
 pub fn read_value_from_file(
@@ -149,4 +149,13 @@ pub struct RowToRead {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
     pub row_position: RowPosition,
+}
+
+pub struct RecoveredRow {
+    pub file_id: u32,
+    pub timestamp: u64,
+    pub row_offset: u64,
+    pub row_size: usize,
+    pub key: Vec<u8>,
+    pub is_tombstone: bool,
 }

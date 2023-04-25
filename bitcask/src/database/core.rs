@@ -15,13 +15,14 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
+    utils,
 };
 use log::{error, info, warn};
 
-use super::writing_file::WritingFile;
+use super::{common::RecoveredRow, writing_file::WritingFile};
 use super::{
     common::{RowPosition, RowToRead, RowToWrite},
-    hint::{HintFile, RowHint},
+    hint::{HintFile, HintRow},
     stable_file::{StableFile, StableFileIter},
 };
 /**
@@ -34,13 +35,13 @@ pub struct DatabaseStats {
      */
     pub number_of_data_files: usize,
     /**
-     * Number of data files in Database
-     */
-    pub number_of_hint_files: usize,
-    /**
      * Data size in bytes of this Database
      */
     pub total_data_size_in_bytes: u64,
+    /**
+     * Number of hint files waiting to write
+     */
+    pub number_of_pending_hint_files: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -228,6 +229,10 @@ impl Database {
         Ok(())
     }
 
+    pub fn recovery_iter(&self) -> BitcaskResult<DatabaseRecoverIter> {
+        todo!()
+    }
+
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
         let mut file_ids: Vec<u32>;
         {
@@ -324,32 +329,6 @@ impl Database {
         ids
     }
 
-    pub fn write_hint_file(&self, file_id: u32) -> BitcaskResult<()> {
-        let row_hint_file =
-            SelfFs::create_file(&self.database_dir, FileType::HintFile, Some(file_id))?;
-        let mut hint_file = HintFile::new(&self.database_dir, file_id, row_hint_file);
-
-        let data_file = SelfFs::open_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
-        let stable_file_iter = StableFile::new(
-            &self.database_dir,
-            file_id,
-            data_file.file,
-            self.options.tolerate_data_file_corruption,
-        )?
-        .iter()?;
-
-        let boxed_iter = Box::new(stable_file_iter.map(|ret| {
-            ret.map(|row| RowHint {
-                timestamp: row.row_position.tstmp,
-                key_size: row.key.len(),
-                value_size: row.value.len(),
-                row_offset: row.row_position.row_offset,
-                key: row.key,
-            })
-        }));
-        hint_file.write_file(boxed_iter)
-    }
-
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
         let writing_file_size: u64;
         {
@@ -369,8 +348,8 @@ impl Database {
 
         Ok(DatabaseStats {
             number_of_data_files: self.stable_files.len() + 1,
-            number_of_hint_files: 0,
             total_data_size_in_bytes,
+            number_of_pending_hint_files: self.hint_file_writer.len(),
         })
     }
 
@@ -438,7 +417,7 @@ impl Database {
         )?;
         self.stable_files.insert(file_id, Mutex::new(stable_file));
         if let Err(e) = self.hint_file_writer.send(file_id) {
-            error!(target: "", "send file id: {} to hint file writer failed with error {}", file_id, e);
+            error!(target: "Database", "send file id: {} to hint file writer failed with error {}", file_id, e);
         }
         Ok(())
     }
@@ -497,6 +476,83 @@ impl Iterator for DatabaseIter {
             }
         }
         None
+    }
+}
+
+pub struct DatabaseRecoverIter {
+    current_iter: Cell<Option<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>>>,
+    data_file_ids: Vec<u32>,
+    database_dir: PathBuf,
+}
+
+impl DatabaseRecoverIter {
+    fn new(
+        database_dir: PathBuf,
+        mut iters: Vec<u32>,
+        options: DataBaseOptions,
+    ) -> BitcaskResult<Self> {
+        if let Some(file_id) = iters.pop() {
+            let iter: Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>;
+            if FileType::HintFile
+                .get_path(&database_dir, Some(file_id))
+                .exists()
+            {
+                iter = Box::new(HintFile::open(&database_dir, file_id).and_then(|f| f.iter())?);
+            } else {
+                let data_file =
+                    SelfFs::open_file(&database_dir, FileType::DataFile, Some(file_id))?;
+                let stable_file = StableFile::new(
+                    &database_dir,
+                    file_id,
+                    data_file.file,
+                    options.tolerate_data_file_corruption,
+                )?;
+                let i = stable_file.iter().map(|iter| {
+                    iter.map(|row| {
+                        row.map(|r| RecoveredRow {
+                            file_id: r.row_position.file_id,
+                            timestamp: r.row_position.timestamp,
+                            row_offset: r.row_position.row_offset,
+                            row_size: r.row_position.row_size,
+                            key: r.key,
+                            is_tombstone: utils::is_tombstone(&r.value),
+                        })
+                    })
+                })?;
+                iter = Box::new(i);
+            }
+            Ok(DatabaseRecoverIter {
+                database_dir,
+                data_file_ids: iters,
+                current_iter: Cell::new(Some(iter)),
+            })
+        } else {
+            Ok(DatabaseRecoverIter {
+                database_dir,
+                data_file_ids: iters,
+                current_iter: Cell::new(None),
+            })
+        }
+    }
+}
+
+impl Iterator for DatabaseRecoverIter {
+    type Item = BitcaskResult<RecoveredRow>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // loop {
+        //     match self.current_iter.get_mut() {
+        //         None => break,
+        //         Some(iter) => match iter.next() {
+        //             None => {
+        //                 self.current_iter.replace(self.remain_iters.pop());
+        //             }
+        //             other => return other,
+        //         },
+        //     }
+        // }
+        // None;
+        todo!()
     }
 }
 
@@ -824,22 +880,5 @@ mod tests {
     }
 
     #[test]
-    fn test_hint_file() {
-        let dir = get_temporary_directory_path();
-        let mut offset_values: Vec<(RowPosition, &str)> = vec![];
-        {
-            let file_id_generator = Arc::new(FileIdGenerator::new());
-            let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
-            let kvs = [("k1", "value1"), ("k2", "value2")];
-            offset_values.append(
-                &mut kvs
-                    .into_iter()
-                    .map(|(k, v)| (db.write(&k.into(), v.as_bytes()).unwrap(), v))
-                    .collect::<Vec<(RowPosition, &str)>>(),
-            );
-        }
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
-        db.write_hint_file(1);
-    }
+    fn test_hint_file() {}
 }

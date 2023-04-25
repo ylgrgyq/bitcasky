@@ -55,7 +55,7 @@ impl WritingFile {
             file_id: self.file_id,
             row_offset: value_offset,
             row_size: row.size,
-            tstmp: row.tstamp,
+            timestamp: row.tstamp,
         })
     }
 
