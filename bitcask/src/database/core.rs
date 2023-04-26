@@ -13,7 +13,7 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use crate::{
     database::hint::HintFileWriter,
     error::{BitcaskError, BitcaskResult},
-    file_id::FileIdGenerator,
+    file_id::{self, FileIdGenerator},
     fs::{self as SelfFs, FileType},
     utils,
 };
@@ -230,7 +230,19 @@ impl Database {
     }
 
     pub fn recovery_iter(&self) -> BitcaskResult<DatabaseRecoverIter> {
-        todo!()
+        let mut file_ids: Vec<u32>;
+        {
+            let writing_file = self.writing_file.lock().unwrap();
+            let writing_file_id = writing_file.file_id();
+
+            file_ids = self
+                .stable_files
+                .iter()
+                .map(|f| f.lock().unwrap().file_id)
+                .collect::<Vec<u32>>();
+            file_ids.push(writing_file_id);
+        }
+        DatabaseRecoverIter::new(self.database_dir.clone(), file_ids, self.options)
     }
 
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
@@ -479,10 +491,47 @@ impl Iterator for DatabaseIter {
     }
 }
 
+fn recovered_iter(
+    database_dir: &Path,
+    file_id: u32,
+    tolerate_data_file_corruption: bool,
+) -> BitcaskResult<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>> {
+    if FileType::HintFile
+        .get_path(database_dir, Some(file_id))
+        .exists()
+    {
+        Ok(Box::new(
+            HintFile::open(database_dir, file_id).and_then(|f| f.iter())?,
+        ))
+    } else {
+        let data_file = SelfFs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
+        let stable_file = StableFile::new(
+            database_dir,
+            file_id,
+            data_file.file,
+            tolerate_data_file_corruption,
+        )?;
+        let i = stable_file.iter().map(|iter| {
+            iter.map(|row| {
+                row.map(|r| RecoveredRow {
+                    file_id: r.row_position.file_id,
+                    timestamp: r.row_position.timestamp,
+                    row_offset: r.row_position.row_offset,
+                    row_size: r.row_position.row_size,
+                    key: r.key,
+                    is_tombstone: utils::is_tombstone(&r.value),
+                })
+            })
+        })?;
+        Ok(Box::new(i))
+    }
+}
+
 pub struct DatabaseRecoverIter {
     current_iter: Cell<Option<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>>>,
     data_file_ids: Vec<u32>,
     database_dir: PathBuf,
+    tolerate_data_file_corruption: bool,
 }
 
 impl DatabaseRecoverIter {
@@ -492,45 +541,23 @@ impl DatabaseRecoverIter {
         options: DataBaseOptions,
     ) -> BitcaskResult<Self> {
         if let Some(file_id) = iters.pop() {
-            let iter: Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>;
-            if FileType::HintFile
-                .get_path(&database_dir, Some(file_id))
-                .exists()
-            {
-                iter = Box::new(HintFile::open(&database_dir, file_id).and_then(|f| f.iter())?);
-            } else {
-                let data_file =
-                    SelfFs::open_file(&database_dir, FileType::DataFile, Some(file_id))?;
-                let stable_file = StableFile::new(
-                    &database_dir,
-                    file_id,
-                    data_file.file,
-                    options.tolerate_data_file_corruption,
-                )?;
-                let i = stable_file.iter().map(|iter| {
-                    iter.map(|row| {
-                        row.map(|r| RecoveredRow {
-                            file_id: r.row_position.file_id,
-                            timestamp: r.row_position.timestamp,
-                            row_offset: r.row_position.row_offset,
-                            row_size: r.row_position.row_size,
-                            key: r.key,
-                            is_tombstone: utils::is_tombstone(&r.value),
-                        })
-                    })
-                })?;
-                iter = Box::new(i);
-            }
+            let iter: Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>> = recovered_iter(
+                &database_dir,
+                file_id,
+                options.tolerate_data_file_corruption,
+            )?;
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_file_ids: iters,
                 current_iter: Cell::new(Some(iter)),
+                tolerate_data_file_corruption: options.tolerate_data_file_corruption,
             })
         } else {
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_file_ids: iters,
                 current_iter: Cell::new(None),
+                tolerate_data_file_corruption: options.tolerate_data_file_corruption,
             })
         }
     }
@@ -540,19 +567,30 @@ impl Iterator for DatabaseRecoverIter {
     type Item = BitcaskResult<RecoveredRow>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // loop {
-        //     match self.current_iter.get_mut() {
-        //         None => break,
-        //         Some(iter) => match iter.next() {
-        //             None => {
-        //                 self.current_iter.replace(self.remain_iters.pop());
-        //             }
-        //             other => return other,
-        //         },
-        //     }
-        // }
-        // None;
-        todo!()
+        loop {
+            match self.current_iter.get_mut() {
+                None => break,
+                Some(iter) => match iter.next() {
+                    None => {
+                        if let Some(file_id) = self.data_file_ids.pop() {
+                            if let Ok(iter) = recovered_iter(
+                                &self.database_dir,
+                                file_id,
+                                self.tolerate_data_file_corruption,
+                            ) {
+                                self.current_iter.replace(Some(iter));
+                            } else {
+                                return Some(Err(BitcaskError::PermissionDenied("asf".into())));
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    other => return other,
+                },
+            }
+        }
+        None
     }
 }
 

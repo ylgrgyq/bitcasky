@@ -76,11 +76,9 @@ impl HintFile {
     where
         I: Iterator<Item = BitcaskResult<HintRow>>,
     {
-        for hint in iter {
-            if let Ok(h) = hint {
-                let data_to_write = h.to_bytes();
-                self.file.write_all(&data_to_write)?;
-            }
+        for hint in iter.flatten() {
+            let data_to_write = hint.to_bytes();
+            self.file.write_all(&data_to_write)?;
         }
         Ok(())
     }
@@ -132,15 +130,13 @@ impl Iterator for HintFileIterator {
                 std::io::ErrorKind::UnexpectedEof => None,
                 _ => Some(Err(BitcaskError::IoError(e))),
             },
-            r => Some(r.and_then(|h| {
-                Ok(RecoveredRow {
-                    file_id: self.file.file_id,
-                    timestamp: h.timestamp,
-                    row_offset: h.row_offset,
-                    row_size: h.key_size + h.value_size,
-                    key: h.key,
-                    is_tombstone: false,
-                })
+            r => Some(r.map(|h| RecoveredRow {
+                file_id: self.file.file_id,
+                timestamp: h.timestamp,
+                row_offset: h.row_offset,
+                row_size: h.key_size + h.value_size,
+                key: h.key,
+                is_tombstone: false,
             })),
         }
     }

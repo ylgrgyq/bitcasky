@@ -73,10 +73,8 @@ impl TestingOperations {
         for (pos, op) in self.operations.iter().enumerate() {
             match op.operator() {
                 TestingOperator::PUT => {
-                    if !map_index.is_empty() {
-                        if map_index.get(&op.key()).is_some() {
-                            ops.retain(|e| e.key() != op.key())
-                        }
+                    if !map_index.is_empty() && map_index.get(&op.key()).is_some() {
+                        ops.retain(|e| e.key() != op.key())
                     }
                     ops.push(op.clone());
                     map_index.insert(op.key(), pos);
