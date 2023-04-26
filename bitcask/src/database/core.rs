@@ -13,7 +13,7 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use crate::{
     database::hint::HintFileWriter,
     error::{BitcaskError, BitcaskResult},
-    file_id::{self, FileIdGenerator},
+    file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
     utils,
 };
@@ -22,7 +22,7 @@ use log::{error, info, warn};
 use super::{common::RecoveredRow, writing_file::WritingFile};
 use super::{
     common::{RowPosition, RowToRead, RowToWrite},
-    hint::{HintFile, HintRow},
+    hint::HintFile,
     stable_file::{StableFile, StableFileIter},
 };
 /**
@@ -573,14 +573,15 @@ impl Iterator for DatabaseRecoverIter {
                 Some(iter) => match iter.next() {
                     None => {
                         if let Some(file_id) = self.data_file_ids.pop() {
-                            if let Ok(iter) = recovered_iter(
+                            match recovered_iter(
                                 &self.database_dir,
                                 file_id,
                                 self.tolerate_data_file_corruption,
                             ) {
-                                self.current_iter.replace(Some(iter));
-                            } else {
-                                return Some(Err(BitcaskError::PermissionDenied("asf".into())));
+                                Ok(iter) => {
+                                    self.current_iter.replace(Some(iter));
+                                }
+                                Err(e) => return Some(Err(e)),
                             }
                         } else {
                             break;

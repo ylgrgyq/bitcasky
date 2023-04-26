@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -11,6 +12,7 @@ use log::error;
 use crate::{
     error::{BitcaskError, BitcaskResult},
     fs::{self, FileType},
+    utils,
 };
 use crossbeam_channel::{unbounded, Sender};
 
@@ -74,9 +76,9 @@ impl HintFile {
 
     pub fn write_file<I>(&mut self, iter: I) -> BitcaskResult<()>
     where
-        I: Iterator<Item = BitcaskResult<HintRow>>,
+        I: Iterator<Item = HintRow>,
     {
-        for hint in iter.flatten() {
+        for hint in iter {
             let data_to_write = hint.to_bytes();
             self.file.write_all(&data_to_write)?;
         }
@@ -174,19 +176,32 @@ impl HintFileWriter {
         let data_file = fs::open_file(&self.database_dir, FileType::DataFile, Some(data_file_id))?;
         let stable_file = StableFile::new(&self.database_dir, data_file_id, data_file.file, false)?;
         let data_itr = stable_file.iter()?;
-        let hint_itr = data_itr.map(|ret| {
-            ret.map(|r| HintRow {
-                timestamp: r.row_position.timestamp,
-                key_size: r.key.len(),
-                value_size: r.value.len(),
-                row_offset: r.row_position.row_offset,
-                key: r.key,
-            })
-        });
 
+        let mut m = HashMap::new();
+        for row in data_itr {
+            match row {
+                Ok(r) => {
+                    if utils::is_tombstone(&r.value) {
+                        m.remove(&r.key);
+                    } else {
+                        m.insert(
+                            r.key.clone(),
+                            HintRow {
+                                timestamp: r.row_position.timestamp,
+                                key_size: r.key.len(),
+                                value_size: r.value.len(),
+                                row_offset: r.row_position.row_offset,
+                                key: r.key,
+                            },
+                        );
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
         let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(&self.database_dir)?;
         let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_file_id)?;
-        hint_file.write_file(hint_itr)?;
+        hint_file.write_file(m.into_values().collect::<Vec<HintRow>>().into_iter())?;
 
         fs::commit_hint_files(&self.database_dir, data_file_id)
     }
