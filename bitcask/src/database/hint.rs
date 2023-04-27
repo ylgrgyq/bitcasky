@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use log::error;
+use log::{error, warn};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
