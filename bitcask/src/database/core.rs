@@ -11,7 +11,7 @@ use crossbeam_channel::Sender;
 use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
-    database::hint::HintFileWriter,
+    database::hint::{self, HintFileWriter},
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
@@ -150,6 +150,7 @@ impl Database {
         let database_dir: PathBuf = directory.into();
         validate_database_directory(&database_dir)?;
 
+        hint::clear_temp_hint_file_directory(&database_dir);
         let recover_ret = recover_merge(&database_dir, &file_id_generator);
         if let Err(err) = recover_ret {
             let merge_dir = SelfFs::merge_file_dir(&database_dir);

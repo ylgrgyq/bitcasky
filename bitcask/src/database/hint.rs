@@ -8,6 +8,7 @@ use std::{
 
 use bytes::{Buf, Bytes, BytesMut};
 use log::{error, warn};
+use walkdir::WalkDir;
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
@@ -149,12 +150,10 @@ pub struct HintFileWriter {
 }
 
 impl HintFileWriter {
-    pub fn start(base_dir: PathBuf) -> Sender<u32> {
+    pub fn start(database_dir: PathBuf) -> Sender<u32> {
         let (sender, receiver) = unbounded();
 
-        let hint_writer = HintFileWriter {
-            database_dir: base_dir,
-        };
+        let hint_writer = HintFileWriter { database_dir };
 
         thread::spawn(move || loop {
             match receiver.recv() {
@@ -164,7 +163,7 @@ impl HintFileWriter {
                     }
                 }
                 Err(_) => {
-                    return;
+                    break;
                 }
             }
         });
@@ -204,5 +203,21 @@ impl HintFileWriter {
         hint_file.write_file(m.into_values().collect::<Vec<HintRow>>().into_iter())?;
 
         fs::commit_hint_files(&self.database_dir, data_file_id)
+    }
+}
+
+pub fn clear_temp_hint_file_directory(database_dir: &Path) {
+    if let Err(e) = fs::create_hint_file_tmp_dir(&database_dir).and_then(|hint_file_tmp_dir| {
+        let paths = std::fs::read_dir(hint_file_tmp_dir)?;
+        for path in paths {
+            let file_path = path?;
+            if !file_path.path().is_file() {
+                continue;
+            }
+            std::fs::remove_file(file_path.path())?;
+        }
+        Ok(())
+    }) {
+        error!(target: "Hint", "clear temp hint file directory failed. {}", e)
     }
 }
