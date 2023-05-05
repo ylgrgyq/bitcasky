@@ -3,12 +3,12 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
-    thread, vec,
+    thread::{self, JoinHandle},
+    vec,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
 use log::{error, warn};
-use walkdir::WalkDir;
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
@@ -145,20 +145,22 @@ impl Iterator for HintFileIterator {
     }
 }
 
+#[derive(Debug)]
 pub struct HintFileWriter {
     database_dir: PathBuf,
+    sender: Box<Sender<u32>>,
+    worker_join_handle: Box<JoinHandle<()>>,
 }
 
 impl HintFileWriter {
-    pub fn start(database_dir: PathBuf) -> Sender<u32> {
+    pub fn start(database_dir: PathBuf) -> HintFileWriter {
         let (sender, receiver) = unbounded();
 
-        let hint_writer = HintFileWriter { database_dir };
-
-        thread::spawn(move || loop {
+        let moved_dir = database_dir.clone();
+        let worker_join_handle = Box::new(thread::spawn(move || loop {
             match receiver.recv() {
                 Ok(file_id) => {
-                    if let Err(e) = hint_writer.write_hint_file(file_id) {
+                    if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
                         error!(target: "Hint", "write hint file failed {}", e);
                     }
                 }
@@ -166,14 +168,28 @@ impl HintFileWriter {
                     break;
                 }
             }
-        });
+        }));
 
-        sender
+        HintFileWriter {
+            database_dir,
+            sender: Box::new(sender),
+            worker_join_handle,
+        }
     }
 
-    pub fn write_hint_file(&self, data_file_id: u32) -> BitcaskResult<()> {
-        let data_file = fs::open_file(&self.database_dir, FileType::DataFile, Some(data_file_id))?;
-        let stable_file = StableFile::new(&self.database_dir, data_file_id, data_file.file, false)?;
+    pub fn async_write_hint_file(&self, data_file_id: u32) {
+        if let Err(e) = self.sender.send(data_file_id) {
+            error!(target: "Database", "send file id: {} to hint file writer failed with error {}", data_file_id, e);
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.sender.len()
+    }
+
+    fn write_hint_file(database_dir: &Path, data_file_id: u32) -> BitcaskResult<()> {
+        let data_file = fs::open_file(database_dir, FileType::DataFile, Some(data_file_id))?;
+        let stable_file = StableFile::new(database_dir, data_file_id, data_file.file, false)?;
         let data_itr = stable_file.iter()?;
 
         let mut m = HashMap::new();
@@ -198,11 +214,18 @@ impl HintFileWriter {
                 Err(e) => return Err(e),
             }
         }
-        let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(&self.database_dir)?;
+        let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_file_id)?;
         hint_file.write_file(m.into_values().collect::<Vec<HintRow>>().into_iter())?;
 
-        fs::commit_hint_files(&self.database_dir, data_file_id)
+        fs::commit_hint_files(database_dir, data_file_id)
+    }
+}
+
+impl Drop for HintFileWriter {
+    fn drop(&mut self) {
+        drop(self.sender.as_mut());
+        self.worker_join_handle.into().join();
     }
 }
 

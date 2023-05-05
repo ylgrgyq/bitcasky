@@ -138,7 +138,7 @@ pub struct Database {
     writing_file: Mutex<WritingFile>,
     stable_files: DashMap<u32, Mutex<StableFile>>,
     options: DataBaseOptions,
-    hint_file_writer: Sender<u32>,
+    hint_file_writer: HintFileWriter,
 }
 
 impl Database {
@@ -429,9 +429,7 @@ impl Database {
             self.options.tolerate_data_file_corruption,
         )?;
         self.stable_files.insert(file_id, Mutex::new(stable_file));
-        if let Err(e) = self.hint_file_writer.send(file_id) {
-            error!(target: "Database", "send file id: {} to hint file writer failed with error {}", file_id, e);
-        }
+        self.hint_file_writer.async_write_hint_file(file_id);
         Ok(())
     }
 
