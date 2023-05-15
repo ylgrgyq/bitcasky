@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{Read, Write},
+    mem::ManuallyDrop,
     path::{Path, PathBuf},
     thread::{self, JoinHandle},
     vec,
@@ -147,9 +148,8 @@ impl Iterator for HintFileIterator {
 
 #[derive(Debug)]
 pub struct HintFileWriter {
-    database_dir: PathBuf,
-    sender: Box<Sender<u32>>,
-    worker_join_handle: Box<JoinHandle<()>>,
+    sender: ManuallyDrop<Sender<u32>>,
+    worker_join_handle: Option<JoinHandle<()>>,
 }
 
 impl HintFileWriter {
@@ -157,7 +157,7 @@ impl HintFileWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.clone();
-        let worker_join_handle = Box::new(thread::spawn(move || loop {
+        let worker_join_handle = Some(thread::spawn(move || loop {
             match receiver.recv() {
                 Ok(file_id) => {
                     if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
@@ -171,8 +171,7 @@ impl HintFileWriter {
         }));
 
         HintFileWriter {
-            database_dir,
-            sender: Box::new(sender),
+            sender: ManuallyDrop::new(sender),
             worker_join_handle,
         }
     }
@@ -224,8 +223,12 @@ impl HintFileWriter {
 
 impl Drop for HintFileWriter {
     fn drop(&mut self) {
-        drop(self.sender.as_mut());
-        self.worker_join_handle.into().join();
+        unsafe { ManuallyDrop::drop(&mut self.sender) }
+        if let Some(join_handle) = self.worker_join_handle.take() {
+            if let Err(_) = join_handle.join() {
+                error!(target: "hint", "wait worker thread finish failed");
+            }
+        }
     }
 }
 
@@ -242,5 +245,23 @@ pub fn clear_temp_hint_file_directory(database_dir: &Path) {
         Ok(())
     }) {
         error!(target: "Hint", "clear temp hint file directory failed. {}", e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_read_write_writing_file() {
+        use std::cell::RefCell;
+        let x = RefCell::new(1);
+
+        let mut mutable_borrow = x.borrow_mut();
+        *mutable_borrow = 1;
+
+        drop(mutable_borrow); // relinquish the mutable borrow on this slot
+
+        let borrow = x.borrow();
+        println!("{}", *borrow);
     }
 }
