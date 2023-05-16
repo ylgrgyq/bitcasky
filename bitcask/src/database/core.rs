@@ -7,7 +7,6 @@ use std::{
     vec,
 };
 
-use crossbeam_channel::Sender;
 use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
@@ -242,6 +241,8 @@ impl Database {
                 .map(|f| f.lock().unwrap().file_id)
                 .collect::<Vec<u32>>();
             file_ids.push(writing_file_id);
+            file_ids.sort();
+            file_ids.reverse();
         }
         DatabaseRecoverIter::new(self.database_dir.clone(), file_ids, self.options)
     }
@@ -499,10 +500,12 @@ fn recovered_iter(
         .get_path(database_dir, Some(file_id))
         .exists()
     {
+        info!(target: "database", "recover from hint file with id: {}", file_id);
         Ok(Box::new(
             HintFile::open(database_dir, file_id).and_then(|f| f.iter())?,
         ))
     } else {
+        info!(target: "database", "recover from data file with id: {}", file_id);
         let data_file = SelfFs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
         let stable_file = StableFile::new(
             database_dir,

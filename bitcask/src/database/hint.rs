@@ -156,16 +156,11 @@ impl HintFileWriter {
     pub fn start(database_dir: PathBuf) -> HintFileWriter {
         let (sender, receiver) = unbounded();
 
-        let moved_dir = database_dir.clone();
-        let worker_join_handle = Some(thread::spawn(move || loop {
-            match receiver.recv() {
-                Ok(file_id) => {
-                    if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
-                        error!(target: "Hint", "write hint file failed {}", e);
-                    }
-                }
-                Err(_) => {
-                    break;
+        let moved_dir = database_dir;
+        let worker_join_handle = Some(thread::spawn(move || {
+            while let Ok(file_id) = receiver.recv() {
+                if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
+                    error!(target: "Hint", "write hint file failed {}", e);
                 }
             }
         }));
@@ -225,7 +220,7 @@ impl Drop for HintFileWriter {
     fn drop(&mut self) {
         unsafe { ManuallyDrop::drop(&mut self.sender) }
         if let Some(join_handle) = self.worker_join_handle.take() {
-            if let Err(_) = join_handle.join() {
+            if join_handle.join().is_err() {
                 error!(target: "hint", "wait worker thread finish failed");
             }
         }
@@ -233,7 +228,7 @@ impl Drop for HintFileWriter {
 }
 
 pub fn clear_temp_hint_file_directory(database_dir: &Path) {
-    if let Err(e) = fs::create_hint_file_tmp_dir(&database_dir).and_then(|hint_file_tmp_dir| {
+    if let Err(e) = fs::create_hint_file_tmp_dir(database_dir).and_then(|hint_file_tmp_dir| {
         let paths = std::fs::read_dir(hint_file_tmp_dir)?;
         for path in paths {
             let file_path = path?;
@@ -245,23 +240,5 @@ pub fn clear_temp_hint_file_directory(database_dir: &Path) {
         Ok(())
     }) {
         error!(target: "Hint", "clear temp hint file directory failed. {}", e)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn test_read_write_writing_file() {
-        use std::cell::RefCell;
-        let x = RefCell::new(1);
-
-        let mut mutable_borrow = x.borrow_mut();
-        *mutable_borrow = 1;
-
-        drop(mutable_borrow); // relinquish the mutable borrow on this slot
-
-        let borrow = x.borrow();
-        println!("{}", *borrow);
     }
 }
