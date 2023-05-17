@@ -2,7 +2,8 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
-use log::{error, info};
+use log::{debug, error, info};
+use uuid::Uuid;
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
@@ -80,6 +81,7 @@ pub struct BitcaskStats {
 }
 
 pub struct Bitcask {
+    instanceId: String,
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
     file_id_generator: Arc<FileIdGenerator>,
@@ -111,7 +113,10 @@ impl Bitcask {
             options.get_database_options(),
         )?;
         let keydir = KeyDir::new(&database)?;
+        let id = Uuid::new_v4();
+        debug!(target: "Bitcask", "Bitcask created. instanceId = {}", id);
         Ok(Bitcask {
+            instanceId: id.to_string(),
             directory_lock_file,
             keydir: RwLock::new(keydir),
             file_id_generator,
@@ -297,5 +302,6 @@ impl Bitcask {
 impl Drop for Bitcask {
     fn drop(&mut self) {
         fs::unlock_directory(&self.directory_lock_file);
+        debug!(target: "Bitcask", "Bitcask shutdown. instanceId = {}", self.instanceId);
     }
 }
