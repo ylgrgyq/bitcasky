@@ -209,7 +209,12 @@ impl Bitcask {
             return Err(BitcaskError::MergeInProgress());
         }
 
+        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}", self.instanceId);
+
         let (kd, known_max_file_id) = self.flush_writing_file()?;
+
+        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instanceId, known_max_file_id);
+
         let dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
         let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
 
@@ -293,8 +298,11 @@ impl Bitcask {
                 new_kd.checked_put(k.clone(), pos)
             }
         }
+        debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
         merge_db.flush_writing_file()?;
+        debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
         let file_ids = merge_db.get_file_ids();
+        debug!(target:"Bitcask", "write merge db done. {} {:?}", self.file_id_generator.get_file_id(), file_ids);
         Ok((file_ids, new_kd))
     }
 }
