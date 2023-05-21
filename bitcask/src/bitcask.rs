@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
-use log::{debug, error, info, warn};
+use log::{debug, error};
 use uuid::Uuid;
 
-use crate::database::{self, DataBaseOptions, Database, MergeMeta};
+use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
 use crate::fs::{self};
@@ -85,11 +85,8 @@ pub struct Bitcask {
     instance_id: String,
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
-    file_id_generator: Arc<FileIdGenerator>,
     options: BitcaskOptions,
     database: Database,
-    merge_lock: Mutex<()>,
-    is_error: Mutex<Option<String>>,
     merge_manager: MergeManager,
 }
 
@@ -123,11 +120,8 @@ impl Bitcask {
             instance_id: id.to_string(),
             directory_lock_file,
             keydir,
-            file_id_generator: file_id_generator.clone(),
             database,
             options,
-            merge_lock: Mutex::new(()),
-            is_error: Mutex::new(None),
             merge_manager: MergeManager::new(
                 id.to_string(),
                 file_id_generator.clone(),
@@ -214,50 +208,7 @@ impl Bitcask {
     pub fn merge(&self) -> BitcaskResult<()> {
         self.database.check_db_error()?;
 
-        self.merge_manager.merge(&self.database, &self.keydir)?;
-
-        let lock_ret = self.merge_lock.try_lock();
-
-        if lock_ret.is_err() {
-            return Err(BitcaskError::MergeInProgress());
-        }
-
-        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}", self.instance_id);
-
-        let (kd, known_max_file_id) = self.flush_writing_file()?;
-
-        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
-
-        let merge_dir_path = database::create_merge_file_dir(self.database.get_database_dir())?;
-        let (file_ids, new_kd) =
-            self.write_merged_files(&merge_dir_path, &kd, known_max_file_id)?;
-
-        info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
-
-        {
-            // stop read/write
-            let kd = self.keydir.write().unwrap();
-            self.database
-                .load_merged_files(&file_ids, known_max_file_id)
-                .map_err(|e| {
-                    self.database.mark_db_error(e.to_string());
-                    error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
-                    e
-                })?;
-
-            for (k, v) in new_kd.into_iter() {
-                kd.checked_put(k, v)
-            }
-        }
-
-        info!(target: "Bitcask", "purge files with id smaller than: {}", known_max_file_id);
-
-        fs::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
-        let clear_ret = fs::clear_dir(&merge_dir_path);
-        if clear_ret.is_err() {
-            warn!(target: "Bitcask", "clear merge directory failed. {}", clear_ret.unwrap_err());
-        }
-        Ok(())
+        self.merge_manager.merge(&self.database, &self.keydir)
     }
 
     pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
@@ -270,46 +221,6 @@ impl Bitcask {
             total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
             number_of_keys: key_size,
         })
-    }
-
-    fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
-        // stop writing and switch the writing file to stable files
-        let _kd = self.keydir.write().unwrap();
-        self.database.flush_writing_file()?;
-        let known_max_file_id = self.database.get_max_file_id();
-        Ok((_kd.clone(), known_max_file_id))
-    }
-
-    fn write_merged_files(
-        &self,
-        merge_file_dir: &Path,
-        key_dir_to_write: &KeyDir,
-        known_max_file_id: u32,
-    ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
-        database::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
-
-        let new_kd = KeyDir::new_empty_key_dir();
-        let merge_db = Database::open(
-            merge_file_dir,
-            self.file_id_generator.clone(),
-            self.options.get_database_options(),
-        )?;
-
-        for r in key_dir_to_write.iter() {
-            let k = r.key();
-            let v = self.database.read_value(r.value())?;
-            if !is_tombstone(&v) {
-                let pos = merge_db.write_with_timestamp(k, &v, r.value().timestamp)?;
-                new_kd.checked_put(k.clone(), pos);
-                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-                    k, v, pos.file_id, pos.row_offset, pos.row_size, pos.timestamp);
-            }
-        }
-        merge_db.flush_writing_file()?;
-        let file_ids = merge_db.get_file_ids();
-        // we do not write anything in writing file
-        // so we can only use stable files
-        Ok((file_ids.stable_file_ids, new_kd))
     }
 }
 
