@@ -109,7 +109,7 @@ pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
 }
 
 pub fn is_empty_dir(dir: &Path) -> BitcaskResult<bool> {
-    let paths = fs::read_dir(dir.clone())?;
+    let paths = fs::read_dir(dir)?;
 
     for path in paths {
         let file_path = path?;

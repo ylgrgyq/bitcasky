@@ -39,6 +39,10 @@ impl StableFile {
         file_id: u32,
         tolerate_data_file_corruption: bool,
     ) -> BitcaskResult<Option<StableFile>> {
+        let path = FileType::DataFile.get_path(database_dir, Some(file_id));
+        if !path.exists() {
+            return Ok(None);
+        }
         let data_file = fs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
         let meta = data_file.file.metadata()?;
         if meta.len() == 0 {

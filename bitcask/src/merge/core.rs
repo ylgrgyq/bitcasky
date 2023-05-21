@@ -51,8 +51,6 @@ impl MergeManager {
             return Err(BitcaskError::MergeInProgress());
         }
 
-        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}", self.instance_id);
-
         let (kd, known_max_file_id) = self.flush_writing_file(database, keydir)?;
 
         debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
@@ -67,12 +65,9 @@ impl MergeManager {
             // stop read/write
             let kd = keydir.write().unwrap();
             database.flush_writing_file()?;
-            let files = load_merged_files(
-                &self.database_dir,
-                &self.file_id_generator,
+            let files = self.load_merged_files(
                 &file_ids,
                 known_max_file_id,
-                self.options.tolerate_data_file_corruption,
             ).map_err(|e| {
                 database.mark_db_error(e.to_string());
                 error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
@@ -140,11 +135,7 @@ impl MergeManager {
         self.file_id_generator
             .update_file_id(*merge_data_file_ids.last().unwrap());
 
-        shift_data_files(
-            &self.database_dir,
-            merge_meta.known_max_file_id,
-            &self.file_id_generator,
-        )?;
+        self.shift_data_files(merge_meta.known_max_file_id)?;
 
         commit_merge_files(&self.database_dir, &merge_data_file_ids)?;
 
@@ -197,6 +188,62 @@ impl MergeManager {
         // we do not write anything in writing file
         // so we can only use stable files
         Ok((file_ids.stable_file_ids, new_kd))
+    }
+
+    fn load_merged_files(
+        &self,
+        merged_file_ids: &Vec<u32>,
+        known_max_file_id: u32,
+    ) -> BitcaskResult<Vec<StableFile>> {
+        let data_file_ids = self.shift_data_files(known_max_file_id)?;
+
+        let mut stable_files = vec![];
+        for file_id in data_file_ids {
+            if let Some(f) = StableFile::open(
+                &self.database_dir,
+                file_id,
+                self.options.tolerate_data_file_corruption,
+            )? {
+                stable_files.push(f);
+            }
+        }
+
+        if merged_file_ids.is_empty() {
+            return Ok(stable_files);
+        }
+
+        commit_merge_files(&self.database_dir, merged_file_ids)?;
+
+        for file_id in merged_file_ids {
+            if let Some(f) = StableFile::open(
+                &self.database_dir,
+                *file_id,
+                self.options.tolerate_data_file_corruption,
+            )? {
+                stable_files.push(f);
+            }
+        }
+
+        Ok(stable_files)
+    }
+
+    fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
+        let mut data_file_ids = fs::get_valid_data_file_ids(&self.database_dir)
+            .into_iter()
+            .filter(|id| *id > known_max_file_id)
+            .collect::<Vec<u32>>();
+        // must change name in descending order to keep data file's order even when any change name operation failed
+        data_file_ids.sort_by(|a, b| b.cmp(a));
+
+        // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
+        // because values in these files is written after merged files
+        let mut new_file_ids = vec![];
+        for from_id in data_file_ids {
+            let new_file_id = &self.file_id_generator.generate_next_file_id();
+            fs::change_data_file_id(&self.database_dir, from_id, *new_file_id)?;
+            new_file_ids.push(*new_file_id);
+        }
+        Ok(new_file_ids)
     }
 }
 
@@ -268,60 +315,6 @@ fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()>
     Ok(())
 }
 
-fn shift_data_files(
-    database_dir: &Path,
-    known_max_file_id: u32,
-    file_id_generator: &Arc<FileIdGenerator>,
-) -> BitcaskResult<Vec<u32>> {
-    let mut data_file_ids = fs::get_valid_data_file_ids(database_dir)
-        .into_iter()
-        .filter(|id| *id > known_max_file_id)
-        .collect::<Vec<u32>>();
-    // must change name in descending order to keep data file's order even when any change name operation failed
-    data_file_ids.sort_by(|a, b| b.cmp(a));
-
-    // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
-    // because values in these files is written after merged files
-    let mut new_file_ids = vec![];
-    for from_id in data_file_ids {
-        let new_file_id = file_id_generator.generate_next_file_id();
-        fs::change_data_file_id(database_dir, from_id, new_file_id)?;
-        new_file_ids.push(new_file_id);
-    }
-    Ok(new_file_ids)
-}
-
-pub fn load_merged_files(
-    database_dir: &Path,
-    file_id_generator: &Arc<FileIdGenerator>,
-    merged_file_ids: &Vec<u32>,
-    known_max_file_id: u32,
-    tolerate_data_file_corruption: bool,
-) -> BitcaskResult<Vec<StableFile>> {
-    let data_file_ids = shift_data_files(database_dir, known_max_file_id, file_id_generator)?;
-
-    let mut stable_files = vec![];
-    for file_id in data_file_ids {
-        if let Some(f) = StableFile::open(database_dir, file_id, tolerate_data_file_corruption)? {
-            stable_files.push(f);
-        }
-    }
-
-    if merged_file_ids.is_empty() {
-        return Ok(stable_files);
-    }
-
-    commit_merge_files(database_dir, merged_file_ids)?;
-
-    for file_id in merged_file_ids {
-        if let Some(f) = StableFile::open(database_dir, *file_id, tolerate_data_file_corruption)? {
-            stable_files.push(f);
-        }
-    }
-
-    Ok(stable_files)
-}
-
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 struct MergeMeta {
     pub known_max_file_id: u32,
@@ -346,60 +339,18 @@ fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResu
 mod tests {
     use std::vec;
 
-    use crate::{database::RowPosition, fs::FileType};
+    use crate::{
+        database::database_tests_utils::{
+            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
+        },
+        fs::FileType,
+    };
 
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
 
-    const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
-        max_file_size: 1024,
-        tolerate_data_file_corruption: true,
-    };
     const INSTANCE_ID: String = String::new();
-
-    struct TestingRow {
-        kv: TestingKV,
-        pos: RowPosition,
-    }
-
-    impl TestingRow {
-        fn new(kv: TestingKV, pos: RowPosition) -> Self {
-            TestingRow { kv, pos }
-        }
-    }
-
-    fn assert_rows_value(db: &Database, expect: &Vec<TestingRow>) {
-        for row in expect {
-            assert_row_value(db, row);
-        }
-    }
-
-    fn assert_row_value(db: &Database, expect: &TestingRow) {
-        let actual = db.read_value(&expect.pos).unwrap();
-        assert_eq!(*expect.kv.value(), actual);
-    }
-
-    fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
-        let mut i = 0;
-        for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
-            let expect_row = expect_rows.get(i).unwrap();
-            assert_eq!(expect_row.kv.key(), actual_row.key);
-            assert_eq!(expect_row.kv.value(), actual_row.value);
-            assert_eq!(expect_row.pos, actual_row.row_position);
-            i += 1;
-        }
-        assert_eq!(expect_rows.len(), i);
-    }
-
-    fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
-        kvs.into_iter()
-            .map(|kv| {
-                let pos = db.write(&kv.key(), &kv.value()).unwrap();
-                TestingRow::new(kv, pos)
-            })
-            .collect::<Vec<TestingRow>>()
-    }
 
     #[test]
     fn test_create_merge_file_dir() {
@@ -652,14 +603,15 @@ mod tests {
             rows.append(&mut write_kvs_to_db(&db, kvs));
             db.flush_writing_file().unwrap();
             old_db.flush_writing_file().unwrap();
-            let files = load_merged_files(
+            let merge_manager = MergeManager::new(
+                INSTANCE_ID,
                 &dir,
-                &file_id_generator,
-                &db.get_file_ids().stable_file_ids,
-                old_db.get_max_file_id(),
-                DEFAULT_OPTIONS.tolerate_data_file_corruption,
-            )
-            .unwrap();
+                file_id_generator.clone(),
+                DEFAULT_OPTIONS,
+            );
+            let files = merge_manager
+                .load_merged_files(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
+                .unwrap();
             old_db.rebuild_data_files(files);
         }
 

@@ -12,7 +12,6 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
-    merge::load_merged_files,
     utils,
 };
 use log::{debug, error, info};
@@ -484,17 +483,19 @@ impl Iterator for DatabaseRecoverIter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use test_log::test;
+pub mod database_tests_utils {
+    use bitcask_tests::common::TestingKV;
 
-    const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
+    use crate::database::RowPosition;
+
+    use super::{DataBaseOptions, Database};
+
+    pub const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: 1024,
         tolerate_data_file_corruption: true,
     };
 
-    struct TestingRow {
+    pub struct TestingRow {
         kv: TestingKV,
         pos: RowPosition,
     }
@@ -505,18 +506,18 @@ mod tests {
         }
     }
 
-    fn assert_rows_value(db: &Database, expect: &Vec<TestingRow>) {
+    pub fn assert_rows_value(db: &Database, expect: &Vec<TestingRow>) {
         for row in expect {
             assert_row_value(db, row);
         }
     }
 
-    fn assert_row_value(db: &Database, expect: &TestingRow) {
+    pub fn assert_row_value(db: &Database, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
         assert_eq!(*expect.kv.value(), actual);
     }
 
-    fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
+    pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
         let mut i = 0;
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
@@ -528,7 +529,7 @@ mod tests {
         assert_eq!(expect_rows.len(), i);
     }
 
-    fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
+    pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
         kvs.into_iter()
             .map(|kv| {
                 let pos = db.write(&kv.key(), &kv.value()).unwrap();
@@ -536,6 +537,19 @@ mod tests {
             })
             .collect::<Vec<TestingRow>>()
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::database::database_tests_utils::{
+        assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
+    };
+
+    use super::*;
+
+    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
+    use test_log::test;
 
     #[test]
     fn test_read_write_writing_file() {

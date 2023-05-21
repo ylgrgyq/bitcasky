@@ -23,7 +23,7 @@ use super::{
     constants::{
         DATA_FILE_KEY_OFFSET, KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE,
     },
-    stable_file::StableFile,
+    StableFile,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -174,7 +174,13 @@ impl HintFileWriter {
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(file_id) = receiver.recv() {
                 if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
-                    error!(target: DEFAULT_LOG_TARGET, "write hint file failed {}", e);
+                    warn!(
+                        target: DEFAULT_LOG_TARGET,
+                        "write hint file with id: {} under path: {} failed {}",
+                        file_id,
+                        moved_dir.display(),
+                        e
+                    );
                 }
             }
         }));
@@ -199,9 +205,11 @@ impl HintFileWriter {
     }
 
     fn write_hint_file(database_dir: &Path, data_file_id: u32) -> BitcaskResult<()> {
-        let data_file = fs::open_file(database_dir, FileType::DataFile, Some(data_file_id))?;
-        let stable_file = StableFile::new(database_dir, data_file_id, data_file.file, false)?;
-        let data_itr = stable_file.iter()?;
+        let stable_file_opt = StableFile::open(database_dir, data_file_id, false)?;
+        if stable_file_opt.is_none() {
+            return Ok(());
+        }
+        let data_itr = stable_file_opt.unwrap().iter()?;
 
         let mut m = HashMap::new();
         for row in data_itr {
