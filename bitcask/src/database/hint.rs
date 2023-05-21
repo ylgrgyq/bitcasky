@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     mem::ManuallyDrop,
-    path::Path,
+    path::{Path, PathBuf},
     thread::{self, JoinHandle},
     vec,
 };
@@ -42,6 +42,7 @@ const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZ
 const HINT_FILE_HEADER_SIZE: usize =
     TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE + ROW_OFFSET_SIZE;
 const DEFAULT_LOG_TARGET: &str = "Hint";
+const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct HintFile {
     file_id: u32,
@@ -224,13 +225,20 @@ impl HintFileWriter {
                 Err(e) => return Err(e),
             }
         }
-        let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(database_dir)?;
+
+        let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_file_id)?;
         m.values()
             .into_iter()
             .map(|r| hint_file.write_hint_row(r))
             .collect::<BitcaskResult<Vec<_>>>()?;
-        fs::commit_hint_files(database_dir, data_file_id)
+        fs::commit_file(
+            FileType::HintFile,
+            Some(data_file_id),
+            &hint_file_tmp_dir,
+            database_dir,
+        )?;
+        Ok(())
     }
 }
 
@@ -249,7 +257,7 @@ impl Drop for HintFileWriter {
 }
 
 pub fn clear_temp_hint_file_directory(database_dir: &Path) {
-    if let Err(e) = fs::create_hint_file_tmp_dir(database_dir).and_then(|hint_file_tmp_dir| {
+    if let Err(e) = create_hint_file_tmp_dir(database_dir).and_then(|hint_file_tmp_dir| {
         let paths = std::fs::read_dir(hint_file_tmp_dir)?;
         for path in paths {
             let file_path = path?;
@@ -265,6 +273,16 @@ pub fn clear_temp_hint_file_directory(database_dir: &Path) {
             "clear temp hint file directory failed. {}", e
         )
     }
+}
+
+fn create_hint_file_tmp_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
+    let p = hint_file_tmp_dir(base_dir);
+    fs::create_dir(p.as_path())?;
+    Ok(p)
+}
+
+fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
+    base_dir.join(HINT_FILES_TMP_DIRECTORY)
 }
 
 #[cfg(test)]

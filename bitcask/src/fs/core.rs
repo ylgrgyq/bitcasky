@@ -6,7 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use log::{info, warn};
+use log::warn;
 use walkdir::WalkDir;
 
 use crate::{
@@ -16,7 +16,6 @@ use crate::{
 
 const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
-const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
@@ -86,30 +85,30 @@ pub fn delete_file(
     Ok(())
 }
 
-pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
-    fs::remove_dir_all(base_dir)?;
+pub fn commit_file(
+    file_type: FileType,
+    file_id: Option<u32>,
+    from_dir: &Path,
+    to_dir: &Path,
+) -> Result<(), std::io::Error> {
+    let from_p = file_type.get_path(from_dir, file_id);
+    if from_p.exists() {
+        let to_p = file_type.get_path(to_dir, file_id);
+        return fs::rename(from_p, to_p);
+    }
     Ok(())
 }
 
-pub fn create_hint_file_tmp_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
-    let p = hint_file_tmp_dir(base_dir);
-
-    if !p.exists() {
-        fs::create_dir(p.clone())?;
+pub fn create_dir(base_dir: &Path) -> BitcaskResult<()> {
+    if !base_dir.exists() {
+        std::fs::create_dir(base_dir)?;
     }
 
-    Ok(p)
+    Ok(())
 }
 
-pub fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
-    base_dir.join(HINT_FILES_TMP_DIRECTORY)
-}
-
-pub fn commit_hint_files(base_dir: &Path, file_id: u32) -> BitcaskResult<()> {
-    let hint_dir_path = hint_file_tmp_dir(base_dir);
-    let from_p = FileType::HintFile.get_path(&hint_dir_path, Some(file_id));
-    let to_p = FileType::HintFile.get_path(base_dir, Some(file_id));
-    fs::rename(from_p, to_p)?;
+pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
+    fs::remove_dir_all(base_dir)?;
     Ok(())
 }
 
@@ -157,18 +156,19 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
 
 pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
     let merge_dir_path = merge_file_dir(base_dir);
-    let commit_file = |file_id: &u32, file_type: FileType| -> Result<(), std::io::Error> {
-        let from_p = file_type.get_path(&merge_dir_path, Some(*file_id));
-        if from_p.exists() {
-            let to_p = file_type.get_path(base_dir, Some(*file_id));
-            return fs::rename(from_p, to_p);
-        }
-        Ok(())
-    };
-
     for file_id in file_ids {
-        commit_file(file_id, FileType::DataFile)?;
-        commit_file(file_id, FileType::HintFile)?;
+        commit_file(
+            FileType::DataFile,
+            Some(*file_id),
+            &merge_dir_path,
+            base_dir,
+        )?;
+        commit_file(
+            FileType::HintFile,
+            Some(*file_id),
+            &merge_dir_path,
+            base_dir,
+        )?;
     }
     Ok(())
 }
