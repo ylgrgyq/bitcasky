@@ -10,6 +10,7 @@ use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
 use crate::fs::{self};
 use crate::keydir::KeyDir;
+use crate::merge::MergeManager;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
 #[derive(Debug, Clone, Copy)]
@@ -89,6 +90,7 @@ pub struct Bitcask {
     database: Database,
     merge_lock: Mutex<()>,
     is_error: Mutex<Option<String>>,
+    merge_manager: MergeManager,
 }
 
 impl Bitcask {
@@ -114,18 +116,23 @@ impl Bitcask {
             file_id_generator.clone(),
             options.get_database_options(),
         )?;
-        let keydir = KeyDir::new(&database)?;
+        let keydir = RwLock::new(KeyDir::new(&database)?);
         let id = Uuid::new_v4();
         debug!(target: "Bitcask", "Bitcask created. instanceId = {}", id);
         Ok(Bitcask {
             instance_id: id.to_string(),
             directory_lock_file,
-            keydir: RwLock::new(keydir),
-            file_id_generator,
+            keydir,
+            file_id_generator: file_id_generator.clone(),
             database,
             options,
             merge_lock: Mutex::new(()),
             is_error: Mutex::new(None),
+            merge_manager: MergeManager::new(
+                id.to_string(),
+                file_id_generator.clone(),
+                options.get_database_options(),
+            ),
         })
     }
 
@@ -206,6 +213,8 @@ impl Bitcask {
 
     pub fn merge(&self) -> BitcaskResult<()> {
         self.check_db_error()?;
+
+        self.merge_manager.merge(&self.database, &self.keydir)?;
 
         let lock_ret = self.merge_lock.try_lock();
 
@@ -309,11 +318,8 @@ impl Bitcask {
                     k, v, pos.file_id, pos.row_offset, pos.row_size, pos.timestamp);
             }
         }
-        debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
         merge_db.flush_writing_file()?;
-        debug!(target:"Bitcask", "write merge db done2. {}", self.file_id_generator.get_file_id());
         let file_ids = merge_db.get_file_ids();
-        debug!(target:"Bitcask", "write merge db done3. {} {:?}", self.file_id_generator.get_file_id(), file_ids.stable_file_ids);
         // we do not write anything in writing file
         // so we can only use stable files
         Ok((file_ids.stable_file_ids, new_kd))
