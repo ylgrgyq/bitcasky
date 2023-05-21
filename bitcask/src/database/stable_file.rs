@@ -22,6 +22,8 @@ use super::{
     },
 };
 
+const DEFAULT_LOG_TARGET: &str = "DatabaseMerge";
+
 #[derive(Debug)]
 pub struct StableFile {
     database_dir: PathBuf,
@@ -32,6 +34,29 @@ pub struct StableFile {
 }
 
 impl StableFile {
+    pub fn open(
+        database_dir: &Path,
+        file_id: u32,
+        tolerate_data_file_corruption: bool,
+    ) -> BitcaskResult<Option<StableFile>> {
+        let data_file = fs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
+        let meta = data_file.file.metadata()?;
+        if meta.len() == 0 {
+            info!(
+                target: DEFAULT_LOG_TARGET,
+                "skip load empty data file with id: {}", &file_id
+            );
+            return Ok(None);
+        }
+        let stable_file = StableFile::new(
+            database_dir,
+            file_id,
+            data_file.file,
+            tolerate_data_file_corruption,
+        )?;
+        Ok(Some(stable_file))
+    }
+
     pub fn new(
         database_dir: &Path,
         file_id: u32,

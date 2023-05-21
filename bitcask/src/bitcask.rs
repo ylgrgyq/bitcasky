@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use log::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::database::{DataBaseOptions, Database};
+use crate::database::{self, DataBaseOptions, Database, MergeMeta};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
-use crate::fs::{self, MergeMeta};
+use crate::fs::{self};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
@@ -105,6 +105,8 @@ impl Bitcask {
                 ));
             }
         };
+
+        validate_database_directory(directory)?;
 
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let database = Database::open(
@@ -217,7 +219,7 @@ impl Bitcask {
 
         debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
 
-        let merge_dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
+        let merge_dir_path = database::create_merge_file_dir(self.database.get_database_dir())?;
         let (file_ids, new_kd) =
             self.write_merged_files(&merge_dir_path, &kd, known_max_file_id)?;
 
@@ -288,7 +290,7 @@ impl Bitcask {
         key_dir_to_write: &KeyDir,
         known_max_file_id: u32,
     ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
-        fs::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
+        database::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
 
         let new_kd = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
@@ -323,4 +325,15 @@ impl Drop for Bitcask {
         fs::unlock_directory(&self.directory_lock_file);
         debug!(target: "Bitcask", "Bitcask shutdown. instanceId = {}", self.instance_id);
     }
+}
+
+fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
+    std::fs::create_dir_all(dir)?;
+    if !fs::check_directory_is_writable(dir) {
+        return Err(BitcaskError::PermissionDenied(format!(
+            "do not have writable permission for path: {}",
+            dir.display()
+        )));
+    }
+    Ok(())
 }
