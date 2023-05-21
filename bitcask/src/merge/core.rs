@@ -22,6 +22,7 @@ const DEFAULT_LOG_TARGET: &str = "DatabaseMerge";
 
 pub struct MergeManager {
     instance_id: String,
+    database_dir: PathBuf,
     merge_lock: Mutex<()>,
     file_id_generator: Arc<FileIdGenerator>,
     options: DataBaseOptions,
@@ -30,16 +31,19 @@ pub struct MergeManager {
 impl MergeManager {
     pub fn new(
         instance_id: String,
+        database_dir: &Path,
         file_id_generator: Arc<FileIdGenerator>,
         options: DataBaseOptions,
     ) -> MergeManager {
         MergeManager {
             instance_id,
+            database_dir: database_dir.to_path_buf(),
             merge_lock: Mutex::new(()),
             file_id_generator,
             options,
         }
     }
+
     pub fn merge(&self, database: &Database, keydir: &RwLock<KeyDir>) -> BitcaskResult<()> {
         let lock_ret = self.merge_lock.try_lock();
 
@@ -81,6 +85,26 @@ impl MergeManager {
         let clear_ret = fs::clear_dir(&merge_dir_path);
         if clear_ret.is_err() {
             warn!(target: "Bitcask", "clear merge directory failed. {}", clear_ret.unwrap_err());
+        }
+        Ok(())
+    }
+
+    pub fn recover_merge(&self) -> BitcaskResult<()> {
+        let recover_ret = do_recover_merge(&self.database_dir, &self.file_id_generator);
+        if let Err(err) = recover_ret {
+            let merge_dir = merge_file_dir(&self.database_dir);
+            warn!(
+                "recover merge under path: {} failed with error: \"{}\"",
+                merge_dir.display(),
+                err
+            );
+            match err {
+                BitcaskError::InvalidMergeDataFile(_, _) => {
+                    // clear Merge directory when recover merge failed
+                    fs::clear_dir(&merge_file_dir(&self.database_dir))?;
+                }
+                _ => return Err(err),
+            }
         }
         Ok(())
     }
@@ -192,29 +216,6 @@ fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()>
             &merge_dir_path,
             base_dir,
         )?;
-    }
-    Ok(())
-}
-
-pub fn recover_merge(
-    database_dir: &Path,
-    file_id_generator: &Arc<FileIdGenerator>,
-) -> BitcaskResult<()> {
-    let recover_ret = do_recover_merge(&database_dir, &file_id_generator);
-    if let Err(err) = recover_ret {
-        let merge_dir = merge_file_dir(&database_dir);
-        warn!(
-            "recover merge under path: {} failed with error: \"{}\"",
-            merge_dir.display(),
-            err
-        );
-        match err {
-            BitcaskError::InvalidMergeDataFile(_, _) => {
-                // clear Merge directory when recover merge failed
-                fs::clear_dir(&merge_file_dir(&database_dir))?;
-            }
-            _ => return Err(err),
-        }
     }
     Ok(())
 }
@@ -350,6 +351,7 @@ mod tests {
         max_file_size: 1024,
         tolerate_data_file_corruption: true,
     };
+    const INSTANCE_ID: String = String::new();
 
     struct TestingRow {
         kv: TestingKV,
@@ -467,6 +469,13 @@ mod tests {
             known_max_file_id: 101,
         };
         write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let merge_manager = MergeManager::new(
+            INSTANCE_ID,
+            &dir,
+            file_id_generator.clone(),
+            DEFAULT_OPTIONS,
+        );
+        merge_manager.recover_merge().unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(2, file_id_generator.get_file_id());
         assert_eq!(1, db.get_file_ids().stable_file_ids.len());
@@ -503,6 +512,13 @@ mod tests {
             known_max_file_id: file_id_generator.generate_next_file_id(),
         };
         write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let merge_manager = MergeManager::new(
+            INSTANCE_ID,
+            &dir,
+            file_id_generator.clone(),
+            DEFAULT_OPTIONS,
+        );
+        merge_manager.recover_merge().unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(4, file_id_generator.get_file_id());
         assert_eq!(1, db.get_file_ids().stable_file_ids.len());
@@ -528,6 +544,13 @@ mod tests {
         };
         let merge_file_dir = create_merge_file_dir(&dir).unwrap();
         write_merge_meta(&merge_file_dir, merge_meta).unwrap();
+        let merge_manager = MergeManager::new(
+            INSTANCE_ID,
+            &dir,
+            file_id_generator.clone(),
+            DEFAULT_OPTIONS,
+        );
+        merge_manager.recover_merge().unwrap();
         let mut rows: Vec<TestingRow> = vec![];
         {
             // write something to data file in merge dir
@@ -541,6 +564,13 @@ mod tests {
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
 
+        let merge_manager = MergeManager::new(
+            INSTANCE_ID,
+            &dir,
+            file_id_generator.clone(),
+            DEFAULT_OPTIONS,
+        );
+        merge_manager.recover_merge().unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(4, file_id_generator.get_file_id());
         assert_eq!(1, db.get_file_ids().stable_file_ids.len());
@@ -585,7 +615,13 @@ mod tests {
         perms.set_readonly(true);
         std::fs::set_permissions(&merge_file_dir, perms).unwrap();
 
-        let ret = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS);
+        let merge_manager = MergeManager::new(
+            INSTANCE_ID,
+            &dir,
+            file_id_generator.clone(),
+            DEFAULT_OPTIONS,
+        );
+        let ret = merge_manager.recover_merge();
         assert!(ret.is_err());
     }
 

@@ -12,7 +12,7 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
-    merge::{load_merged_files, recover_merge},
+    merge::load_merged_files,
     utils,
 };
 use log::{debug, error, info};
@@ -76,7 +76,6 @@ impl Database {
         debug!(target: "Database", "opening database at directory {:?}", directory);
 
         hint::clear_temp_hint_file_directory(&database_dir);
-        recover_merge(&database_dir, &file_id_generator)?;
 
         let opened_stable_files = SelfFs::open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {

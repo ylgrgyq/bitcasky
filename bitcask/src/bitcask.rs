@@ -107,14 +107,23 @@ impl Bitcask {
 
         validate_database_directory(directory)?;
 
+        let id = Uuid::new_v4();
         let file_id_generator = Arc::new(FileIdGenerator::new());
+        let merge_manager = MergeManager::new(
+            id.to_string(),
+            directory,
+            file_id_generator.clone(),
+            options.get_database_options(),
+        );
+        merge_manager.recover_merge()?;
+
         let database = Database::open(
             directory,
             file_id_generator.clone(),
             options.get_database_options(),
         )?;
         let keydir = RwLock::new(KeyDir::new(&database)?);
-        let id = Uuid::new_v4();
+
         debug!(target: "Bitcask", "Bitcask created. instanceId = {}", id);
         Ok(Bitcask {
             instance_id: id.to_string(),
@@ -122,11 +131,7 @@ impl Bitcask {
             keydir,
             database,
             options,
-            merge_manager: MergeManager::new(
-                id.to_string(),
-                file_id_generator.clone(),
-                options.get_database_options(),
-            ),
+            merge_manager,
         })
     }
 
