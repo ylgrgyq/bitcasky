@@ -2,7 +2,8 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
-use log::{error, info};
+use log::{debug, error, info, warn};
+use uuid::Uuid;
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
@@ -11,16 +12,9 @@ use crate::fs::{self, MergeMeta};
 use crate::keydir::KeyDir;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
-pub const DEFAULT_BITCASK_OPTIONS: BitcaskOptions = BitcaskOptions {
-    max_file_size: 128 * 1024 * 1024,
-    max_key_size: 64,
-    max_value_size: 100 * 1024,
-    tolerate_data_file_corrption: true,
-};
-
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
-    pub max_file_size: usize,
+    pub max_file_size: u64,
     pub max_key_size: usize,
     pub max_value_size: usize,
     pub tolerate_data_file_corrption: bool,
@@ -57,6 +51,17 @@ impl BitcaskOptions {
     }
 }
 
+impl Default for BitcaskOptions {
+    fn default() -> Self {
+        Self {
+            max_file_size: 128 * 1024 * 1024,
+            max_key_size: 64,
+            max_value_size: 100 * 1024,
+            tolerate_data_file_corrption: true,
+        }
+    }
+}
+
 #[derive(PartialEq)]
 enum FoldStatus {
     Stopped,
@@ -70,12 +75,13 @@ pub struct FoldResult<T> {
 #[derive(Debug)]
 pub struct BitcaskStats {
     pub number_of_data_files: usize,
-    pub number_of_hint_files: usize,
     pub total_data_size_in_bytes: u64,
     pub number_of_keys: usize,
+    pub number_of_pending_hint_files: usize,
 }
 
 pub struct Bitcask {
+    instance_id: String,
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
     file_id_generator: Arc<FileIdGenerator>,
@@ -107,7 +113,10 @@ impl Bitcask {
             options.get_database_options(),
         )?;
         let keydir = KeyDir::new(&database)?;
+        let id = Uuid::new_v4();
+        debug!(target: "Bitcask", "Bitcask created. instanceId = {}", id);
         Ok(Bitcask {
+            instance_id: id.to_string(),
             directory_lock_file,
             keydir: RwLock::new(keydir),
             file_id_generator,
@@ -149,6 +158,8 @@ impl Bitcask {
             e
         })?;
 
+        debug!(target: "Bitcask", "put data success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
+            key, value, ret.file_id, ret.row_offset, ret.row_size, ret.timestamp);
         kd.put(key, ret);
         Ok(())
     }
@@ -200,9 +211,15 @@ impl Bitcask {
             return Err(BitcaskError::MergeInProgress());
         }
 
+        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}", self.instance_id);
+
         let (kd, known_max_file_id) = self.flush_writing_file()?;
-        let dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
-        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
+
+        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
+
+        let merge_dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
+        let (file_ids, new_kd) =
+            self.write_merged_files(&merge_dir_path, &kd, known_max_file_id)?;
 
         info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
 
@@ -222,9 +239,13 @@ impl Bitcask {
             }
         }
 
-        info!(target: "BitcaskMerge", "purge files with id smaller than: {}", known_max_file_id);
+        info!(target: "Bitcask", "purge files with id smaller than: {}", known_max_file_id);
 
         fs::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
+        let clear_ret = fs::clear_dir(&merge_dir_path);
+        if clear_ret.is_err() {
+            warn!(target: "Bitcask", "clear merge directory failed. {}", clear_ret.unwrap_err());
+        }
         Ok(())
     }
 
@@ -234,7 +255,7 @@ impl Bitcask {
         let db_stats = self.database.stats()?;
         Ok(BitcaskStats {
             number_of_data_files: db_stats.number_of_data_files,
-            number_of_hint_files: db_stats.number_of_hint_files,
+            number_of_pending_hint_files: db_stats.number_of_pending_hint_files,
             total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
             number_of_keys: key_size,
         })
@@ -280,18 +301,26 @@ impl Bitcask {
             let k = r.key();
             let v = self.database.read_value(r.value())?;
             if !is_tombstone(&v) {
-                let pos = merge_db.write_with_timestamp(k, &v, r.value().tstmp)?;
-                new_kd.checked_put(k.clone(), pos)
+                let pos = merge_db.write_with_timestamp(k, &v, r.value().timestamp)?;
+                new_kd.checked_put(k.clone(), pos);
+                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
+                    k, v, pos.file_id, pos.row_offset, pos.row_size, pos.timestamp);
             }
         }
+        debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
         merge_db.flush_writing_file()?;
+        debug!(target:"Bitcask", "write merge db done2. {}", self.file_id_generator.get_file_id());
         let file_ids = merge_db.get_file_ids();
-        Ok((file_ids, new_kd))
+        debug!(target:"Bitcask", "write merge db done3. {} {:?}", self.file_id_generator.get_file_id(), file_ids.stable_file_ids);
+        // we do not write anything in writing file
+        // so we can only use stable files
+        Ok((file_ids.stable_file_ids, new_kd))
     }
 }
 
 impl Drop for Bitcask {
     fn drop(&mut self) {
         fs::unlock_directory(&self.directory_lock_file);
+        debug!(target: "Bitcask", "Bitcask shutdown. instanceId = {}", self.instance_id);
     }
 }

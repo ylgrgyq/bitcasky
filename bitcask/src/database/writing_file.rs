@@ -55,11 +55,11 @@ impl WritingFile {
             file_id: self.file_id,
             row_offset: value_offset,
             row_size: row.size,
-            tstmp: row.tstamp,
+            timestamp: row.tstamp,
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.data_file, value_offset, size)
     }
 

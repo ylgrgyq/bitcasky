@@ -1,4 +1,3 @@
-use core::panic;
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -7,8 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use fs2::FileExt;
-use log::{error, warn};
+use log::{info, warn};
 use walkdir::WalkDir;
 
 use crate::{
@@ -18,6 +16,7 @@ use crate::{
 
 const TESTING_DIRECTORY: &str = "Testing";
 const MERGE_FILES_DIRECTORY: &str = "Merge";
+const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
@@ -81,12 +80,36 @@ pub fn delete_file(
     file_id: Option<u32>,
 ) -> BitcaskResult<()> {
     let path = file_type.get_path(base_dir, file_id);
-    fs::remove_file(path)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
     Ok(())
 }
 
 pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
     fs::remove_dir_all(base_dir)?;
+    Ok(())
+}
+
+pub fn create_hint_file_tmp_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
+    let p = hint_file_tmp_dir(base_dir);
+
+    if !p.exists() {
+        fs::create_dir(p.clone())?;
+    }
+
+    Ok(p)
+}
+
+pub fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
+    base_dir.join(HINT_FILES_TMP_DIRECTORY)
+}
+
+pub fn commit_hint_files(base_dir: &Path, file_id: u32) -> BitcaskResult<()> {
+    let hint_dir_path = hint_file_tmp_dir(base_dir);
+    let from_p = FileType::HintFile.get_path(&hint_dir_path, Some(file_id));
+    let to_p = FileType::HintFile.get_path(base_dir, Some(file_id));
+    fs::rename(from_p, to_p)?;
     Ok(())
 }
 
@@ -101,6 +124,7 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
         fs::create_dir(merge_dir_path.clone())?;
     }
 
+    let mut merge_dir_empty = true;
     let paths = fs::read_dir(merge_dir_path.clone())?;
     for path in paths {
         let file_path = path?;
@@ -110,20 +134,41 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
         if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
             continue;
         }
-        warn!(target: "FileManager", "Merge file directory:{} is not empty", merge_dir_path.display().to_string());
-        return Err(BitcaskError::MergeFileDirectoryNotEmpty(
-            file_path.path().display().to_string(),
-        ));
+        warn!(target: "File", "Merge file directory:{} is not empty, it at least has file: {}", merge_dir_path.display().to_string(), file_path.path().display());
+
+        merge_dir_empty = false;
+        break;
     }
+    if !merge_dir_empty {
+        let clear_ret = clear_dir(&merge_dir_path).and_then(|_| {
+            fs::create_dir(merge_dir_path.clone())?;
+            Ok(())
+        });
+        if clear_ret.is_err() {
+            warn!(target: "File", "clear merge directory failed. {}", clear_ret.unwrap_err());
+            return Err(BitcaskError::MergeFileDirectoryNotEmpty(
+                merge_dir_path.display().to_string(),
+            ));
+        }
+    }
+
     Ok(merge_dir_path)
 }
 
 pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
     let merge_dir_path = merge_file_dir(base_dir);
+    let commit_file = |file_id: &u32, file_type: FileType| -> Result<(), std::io::Error> {
+        let from_p = file_type.get_path(&merge_dir_path, Some(*file_id));
+        if from_p.exists() {
+            let to_p = file_type.get_path(base_dir, Some(*file_id));
+            return fs::rename(from_p, to_p);
+        }
+        Ok(())
+    };
+
     for file_id in file_ids {
-        let from_p = FileType::DataFile.get_path(&merge_dir_path, Some(*file_id));
-        let to_p = FileType::DataFile.get_path(base_dir, Some(*file_id));
-        fs::rename(from_p, to_p)?;
+        commit_file(file_id, FileType::DataFile)?;
+        commit_file(file_id, FileType::HintFile)?;
     }
     Ok(())
 }
@@ -184,9 +229,11 @@ pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
 pub fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
     get_valid_data_file_ids(base_dir)
         .iter()
-        .filter(|id| **id < max_file_id)
-        .for_each(|id| delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default());
-
+        .filter(|id| **id <= max_file_id)
+        .for_each(|id| {
+            delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default();
+            delete_file(base_dir, FileType::HintFile, Some(*id)).unwrap_or_default();
+        });
     Ok(())
 }
 
@@ -213,7 +260,6 @@ fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| {
-            let file_name = e.file_name().to_string_lossy();
             if FileType::DataFile.check_file_belongs_to_type(e.path())
                 && FileType::DataFile
                     .parse_file_id_from_file_name(e.path())
@@ -282,11 +328,19 @@ mod tests {
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
         create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
 
-        let failed_to_create = create_merge_file_dir(&dir);
-        assert!(match failed_to_create.err().unwrap() {
-            BitcaskError::MergeFileDirectoryNotEmpty(_) => true,
-            _ => false,
-        });
+        create_merge_file_dir(&dir).unwrap();
+
+        let paths = fs::read_dir(merge_file_path.clone()).unwrap();
+        assert!(!paths.into_iter().any(|p| {
+            let file_path = p.unwrap();
+            if file_path.path().is_dir() {
+                return false;
+            }
+            if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
+                return false;
+            }
+            return true;
+        }));
     }
 
     #[test]

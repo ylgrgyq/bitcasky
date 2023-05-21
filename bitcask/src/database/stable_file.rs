@@ -12,7 +12,7 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     fs::{self, FileType},
 };
-use log::error;
+use log::{error, info};
 
 use super::{
     common::{io_error_to_bitcask_error, read_value_from_file, RowPosition, RowToRead},
@@ -48,7 +48,7 @@ impl StableFile {
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
     }
 
@@ -114,8 +114,8 @@ impl StableFile {
             row_position: RowPosition {
                 file_id: self.file_id,
                 row_offset: value_offset,
-                row_size: DATA_FILE_KEY_OFFSET + key_size + value_size,
-                tstmp,
+                row_size: (DATA_FILE_KEY_OFFSET + key_size + value_size) as u64,
+                timestamp: tstmp,
             },
         }))
     }

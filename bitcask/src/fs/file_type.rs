@@ -1,8 +1,6 @@
 use core::panic;
 use std::path::{Path, PathBuf};
 
-use crate::error::BitcaskError;
-
 const LOCK_FILE_EXTENSION: &str = "lock";
 const MERGE_META_FILE_EXTENSION: &str = "meta";
 const DATA_FILE_EXTENSION: &str = "data";
