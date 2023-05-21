@@ -1,31 +1,23 @@
 use std::{
     cell::Cell,
-    fs::{self},
     mem,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
-    vec,
 };
 
 use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
-    database::{
-        hint::{self, HintFileWriter},
-        merge::recover_merge,
-    },
+    database::hint::{self, HintFileWriter},
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
+    merge::{load_merged_files, recover_merge},
     utils,
 };
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 
-use super::{
-    common::RecoveredRow,
-    merge::{self, commit_merge_files, merge_file_dir, read_merge_meta, shift_data_files},
-    writing_file::WritingFile,
-};
+use super::{common::RecoveredRow, writing_file::WritingFile};
 use super::{
     common::{RowPosition, RowToRead, RowToWrite},
     hint::HintFile,
@@ -223,7 +215,7 @@ impl Database {
     ) -> BitcaskResult<()> {
         self.flush_writing_file()?;
 
-        let files = merge::load_merged_files(
+        let files = load_merged_files(
             &self.database_dir,
             &self.file_id_generator,
             merged_file_ids,
@@ -299,18 +291,6 @@ impl Database {
         if err.is_some() {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
-        Ok(())
-    }
-
-    fn open_stable_file(&self, file_id: u32) -> BitcaskResult<()> {
-        if let Some(f) = StableFile::open(
-            &self.database_dir,
-            file_id,
-            self.options.tolerate_data_file_corruption,
-        )? {
-            self.stable_files.insert(file_id, Mutex::new(f));
-        }
-
         Ok(())
     }
 
@@ -523,11 +503,6 @@ impl Iterator for DatabaseRecoverIter {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{
-        merge::create_merge_file_dir, write_merge_meta, writing_file, MergeMeta,
-    };
-
-    use super::super::mocks::MockWritingFile;
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
@@ -652,146 +627,6 @@ mod tests {
     }
 
     #[test]
-    fn test_recover_merge_with_only_merge_meta() {
-        let dir = get_temporary_directory_path();
-        let mut rows: Vec<TestingRow> = vec![];
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        {
-            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value1"),
-                TestingKV::new("k2", "value2"),
-            ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
-        }
-        let merge_file_dir = create_merge_file_dir(&dir).unwrap();
-        let merge_meta = MergeMeta {
-            known_max_file_id: 101,
-        };
-        write_merge_meta(&merge_file_dir, merge_meta).unwrap();
-        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        assert_eq!(2, file_id_generator.get_file_id());
-        assert_eq!(1, db.stable_files.len());
-        assert_rows_value(&db, &rows);
-        assert_database_rows(&db, &rows);
-    }
-
-    #[test]
-    fn test_recover_merge_with_invalid_merge_meta() {
-        let dir = get_temporary_directory_path();
-        let mut rows: Vec<TestingRow> = vec![];
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        {
-            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value1"),
-                TestingKV::new("k2", "value2"),
-            ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
-        }
-        let merge_file_dir = create_merge_file_dir(&dir).unwrap();
-        {
-            // write something to data file in merge dir
-            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
-                .unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value1"),
-                TestingKV::new("k2", "value2"),
-            ];
-            write_kvs_to_db(&db, kvs);
-        }
-
-        let merge_meta = MergeMeta {
-            known_max_file_id: file_id_generator.generate_next_file_id(),
-        };
-        write_merge_meta(&merge_file_dir, merge_meta).unwrap();
-        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        assert_eq!(4, file_id_generator.get_file_id());
-        assert_eq!(1, db.stable_files.len());
-        assert_rows_value(&db, &rows);
-        assert_database_rows(&db, &rows);
-        assert!(!merge_file_dir.exists());
-    }
-
-    #[test]
-    fn test_recover_merge() {
-        let dir = get_temporary_directory_path();
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        {
-            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value1"),
-                TestingKV::new("k2", "value2"),
-            ];
-            write_kvs_to_db(&db, kvs);
-        }
-        let merge_meta = MergeMeta {
-            known_max_file_id: file_id_generator.generate_next_file_id(),
-        };
-        let merge_file_dir = create_merge_file_dir(&dir).unwrap();
-        write_merge_meta(&merge_file_dir, merge_meta).unwrap();
-        let mut rows: Vec<TestingRow> = vec![];
-        {
-            // write something to data file in merge dir
-            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
-                .unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value3"),
-                TestingKV::new("k2", "value4"),
-                TestingKV::new("k3", "value5"),
-            ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
-        }
-
-        let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        assert_eq!(4, file_id_generator.get_file_id());
-        assert_eq!(1, db.stable_files.len());
-        assert_rows_value(&db, &rows);
-        assert_database_rows(&db, &rows);
-        assert!(!merge_file_dir.exists());
-    }
-
-    #[test]
-    fn test_recover_merge_failed_with_unexpeded_error() {
-        let dir = get_temporary_directory_path();
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let mut rows: Vec<TestingRow> = vec![];
-        {
-            let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value1"),
-                TestingKV::new("k2", "value2"),
-            ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
-        }
-        let merge_meta = MergeMeta {
-            known_max_file_id: file_id_generator.generate_next_file_id(),
-        };
-        let merge_file_dir = create_merge_file_dir(&dir).unwrap();
-        write_merge_meta(&merge_file_dir, merge_meta).unwrap();
-        {
-            // write something to data file in merge dir
-            let db = Database::open(&merge_file_dir, file_id_generator.clone(), DEFAULT_OPTIONS)
-                .unwrap();
-            let kvs = vec![
-                TestingKV::new("k1", "value3"),
-                TestingKV::new("k2", "value4"),
-            ];
-            write_kvs_to_db(&db, kvs);
-        }
-
-        // change one data file under merge directory to readonly
-        // so this file cannot recover and move to base directory
-        let meta = fs::metadata(&merge_file_dir).unwrap();
-        let mut perms = meta.permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(&merge_file_dir, perms).unwrap();
-
-        let ret = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS);
-        assert!(ret.is_err());
-    }
-
-    #[test]
     fn test_wrap_file() {
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let dir = get_temporary_directory_path();
@@ -815,35 +650,5 @@ mod tests {
         assert_rows_value(&db, &rows);
         assert_eq!(1, db.stable_files.len());
         assert_database_rows(&db, &rows);
-    }
-
-    #[test]
-    fn test_load_merged_files() {
-        let dir = get_temporary_directory_path();
-        let mut rows: Vec<TestingRow> = vec![];
-        let file_id_generator = Arc::new(FileIdGenerator::new());
-        let old_db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        let kvs = vec![
-            TestingKV::new("k1", "value1"),
-            TestingKV::new("k2", "value2"),
-        ];
-        rows.append(&mut write_kvs_to_db(&old_db, kvs));
-        {
-            let merge_path = create_merge_file_dir(&dir).unwrap();
-            let db =
-                Database::open(&merge_path, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-            let kvs = vec![
-                TestingKV::new("k3", "hello world"),
-                TestingKV::new("k1", "value4"),
-            ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
-            db.flush_writing_file().unwrap();
-            old_db
-                .load_merged_files(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
-                .unwrap();
-        }
-
-        assert_eq!(5, file_id_generator.get_file_id());
-        assert_eq!(1, old_db.stable_files.len());
     }
 }
