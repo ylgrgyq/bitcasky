@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     mem::ManuallyDrop,
-    path::{Path, PathBuf},
+    path::Path,
     thread::{self, JoinHandle},
     vec,
 };
@@ -41,9 +41,9 @@ const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_VALUE_SIZE_OFFSET + VALUE_S
 const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
 const HINT_FILE_HEADER_SIZE: usize =
     TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE + ROW_OFFSET_SIZE;
+const DEFAULT_LOG_TARGET: &str = "Hint";
 
 pub struct HintFile {
-    database_dir: PathBuf,
     file_id: u32,
     file: File,
 }
@@ -51,47 +51,31 @@ pub struct HintFile {
 impl HintFile {
     pub fn create(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
         let file = fs::create_file(database_dir, FileType::HintFile, Some(file_id))?;
-        Ok(HintFile {
-            database_dir: database_dir.to_path_buf(),
-            file_id,
-            file,
-        })
+        debug!(
+            target: DEFAULT_LOG_TARGET,
+            "create hint file with id: {}", file_id
+        );
+        Ok(HintFile { file_id, file })
     }
 
-    pub fn open(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
-        let file = fs::open_file(database_dir, FileType::HintFile, Some(file_id))?;
-        Ok(HintFile {
-            database_dir: database_dir.to_path_buf(),
-            file_id,
-            file: file.file,
-        })
+    pub fn open_iterator(database_dir: &Path, file_id: u32) -> BitcaskResult<HintFileIterator> {
+        let file = Self::open(database_dir, file_id)?;
+        debug!(
+            target: DEFAULT_LOG_TARGET,
+            "open hint file iterator with id: {}", file_id
+        );
+        Ok(HintFileIterator { file })
     }
 
-    pub fn write_hint_row(&mut self, hint: HintRow) -> BitcaskResult<()> {
-        let data_to_write = self.to_bytes(&hint);
+    pub fn write_hint_row(&mut self, hint: &HintRow) -> BitcaskResult<()> {
+        let data_to_write = self.to_bytes(hint);
         self.file.write_all(&data_to_write)?;
-        debug!(target: "Hint", "write hint row success. key: {:?}, key_size: {}, value_size: {}, row_offset: {}, timestamp: {}", 
+        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, key_size: {}, value_size: {}, row_offset: {}, timestamp: {}", 
             hint.key, hint.key_size, hint.value_size, hint.row_offset, hint.timestamp);
         Ok(())
     }
 
-    pub fn write_hint_rows<I>(&mut self, iter: I) -> BitcaskResult<()>
-    where
-        I: Iterator<Item = HintRow>,
-    {
-        for hint in iter {
-            self.write_hint_row(hint)?;
-        }
-        Ok(())
-    }
-
-    pub fn iter(&self) -> BitcaskResult<HintFileIterator> {
-        Ok(HintFileIterator {
-            file: HintFile::open(&self.database_dir, self.file_id)?,
-        })
-    }
-
-    fn read_hint_row(&mut self) -> BitcaskResult<HintRow> {
+    pub fn read_hint_row(&mut self) -> BitcaskResult<HintRow> {
         let mut header_buf = vec![0; HINT_FILE_HEADER_SIZE];
         self.file.read_exact(&mut header_buf)?;
 
@@ -109,14 +93,17 @@ impl HintFile {
 
         let mut k_buf = vec![0; key_size as usize];
         self.file.read_exact(&mut k_buf)?;
-        let kv_bs = Bytes::from(k_buf);
+        let key: Vec<u8> = Bytes::from(k_buf).into();
+
+        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, key_size: {}, value_size: {}, row_offset: {}, timestamp: {}", 
+            key, key_size, value_size, row_offset, timestamp);
 
         Ok(HintRow {
             timestamp,
             key_size,
             value_size,
             row_offset,
-            key: kv_bs.into(),
+            key,
         })
     }
 
@@ -129,12 +116,20 @@ impl HintFile {
         bs.extend_from_slice(&row.key);
         bs.freeze()
     }
+
+    fn open(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+        let file = fs::open_file(database_dir, FileType::HintFile, Some(file_id))?;
+        Ok(HintFile {
+            file_id,
+            file: file.file,
+        })
+    }
 }
 
 impl Drop for HintFile {
     fn drop(&mut self) {
         if let Err(e) = self.file.flush() {
-            warn!(target: "Hint", "flush hint file failed. {}", e)
+            warn!(target: DEFAULT_LOG_TARGET, "flush hint file failed. {}", e)
         }
     }
 }
@@ -178,7 +173,7 @@ impl HintFileWriter {
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(file_id) = receiver.recv() {
                 if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
-                    error!(target: "Hint", "write hint file failed {}", e);
+                    error!(target: DEFAULT_LOG_TARGET, "write hint file failed {}", e);
                 }
             }
         }));
@@ -191,7 +186,10 @@ impl HintFileWriter {
 
     pub fn async_write_hint_file(&self, data_file_id: u32) {
         if let Err(e) = self.sender.send(data_file_id) {
-            error!(target: "Database", "send file id: {} to hint file writer failed with error {}", data_file_id, e);
+            error!(
+                target: DEFAULT_LOG_TARGET,
+                "send file id: {} to hint file writer failed with error {}", data_file_id, e
+            );
         }
     }
 
@@ -228,8 +226,10 @@ impl HintFileWriter {
         }
         let hint_file_tmp_dir = fs::create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_file_id)?;
-        hint_file.write_hint_rows(m.into_values().collect::<Vec<HintRow>>().into_iter())?;
-
+        m.values()
+            .into_iter()
+            .map(|r| hint_file.write_hint_row(r))
+            .collect::<BitcaskResult<Vec<_>>>()?;
         fs::commit_hint_files(database_dir, data_file_id)
     }
 }
@@ -239,7 +239,10 @@ impl Drop for HintFileWriter {
         unsafe { ManuallyDrop::drop(&mut self.sender) }
         if let Some(join_handle) = self.worker_join_handle.take() {
             if join_handle.join().is_err() {
-                error!(target: "hint", "wait worker thread finish failed");
+                error!(
+                    target: DEFAULT_LOG_TARGET,
+                    "wait worker thread finish failed"
+                );
             }
         }
     }
@@ -257,7 +260,10 @@ pub fn clear_temp_hint_file_directory(database_dir: &Path) {
         }
         Ok(())
     }) {
-        error!(target: "Hint", "clear temp hint file directory failed. {}", e)
+        error!(
+            target: DEFAULT_LOG_TARGET,
+            "clear temp hint file directory failed. {}", e
+        )
     }
 }
 
@@ -284,7 +290,7 @@ mod tests {
         };
         {
             let mut hint_file = HintFile::create(&dir, file_id).unwrap();
-            hint_file.write_hint_row(expect_row.clone()).unwrap();
+            hint_file.write_hint_row(&expect_row).unwrap();
         }
         let mut hint_file = HintFile::open(&dir, file_id).unwrap();
         let actual_row = hint_file.read_hint_row().unwrap();

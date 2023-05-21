@@ -10,7 +10,7 @@ use std::{
 use dashmap::{mapref::one::RefMut, DashMap};
 
 use crate::{
-    database::hint::{self, HintFileWriter},
+    database::hint::{self, HintFileIterator, HintFileWriter},
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self as SelfFs, FileType},
@@ -511,9 +511,7 @@ fn recovered_iter(
         .exists()
     {
         debug!(target: "Database", "recover from hint file with id: {}", file_id);
-        Ok(Box::new(
-            HintFile::open(database_dir, file_id).and_then(|f| f.iter())?,
-        ))
+        Ok(Box::new(HintFile::open_iterator(database_dir, file_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", file_id);
         let data_file = SelfFs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
