@@ -59,7 +59,7 @@ impl MergeManager {
             database
                 .load_merged_files(&file_ids, known_max_file_id)
                 .map_err(|e| {
-                    // self.mark_db_error(e.to_string());
+                    database.mark_db_error(e.to_string());
                     error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
                     e
                 })?;

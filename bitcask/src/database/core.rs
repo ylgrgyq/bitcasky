@@ -70,6 +70,7 @@ pub struct Database {
     stable_files: DashMap<u32, Mutex<StableFile>>,
     options: DataBaseOptions,
     hint_file_writer: HintFileWriter,
+    is_error: Mutex<Option<String>>,
 }
 
 impl Database {
@@ -111,6 +112,7 @@ impl Database {
             stable_files,
             options,
             hint_file_writer,
+            is_error: Mutex::new(None),
         })
     }
 
@@ -284,6 +286,19 @@ impl Database {
     pub fn close(&self) -> BitcaskResult<()> {
         let mut writing_file_ref = self.writing_file.lock().unwrap();
         writing_file_ref.flush()?;
+        Ok(())
+    }
+
+    pub fn mark_db_error(&self, error_string: String) {
+        let mut err = self.is_error.lock().expect("lock db is error mutex failed");
+        *err = Some(error_string)
+    }
+
+    pub fn check_db_error(&self) -> Result<(), BitcaskError> {
+        let err = self.is_error.lock().expect("lock db is error mutex failed");
+        if err.is_some() {
+            return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
+        }
         Ok(())
     }
 

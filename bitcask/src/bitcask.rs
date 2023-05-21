@@ -150,7 +150,7 @@ impl Bitcask {
             ));
         }
 
-        self.check_db_error()?;
+        self.database.check_db_error()?;
 
         let kd = self.keydir.write().unwrap();
         let ret = self.database.write(&key, value).map_err(|e| {
@@ -162,7 +162,7 @@ impl Bitcask {
                 }
                 _ => true,
             } {
-                self.mark_db_error(e.to_string());
+                self.database.mark_db_error(e.to_string());
             }
             e
         })?;
@@ -174,7 +174,7 @@ impl Bitcask {
     }
 
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
-        self.check_db_error()?;
+        self.database.check_db_error()?;
 
         let row_pos = { self.keydir.read().unwrap().get(key).map(|r| *r.value()) };
 
@@ -200,7 +200,7 @@ impl Bitcask {
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
-        self.check_db_error()?;
+        self.database.check_db_error()?;
         let kd = self.keydir.write().unwrap();
 
         if kd.contains_key(key) {
@@ -212,7 +212,7 @@ impl Bitcask {
     }
 
     pub fn merge(&self) -> BitcaskResult<()> {
-        self.check_db_error()?;
+        self.database.check_db_error()?;
 
         self.merge_manager.merge(&self.database, &self.keydir)?;
 
@@ -240,7 +240,7 @@ impl Bitcask {
             self.database
                 .load_merged_files(&file_ids, known_max_file_id)
                 .map_err(|e| {
-                    self.mark_db_error(e.to_string());
+                    self.database.mark_db_error(e.to_string());
                     error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
                     e
                 })?;
@@ -270,19 +270,6 @@ impl Bitcask {
             total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
             number_of_keys: key_size,
         })
-    }
-
-    fn mark_db_error(&self, error_string: String) {
-        let mut err = self.is_error.lock().expect("lock db is error mutex failed");
-        *err = Some(error_string)
-    }
-
-    fn check_db_error(&self) -> Result<(), BitcaskError> {
-        let err = self.is_error.lock().expect("lock db is error mutex failed");
-        if err.is_some() {
-            return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
-        }
-        Ok(())
     }
 
     fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
