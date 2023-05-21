@@ -66,13 +66,20 @@ impl MergeManager {
         {
             // stop read/write
             let kd = keydir.write().unwrap();
-            database
-                .load_merged_files(&file_ids, known_max_file_id)
-                .map_err(|e| {
-                    database.mark_db_error(e.to_string());
-                    error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
-                    e
-                })?;
+            database.flush_writing_file()?;
+            let files = load_merged_files(
+                &self.database_dir,
+                &self.file_id_generator,
+                &file_ids,
+                known_max_file_id,
+                self.options.tolerate_data_file_corruption,
+            ).map_err(|e| {
+                database.mark_db_error(e.to_string());
+                error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
+                e
+            })?;
+
+            database.rebuild_data_files(files);
 
             for (k, v) in new_kd.into_iter() {
                 kd.checked_put(k, v)
@@ -90,7 +97,7 @@ impl MergeManager {
     }
 
     pub fn recover_merge(&self) -> BitcaskResult<()> {
-        let recover_ret = do_recover_merge(&self.database_dir, &self.file_id_generator);
+        let recover_ret = self.do_recover_merge();
         if let Err(err) = recover_ret {
             let merge_dir = merge_file_dir(&self.database_dir);
             warn!(
@@ -105,6 +112,47 @@ impl MergeManager {
                 }
                 _ => return Err(err),
             }
+        }
+        Ok(())
+    }
+
+    fn do_recover_merge(&self) -> BitcaskResult<()> {
+        let merge_file_dir = merge_file_dir(&self.database_dir);
+
+        if !merge_file_dir.exists() {
+            return Ok(());
+        }
+
+        let mut merge_data_file_ids = fs::get_valid_data_file_ids(&merge_file_dir);
+        if merge_data_file_ids.is_empty() {
+            return Ok(());
+        }
+
+        merge_data_file_ids.sort();
+        let merge_meta = read_merge_meta(&merge_file_dir)?;
+        if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
+            return Err(BitcaskError::InvalidMergeDataFile(
+                merge_meta.known_max_file_id,
+                *merge_data_file_ids.first().unwrap(),
+            ));
+        }
+
+        self.file_id_generator
+            .update_file_id(*merge_data_file_ids.last().unwrap());
+
+        shift_data_files(
+            &self.database_dir,
+            merge_meta.known_max_file_id,
+            &self.file_id_generator,
+        )?;
+
+        commit_merge_files(&self.database_dir, &merge_data_file_ids)?;
+
+        fs::purge_outdated_data_files(&self.database_dir, merge_meta.known_max_file_id)?;
+
+        let clear_ret = fs::clear_dir(&merge_file_dir);
+        if clear_ret.is_err() {
+            warn!(target: "Database", "clear merge directory failed. {}", clear_ret.unwrap_err());
         }
         Ok(())
     }
@@ -220,49 +268,6 @@ fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()>
     Ok(())
 }
 
-fn do_recover_merge(
-    database_dir: &Path,
-    file_id_generator: &Arc<FileIdGenerator>,
-) -> BitcaskResult<()> {
-    let merge_file_dir = merge_file_dir(database_dir);
-
-    if !merge_file_dir.exists() {
-        return Ok(());
-    }
-
-    let mut merge_data_file_ids = fs::get_valid_data_file_ids(&merge_file_dir);
-    if merge_data_file_ids.is_empty() {
-        return Ok(());
-    }
-
-    merge_data_file_ids.sort();
-    let merge_meta = read_merge_meta(&merge_file_dir)?;
-    if *merge_data_file_ids.first().unwrap() <= merge_meta.known_max_file_id {
-        return Err(BitcaskError::InvalidMergeDataFile(
-            merge_meta.known_max_file_id,
-            *merge_data_file_ids.first().unwrap(),
-        ));
-    }
-
-    file_id_generator.update_file_id(*merge_data_file_ids.last().unwrap());
-
-    shift_data_files(
-        database_dir,
-        merge_meta.known_max_file_id,
-        file_id_generator,
-    )?;
-
-    commit_merge_files(database_dir, &merge_data_file_ids)?;
-
-    fs::purge_outdated_data_files(database_dir, merge_meta.known_max_file_id)?;
-
-    let clear_ret = fs::clear_dir(&merge_file_dir);
-    if clear_ret.is_err() {
-        warn!(target: "Database", "clear merge directory failed. {}", clear_ret.unwrap_err());
-    }
-    Ok(())
-}
-
 fn shift_data_files(
     database_dir: &Path,
     known_max_file_id: u32,
@@ -318,7 +323,7 @@ pub fn load_merged_files(
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub struct MergeMeta {
+struct MergeMeta {
     pub known_max_file_id: u32,
 }
 
@@ -646,12 +651,19 @@ mod tests {
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
             db.flush_writing_file().unwrap();
-            old_db
-                .load_merged_files(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
-                .unwrap();
+            old_db.flush_writing_file().unwrap();
+            let files = load_merged_files(
+                &dir,
+                &file_id_generator,
+                &db.get_file_ids().stable_file_ids,
+                old_db.get_max_file_id(),
+                DEFAULT_OPTIONS.tolerate_data_file_corruption,
+            )
+            .unwrap();
+            old_db.rebuild_data_files(files);
         }
 
-        assert_eq!(5, file_id_generator.get_file_id());
+        assert_eq!(4, file_id_generator.get_file_id());
         assert_eq!(1, old_db.get_file_ids().stable_file_ids.len());
     }
 }

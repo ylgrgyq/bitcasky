@@ -207,44 +207,27 @@ impl Database {
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
-    pub fn load_merged_files(
-        &self,
-        merged_file_ids: &Vec<u32>,
-        known_max_file_id: u32,
-    ) -> BitcaskResult<()> {
-        self.flush_writing_file()?;
-
-        let files = load_merged_files(
-            &self.database_dir,
-            &self.file_id_generator,
-            merged_file_ids,
-            known_max_file_id,
-            self.options.tolerate_data_file_corruption,
-        )?;
-
-        // rebuild stable files with file id >= known_max_file_id files and merged files
+    pub fn rebuild_data_files(&self, data_files: Vec<StableFile>) {
         self.stable_files.clear();
 
-        for f in files {
+        for f in data_files {
             if self.stable_files.contains_key(&f.file_id) {
-                core::panic!("merged file id: {} already loaded in database", f.file_id);
+                core::panic!("file id: {} already loaded in database", f.file_id);
             }
             self.stable_files.insert(f.file_id, Mutex::new(f));
         }
-
-        Ok(())
     }
 
     pub fn get_file_ids(&self) -> FileIds {
         let writing_file_ref = self.writing_file.lock().unwrap();
         let writing_file_id = writing_file_ref.file_id();
-        let mut ids: Vec<u32> = self
+        let stable_file_ids: Vec<u32> = self
             .stable_files
             .iter()
             .map(|f| f.value().lock().unwrap().file_id)
             .collect();
         FileIds {
-            stable_file_ids: ids,
+            stable_file_ids,
             writing_file_id,
         }
     }
