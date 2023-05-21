@@ -16,7 +16,7 @@ use crate::{
     fs::{self as SelfFs, FileType},
     utils,
 };
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 
 use super::{common::RecoveredRow, writing_file::WritingFile};
 use super::{
@@ -43,9 +43,15 @@ pub struct DatabaseStats {
     pub number_of_pending_hint_files: usize,
 }
 
+#[derive(Debug)]
+pub struct FileIds {
+    pub stable_file_ids: Vec<u32>,
+    pub writing_file_id: u32,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
-    pub max_file_size: usize,
+    pub max_file_size: u64,
     pub tolerate_data_file_corruption: bool,
 }
 
@@ -67,10 +73,12 @@ fn shift_data_files(
 ) -> BitcaskResult<Vec<u32>> {
     let mut data_file_ids = SelfFs::get_valid_data_file_ids(database_dir)
         .into_iter()
-        .filter(|id| *id >= known_max_file_id)
+        .filter(|id| *id > known_max_file_id)
         .collect::<Vec<u32>>();
     // must change name in descending order to keep data file's order even when any change name operation failed
     data_file_ids.sort_by(|a, b| b.cmp(a));
+
+    debug!("current {:?}", data_file_ids);
 
     // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
     // because values in these files is written after merged files
@@ -78,6 +86,7 @@ fn shift_data_files(
     for from_id in data_file_ids {
         let new_file_id = file_id_generator.generate_next_file_id();
         SelfFs::change_data_file_id(database_dir, from_id, new_file_id)?;
+        debug!("llll from {} to {}", from_id, new_file_id);
         new_file_ids.push(new_file_id);
     }
     Ok(new_file_ids)
@@ -97,6 +106,8 @@ fn recover_merge(
     if merge_data_file_ids.is_empty() {
         return Ok(());
     }
+
+    info!("sdfs11");
 
     merge_data_file_ids.sort();
     let merge_meta = SelfFs::read_merge_meta(&merge_file_dir)?;
@@ -121,12 +132,8 @@ fn recover_merge(
 
     let clear_ret = SelfFs::clear_dir(&merge_file_dir);
     if clear_ret.is_err() {
-        warn!(
-            "clear merge directory failed after merge recovered. {}",
-            clear_ret.unwrap_err()
-        );
+        warn!("clear merge directory failed. {}", clear_ret.unwrap_err());
     }
-
     Ok(())
 }
 
@@ -149,6 +156,8 @@ impl Database {
         let database_dir: PathBuf = directory.into();
         validate_database_directory(&database_dir)?;
 
+        debug!(target: "Database", "opening database at directory {:?}", directory);
+
         hint::clear_temp_hint_file_directory(&database_dir);
         let recover_ret = recover_merge(&database_dir, &file_id_generator);
         if let Err(err) = recover_ret {
@@ -167,6 +176,7 @@ impl Database {
             }
         }
 
+        info!("asdfasdf");
         let opened_stable_files = SelfFs::open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);
@@ -223,6 +233,7 @@ impl Database {
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
         let mut writing_file_ref = self.writing_file.lock().unwrap();
         // flush file only when we actually wrote something
+        debug!("taasdfsf {}", writing_file_ref.file_size());
         if writing_file_ref.file_size() > 0 {
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
@@ -331,7 +342,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_file_ids(&self) -> Vec<u32> {
+    pub fn get_file_ids(&self) -> FileIds {
         let writing_file_ref = self.writing_file.lock().unwrap();
         let writing_file_id = writing_file_ref.file_id();
         let mut ids: Vec<u32> = self
@@ -339,8 +350,10 @@ impl Database {
             .iter()
             .map(|f| f.value().lock().unwrap().file_id)
             .collect();
-        ids.push(writing_file_id);
-        ids
+        FileIds {
+            stable_file_ids: ids,
+            writing_file_id,
+        }
     }
 
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
@@ -411,7 +424,7 @@ impl Database {
         writing_file_ref: &MutexGuard<WritingFile>,
         row: &RowToWrite,
     ) -> bool {
-        row.size + writing_file_ref.file_size() > self.options.max_file_size
+        row.size + writing_file_ref.file_size() as u64 > self.options.max_file_size
     }
 
     fn do_flush_writing_file(
@@ -431,6 +444,7 @@ impl Database {
         )?;
         self.stable_files.insert(file_id, Mutex::new(stable_file));
         self.hint_file_writer.async_write_hint_file(file_id);
+        debug!(target: "Database", "writing file id changed from {} to {}", file_id, next_file_id);
         Ok(())
     }
 
@@ -445,8 +459,9 @@ impl Drop for Database {
     fn drop(&mut self) {
         let ret = self.close();
         if ret.is_err() {
-            error!(target: "Database", "Close database failed: {}", ret.err().unwrap())
+            error!(target: "Database", "close database failed: {}", ret.err().unwrap())
         }
+        info!(target: "Database", "database on directory: {:?} closed", self.database_dir)
     }
 }
 
@@ -500,12 +515,12 @@ fn recovered_iter(
         .get_path(database_dir, Some(file_id))
         .exists()
     {
-        info!(target: "database", "recover from hint file with id: {}", file_id);
+        info!(target: "Database", "recover from hint file with id: {}", file_id);
         Ok(Box::new(
             HintFile::open(database_dir, file_id).and_then(|f| f.iter())?,
         ))
     } else {
-        info!(target: "database", "recover from data file with id: {}", file_id);
+        info!(target: "Database", "recover from data file with id: {}", file_id);
         let data_file = SelfFs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
         let stable_file = StableFile::new(
             database_dir,
@@ -912,7 +927,7 @@ mod tests {
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
             old_db
-                .load_merged_files(&db.get_file_ids(), old_db.get_max_file_id())
+                .load_merged_files(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
                 .unwrap();
         }
 

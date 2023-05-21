@@ -26,8 +26,8 @@ use super::{
 
 pub struct HintRow {
     pub timestamp: u64,
-    pub key_size: usize,
-    pub value_size: usize,
+    pub key_size: u64,
+    pub value_size: u64,
     pub row_offset: u64,
     pub key: Vec<u8>,
 }
@@ -101,13 +101,13 @@ impl HintFile {
         let timestamp = header_bs.slice(0..HINT_FILE_KEY_SIZE_OFFSET).get_u64();
         let key_size = header_bs
             .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_VALUE_SIZE_OFFSET)
-            .get_u64() as usize;
-        let value_size = header_bs.slice(HINT_FILE_VALUE_SIZE_OFFSET..24).get_u64() as usize;
+            .get_u64();
+        let value_size = header_bs.slice(HINT_FILE_VALUE_SIZE_OFFSET..24).get_u64();
         let row_offset = header_bs
             .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
             .get_u64();
 
-        let mut k_buf = vec![0; key_size];
+        let mut k_buf = vec![0; key_size as usize];
         self.file.read_exact(&mut k_buf)?;
         let kv_bs = Bytes::from(k_buf);
 
@@ -197,8 +197,8 @@ impl HintFileWriter {
                             r.key.clone(),
                             HintRow {
                                 timestamp: r.row_position.timestamp,
-                                key_size: r.key.len(),
-                                value_size: r.value.len(),
+                                key_size: r.key.len() as u64,
+                                value_size: r.value.len() as u64,
                                 row_offset: r.row_position.row_offset,
                                 key: r.key,
                             },

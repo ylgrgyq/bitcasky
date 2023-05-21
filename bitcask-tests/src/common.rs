@@ -35,6 +35,7 @@ impl TestingKV {
 pub enum TestingOperator {
     DELETE,
     PUT,
+    MERGE,
 }
 
 #[derive(Clone)]
@@ -84,6 +85,7 @@ impl TestingOperations {
                         ops.retain(|e| e.key() != op.key())
                     }
                 }
+                _ => {}
             }
         }
         ops
@@ -94,14 +96,20 @@ pub struct RandomTestingDataGenerator {
     rng: ThreadRng,
     key_size: usize,
     value_size: usize,
+    candidate_operators: Vec<TestingOperator>,
 }
 
 impl RandomTestingDataGenerator {
-    pub fn new(key_size: usize, value_size: usize) -> RandomTestingDataGenerator {
+    pub fn new(
+        key_size: usize,
+        value_size: usize,
+        candidate_operations: Vec<TestingOperator>,
+    ) -> RandomTestingDataGenerator {
         RandomTestingDataGenerator {
             rng: rand::thread_rng(),
             key_size,
             value_size,
+            candidate_operators: candidate_operations,
         }
     }
 
@@ -137,11 +145,8 @@ impl RandomTestingDataGenerator {
     }
 
     pub fn generate_write_operator(&mut self) -> TestingOperator {
-        if self.rng.next_u64() % 2 == 0 {
-            TestingOperator::PUT
-        } else {
-            TestingOperator::DELETE
-        }
+        let inx = self.rng.next_u64() % self.candidate_operators.len() as u64;
+        return self.candidate_operators[inx as usize].clone();
     }
 }
 

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::database::{DataBaseOptions, Database};
@@ -14,7 +14,7 @@ use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
-    pub max_file_size: usize,
+    pub max_file_size: u64,
     pub max_key_size: usize,
     pub max_value_size: usize,
     pub tolerate_data_file_corrption: bool,
@@ -215,8 +215,9 @@ impl Bitcask {
 
         debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instanceId, known_max_file_id);
 
-        let dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
-        let (file_ids, new_kd) = self.write_merged_files(&dir_path, &kd, known_max_file_id)?;
+        let merge_dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
+        let (file_ids, new_kd) =
+            self.write_merged_files(&merge_dir_path, &kd, known_max_file_id)?;
 
         info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
 
@@ -239,6 +240,10 @@ impl Bitcask {
         info!(target: "BitcaskMerge", "purge files with id smaller than: {}", known_max_file_id);
 
         fs::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
+        let clear_ret = fs::clear_dir(&merge_dir_path);
+        if clear_ret.is_err() {
+            warn!("clear merge directory failed. {}", clear_ret.unwrap_err());
+        }
         Ok(())
     }
 
@@ -300,10 +305,12 @@ impl Bitcask {
         }
         debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
         merge_db.flush_writing_file()?;
-        debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
+        debug!(target:"Bitcask", "write merge db done2. {}", self.file_id_generator.get_file_id());
         let file_ids = merge_db.get_file_ids();
-        debug!(target:"Bitcask", "write merge db done. {} {:?}", self.file_id_generator.get_file_id(), file_ids);
-        Ok((file_ids, new_kd))
+        debug!(target:"Bitcask", "write merge db done3. {} {:?}", self.file_id_generator.get_file_id(), file_ids.stable_file_ids);
+        // we do not write anything in writing file
+        // so we can only use stable files
+        Ok((file_ids.stable_file_ids, new_kd))
     }
 }
 

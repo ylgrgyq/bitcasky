@@ -59,7 +59,7 @@ impl WritingFile {
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.data_file, value_offset, size)
     }
 

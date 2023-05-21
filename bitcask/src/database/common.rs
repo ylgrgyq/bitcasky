@@ -32,7 +32,7 @@ pub struct RowToWrite<'a> {
     pub value_size: u64,
     pub key: &'a Vec<u8>,
     pub value: &'a [u8],
-    pub size: usize,
+    pub size: u64,
 }
 
 impl<'a> RowToWrite<'a> {
@@ -61,12 +61,12 @@ impl<'a> RowToWrite<'a> {
             value_size,
             key,
             value,
-            size: DATA_FILE_KEY_OFFSET + key_size as usize + value_size as usize,
+            size: DATA_FILE_KEY_OFFSET as u64 + key_size + value_size,
         }
     }
 
     pub fn to_bytes(&self) -> Bytes {
-        let mut bs = BytesMut::with_capacity(self.size);
+        let mut bs = BytesMut::with_capacity(self.size as usize);
         bs.extend_from_slice(&self.crc.to_be_bytes());
         bs.extend_from_slice(&self.tstamp.to_be_bytes());
         bs.extend_from_slice(&self.key_size.to_be_bytes());
@@ -99,7 +99,7 @@ pub fn io_error_to_bitcask_error(
 pub struct RowPosition {
     pub file_id: u32,
     pub row_offset: u64,
-    pub row_size: usize,
+    pub row_size: u64,
     pub timestamp: u64,
 }
 
@@ -107,10 +107,10 @@ pub fn read_value_from_file(
     file_id: u32,
     data_file: &mut File,
     value_offset: u64,
-    size: usize,
+    size: u64,
 ) -> BitcaskResult<Vec<u8>> {
     data_file.seek(SeekFrom::Start(value_offset))?;
-    let mut buf = vec![0; size];
+    let mut buf = vec![0; size as usize];
     data_file.read_exact(&mut buf)?;
 
     let bs = Bytes::from(buf);
@@ -155,7 +155,7 @@ pub struct RecoveredRow {
     pub file_id: u32,
     pub timestamp: u64,
     pub row_offset: u64,
-    pub row_size: usize,
+    pub row_size: u64,
     pub key: Vec<u8>,
     pub is_tombstone: bool,
 }

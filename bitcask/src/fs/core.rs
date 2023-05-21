@@ -6,7 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use log::warn;
+use log::{info, warn};
 use walkdir::WalkDir;
 
 use crate::{
@@ -124,6 +124,7 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
         fs::create_dir(merge_dir_path.clone())?;
     }
 
+    let mut merge_dir_empty = true;
     let paths = fs::read_dir(merge_dir_path.clone())?;
     for path in paths {
         let file_path = path?;
@@ -133,20 +134,39 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
         if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
             continue;
         }
-        warn!(target: "FileManager", "Merge file directory:{} is not empty", merge_dir_path.display().to_string());
-        return Err(BitcaskError::MergeFileDirectoryNotEmpty(
-            file_path.path().display().to_string(),
-        ));
+        warn!(target: "FileManager", "Merge file directory:{} is not empty, it at least has file: {}", merge_dir_path.display().to_string(), file_path.path().display());
+
+        merge_dir_empty = false;
+        break;
     }
+    if !merge_dir_empty {
+        let clear_ret = clear_dir(&merge_dir_path);
+        if clear_ret.is_err() {
+            warn!("clear merge directory failed. {}", clear_ret.unwrap_err());
+            return Err(BitcaskError::MergeFileDirectoryNotEmpty(
+                merge_dir_path.display().to_string(),
+            ));
+        }
+    }
+
     Ok(merge_dir_path)
 }
 
 pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
     let merge_dir_path = merge_file_dir(base_dir);
+    let commit_file = |file_id: &u32, file_type: FileType| -> Result<(), std::io::Error> {
+        let from_p = file_type.get_path(&merge_dir_path, Some(*file_id));
+        if from_p.exists() {
+            let to_p = file_type.get_path(base_dir, Some(*file_id));
+            info!(target : "asdf", "rename file {} to {}", from_p.display(), to_p.display());
+            return fs::rename(from_p, to_p);
+        }
+        Ok(())
+    };
+
     for file_id in file_ids {
-        let from_p = FileType::DataFile.get_path(&merge_dir_path, Some(*file_id));
-        let to_p = FileType::DataFile.get_path(base_dir, Some(*file_id));
-        fs::rename(from_p, to_p)?;
+        commit_file(file_id, FileType::DataFile)?;
+        commit_file(file_id, FileType::HintFile)?;
     }
     Ok(())
 }
@@ -207,7 +227,7 @@ pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
 pub fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
     get_valid_data_file_ids(base_dir)
         .iter()
-        .filter(|id| **id < max_file_id)
+        .filter(|id| **id <= max_file_id)
         .for_each(|id| {
             delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default();
             delete_file(base_dir, FileType::HintFile, Some(*id)).unwrap_or_default();

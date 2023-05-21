@@ -48,7 +48,7 @@ impl StableFile {
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<Vec<u8>> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
     }
 
@@ -114,7 +114,7 @@ impl StableFile {
             row_position: RowPosition {
                 file_id: self.file_id,
                 row_offset: value_offset,
-                row_size: DATA_FILE_KEY_OFFSET + key_size + value_size,
+                row_size: (DATA_FILE_KEY_OFFSET + key_size + value_size) as u64,
                 timestamp: tstmp,
             },
         }))

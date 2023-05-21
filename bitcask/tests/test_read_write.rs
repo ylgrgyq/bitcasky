@@ -22,6 +22,7 @@ fn load_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
         match op.operator() {
             TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
             TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
+            TestingOperator::MERGE => bc.merge().unwrap(),
         }
     }
 }
@@ -54,7 +55,11 @@ fn test_read_write_writing_file() {
 
 #[test]
 fn test_random_put_and_delete() {
-    let mut gen = RandomTestingDataGenerator::new(64, 512);
+    let mut gen = RandomTestingDataGenerator::new(
+        64,
+        512,
+        vec![TestingOperator::PUT, TestingOperator::DELETE],
+    );
     let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
@@ -65,9 +70,34 @@ fn test_random_put_and_delete() {
     }
 }
 
+// #[test]
+// fn test_random_put_delete_merge() {
+//     let mut gen = RandomTestingDataGenerator::new(
+//         64,
+//         512,
+//         vec![
+//             TestingOperator::PUT,
+//             TestingOperator::DELETE,
+//             TestingOperator::MERGE,
+//         ],
+//     );
+//     let ops = gen.generate_testing_operations(5000);
+//     let dir = get_temporary_directory_path();
+//     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+//     load_testing_operations(&bc, &ops);
+
+//     for op in ops.squash() {
+//         assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+//     }
+// }
+
 #[test]
 fn test_recovery() {
-    let mut gen = RandomTestingDataGenerator::new(64, 512);
+    let mut gen = RandomTestingDataGenerator::new(
+        64,
+        512,
+        vec![TestingOperator::PUT, TestingOperator::DELETE],
+    );
     let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
     {
