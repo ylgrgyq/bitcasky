@@ -12,7 +12,7 @@ use crate::{
     error::{BitcaskError, BitcaskResult},
     fs::{self, FileType},
 };
-use log::error;
+use log::{error, info};
 
 use super::{
     common::{io_error_to_bitcask_error, read_value_from_file, RowPosition, RowToRead},

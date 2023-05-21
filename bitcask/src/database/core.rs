@@ -78,15 +78,12 @@ fn shift_data_files(
     // must change name in descending order to keep data file's order even when any change name operation failed
     data_file_ids.sort_by(|a, b| b.cmp(a));
 
-    debug!("current {:?}", data_file_ids);
-
     // rename files which file id >= knwon_max_file_id to files which file id greater than all merged files
     // because values in these files is written after merged files
     let mut new_file_ids = vec![];
     for from_id in data_file_ids {
         let new_file_id = file_id_generator.generate_next_file_id();
         SelfFs::change_data_file_id(database_dir, from_id, new_file_id)?;
-        debug!("llll from {} to {}", from_id, new_file_id);
         new_file_ids.push(new_file_id);
     }
     Ok(new_file_ids)
@@ -106,8 +103,6 @@ fn recover_merge(
     if merge_data_file_ids.is_empty() {
         return Ok(());
     }
-
-    info!("sdfs11");
 
     merge_data_file_ids.sort();
     let merge_meta = SelfFs::read_merge_meta(&merge_file_dir)?;
@@ -132,7 +127,7 @@ fn recover_merge(
 
     let clear_ret = SelfFs::clear_dir(&merge_file_dir);
     if clear_ret.is_err() {
-        warn!("clear merge directory failed. {}", clear_ret.unwrap_err());
+        warn!(target: "Database", "clear merge directory failed. {}", clear_ret.unwrap_err());
     }
     Ok(())
 }
@@ -176,7 +171,6 @@ impl Database {
             }
         }
 
-        info!("asdfasdf");
         let opened_stable_files = SelfFs::open_data_files_under_path(&database_dir)?;
         if !opened_stable_files.is_empty() {
             let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);
@@ -194,7 +188,7 @@ impl Database {
             })
             .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
 
-        let hint_file_writer = HintFileWriter::start(database_dir.clone());
+        let hint_file_writer = HintFileWriter::start(&database_dir);
         info!(target: "Database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
         Ok(Database {
             writing_file,
@@ -233,7 +227,6 @@ impl Database {
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
         let mut writing_file_ref = self.writing_file.lock().unwrap();
         // flush file only when we actually wrote something
-        debug!("taasdfsf {}", writing_file_ref.file_size());
         if writing_file_ref.file_size() > 0 {
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
@@ -312,9 +305,6 @@ impl Database {
         merged_file_ids: &Vec<u32>,
         known_max_file_id: u32,
     ) -> BitcaskResult<()> {
-        if merged_file_ids.is_empty() {
-            return Ok(());
-        }
         self.flush_writing_file()?;
 
         let data_file_ids = shift_data_files(
@@ -328,6 +318,10 @@ impl Database {
 
         for file_id in data_file_ids {
             self.open_stable_file(file_id)?;
+        }
+
+        if merged_file_ids.is_empty() {
+            return Ok(());
         }
 
         SelfFs::commit_merge_files(&self.database_dir, merged_file_ids)?;
@@ -371,6 +365,7 @@ impl Database {
             .collect::<Vec<u64>>()
             .iter()
             .sum();
+
         total_data_size_in_bytes += writing_file_size;
 
         Ok(DatabaseStats {
@@ -515,12 +510,12 @@ fn recovered_iter(
         .get_path(database_dir, Some(file_id))
         .exists()
     {
-        info!(target: "Database", "recover from hint file with id: {}", file_id);
+        debug!(target: "Database", "recover from hint file with id: {}", file_id);
         Ok(Box::new(
             HintFile::open(database_dir, file_id).and_then(|f| f.iter())?,
         ))
     } else {
-        info!(target: "Database", "recover from data file with id: {}", file_id);
+        debug!(target: "Database", "recover from data file with id: {}", file_id);
         let data_file = SelfFs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
         let stable_file = StableFile::new(
             database_dir,
@@ -926,15 +921,13 @@ mod tests {
                 TestingKV::new("k1", "value4"),
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
+            db.flush_writing_file().unwrap();
             old_db
                 .load_merged_files(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
                 .unwrap();
         }
 
         assert_eq!(5, file_id_generator.get_file_id());
-        assert_eq!(2, old_db.stable_files.len());
+        assert_eq!(1, old_db.stable_files.len());
     }
-
-    #[test]
-    fn test_hint_file() {}
 }

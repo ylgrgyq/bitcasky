@@ -134,15 +134,18 @@ pub fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
         if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
             continue;
         }
-        warn!(target: "FileManager", "Merge file directory:{} is not empty, it at least has file: {}", merge_dir_path.display().to_string(), file_path.path().display());
+        warn!(target: "File", "Merge file directory:{} is not empty, it at least has file: {}", merge_dir_path.display().to_string(), file_path.path().display());
 
         merge_dir_empty = false;
         break;
     }
     if !merge_dir_empty {
-        let clear_ret = clear_dir(&merge_dir_path);
+        let clear_ret = clear_dir(&merge_dir_path).and_then(|_| {
+            fs::create_dir(merge_dir_path.clone())?;
+            Ok(())
+        });
         if clear_ret.is_err() {
-            warn!("clear merge directory failed. {}", clear_ret.unwrap_err());
+            warn!(target: "File", "clear merge directory failed. {}", clear_ret.unwrap_err());
             return Err(BitcaskError::MergeFileDirectoryNotEmpty(
                 merge_dir_path.display().to_string(),
             ));
@@ -158,7 +161,6 @@ pub fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult
         let from_p = file_type.get_path(&merge_dir_path, Some(*file_id));
         if from_p.exists() {
             let to_p = file_type.get_path(base_dir, Some(*file_id));
-            info!(target : "asdf", "rename file {} to {}", from_p.display(), to_p.display());
             return fs::rename(from_p, to_p);
         }
         Ok(())
@@ -326,11 +328,19 @@ mod tests {
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
         create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
 
-        let failed_to_create = create_merge_file_dir(&dir);
-        assert!(match failed_to_create.err().unwrap() {
-            BitcaskError::MergeFileDirectoryNotEmpty(_) => true,
-            _ => false,
-        });
+        create_merge_file_dir(&dir).unwrap();
+
+        let paths = fs::read_dir(merge_file_path.clone()).unwrap();
+        assert!(!paths.into_iter().any(|p| {
+            let file_path = p.unwrap();
+            if file_path.path().is_dir() {
+                return false;
+            }
+            if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
+                return false;
+            }
+            return true;
+        }));
     }
 
     #[test]
