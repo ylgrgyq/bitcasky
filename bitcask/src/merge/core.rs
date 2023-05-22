@@ -195,7 +195,11 @@ impl MergeManager {
         merged_file_ids: &Vec<u32>,
         known_max_file_id: u32,
     ) -> BitcaskResult<Vec<StableFile>> {
-        let data_file_ids = self.shift_data_files(known_max_file_id)?;
+        let mut data_file_ids = self.shift_data_files(known_max_file_id)?;
+
+        commit_merge_files(&self.database_dir, merged_file_ids)?;
+
+        data_file_ids.extend(merged_file_ids.iter());
 
         let mut stable_files = vec![];
         for file_id in data_file_ids {
@@ -208,29 +212,13 @@ impl MergeManager {
             }
         }
 
-        if merged_file_ids.is_empty() {
-            return Ok(stable_files);
-        }
-
-        commit_merge_files(&self.database_dir, merged_file_ids)?;
-
-        for file_id in merged_file_ids {
-            if let Some(f) = StableFile::open(
-                &self.database_dir,
-                *file_id,
-                self.options.tolerate_data_file_corruption,
-            )? {
-                stable_files.push(f);
-            }
-        }
-
         Ok(stable_files)
     }
 
     fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
         let mut data_file_ids = fs::get_valid_data_file_ids(&self.database_dir)
             .into_iter()
-            .filter(|id| *id > known_max_file_id)
+            .filter(|id| *id >= known_max_file_id)
             .collect::<Vec<u32>>();
         // must change name in descending order to keep data file's order even when any change name operation failed
         data_file_ids.sort_by(|a, b| b.cmp(a));
@@ -615,7 +603,7 @@ mod tests {
             old_db.rebuild_data_files(files);
         }
 
-        assert_eq!(4, file_id_generator.get_file_id());
+        assert_eq!(5, file_id_generator.get_file_id());
         assert_eq!(1, old_db.get_file_ids().stable_file_ids.len());
     }
 }
