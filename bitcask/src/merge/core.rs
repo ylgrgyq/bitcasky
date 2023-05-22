@@ -201,18 +201,19 @@ impl MergeManager {
 
         data_file_ids.extend(merged_file_ids.iter());
 
-        let mut stable_files = vec![];
-        for file_id in data_file_ids {
-            if let Some(f) = StableFile::open(
-                &self.database_dir,
-                file_id,
-                self.options.tolerate_data_file_corruption,
-            )? {
-                stable_files.push(f);
-            }
-        }
-
-        Ok(stable_files)
+        Ok(data_file_ids
+            .iter()
+            .map(|file_id| {
+                StableFile::open(
+                    &self.database_dir,
+                    *file_id,
+                    self.options.tolerate_data_file_corruption,
+                )
+            })
+            .collect::<BitcaskResult<Vec<Option<StableFile>>>>()?
+            .into_iter()
+            .filter_map(|s| s)
+            .collect::<Vec<StableFile>>())
     }
 
     fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
