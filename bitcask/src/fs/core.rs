@@ -69,6 +69,23 @@ pub fn open_file(
     })
 }
 
+fn open_file_by_path(file_type: FileType, file_path: &Path) -> BitcaskResult<IdentifiedFile> {
+    if file_type.check_file_belongs_to_type(file_path) {
+        let file_id = file_type.parse_file_id_from_file_name(file_path);
+        let file = File::options().read(true).open(file_path)?;
+        return Ok(IdentifiedFile {
+            file_type,
+            file,
+            file_id,
+        });
+    }
+    let file_name = file_path
+        .file_name()
+        .map(|s| s.to_str().unwrap_or(""))
+        .unwrap_or("");
+    Err(BitcaskError::InvalidFileName(file_name.into()))
+}
+
 pub fn delete_file(
     base_dir: &Path,
     file_type: FileType,
@@ -92,6 +109,18 @@ pub fn commit_file(
         let to_p = file_type.get_path(to_dir, file_id);
         return fs::rename(from_p, to_p);
     }
+    Ok(())
+}
+
+pub fn change_file_id(
+    base_dir: &Path,
+    file_type: FileType,
+    from_file_id: u32,
+    to_file_id: u32,
+) -> BitcaskResult<()> {
+    let from_p = file_type.get_path(base_dir, Some(from_file_id));
+    let to_p = file_type.get_path(base_dir, Some(to_file_id));
+    fs::rename(from_p, to_p)?;
     Ok(())
 }
 
@@ -121,39 +150,30 @@ pub fn is_empty_dir(dir: &Path) -> BitcaskResult<bool> {
     Ok(true)
 }
 
-pub fn get_data_file_ids_in_dir(dir_path: &Path) -> Vec<u32> {
+pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
     let mut actual_file_ids = vec![];
     for path in fs::read_dir(dir_path).unwrap() {
-        let file_path = path.unwrap();
-        if file_path.path().is_dir() {
+        let file_dir_entry = path.unwrap();
+        let file_path = file_dir_entry.path();
+        if file_path.is_dir() {
+            continue;
+        }
+        if !file_type.check_file_belongs_to_type(&file_path) {
             continue;
         }
 
-        let id = FileType::DataFile
-            .parse_file_id_from_file_name(&file_path.path())
-            .unwrap();
+        let id = file_type.parse_file_id_from_file_name(&file_path).unwrap();
         actual_file_ids.push(id);
     }
     actual_file_ids.sort();
     actual_file_ids
 }
 
-pub fn change_data_file_id(
-    base_dir: &Path,
-    from_file_id: u32,
-    to_file_id: u32,
-) -> BitcaskResult<()> {
-    let from_p = FileType::DataFile.get_path(base_dir, Some(from_file_id));
-    let to_p = FileType::DataFile.get_path(base_dir, Some(to_file_id));
-    fs::rename(from_p, to_p)?;
-    Ok(())
-}
-
 pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
     let file_entries = get_valid_data_file_paths(base_dir);
     let db_files = file_entries
         .iter()
-        .map(|f| open_data_file_by_path(f))
+        .map(|f| open_file_by_path(FileType::DataFile, f))
         .collect::<BitcaskResult<Vec<IdentifiedFile>>>()?;
     Ok(db_files
         .into_iter()
@@ -162,40 +182,6 @@ pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32,
             _ => unreachable!(),
         })
         .collect())
-}
-
-pub fn get_valid_data_file_ids(base_dir: &Path) -> Vec<u32> {
-    get_valid_data_file_paths(base_dir)
-        .iter()
-        .map(|p| FileType::DataFile.parse_file_id_from_file_name(p).unwrap())
-        .collect()
-}
-
-pub fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
-    get_valid_data_file_ids(base_dir)
-        .iter()
-        .filter(|id| **id <= max_file_id)
-        .for_each(|id| {
-            delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default();
-            delete_file(base_dir, FileType::HintFile, Some(*id)).unwrap_or_default();
-        });
-    Ok(())
-}
-
-fn open_data_file_by_path(file_path: &Path) -> BitcaskResult<IdentifiedFile> {
-    if let Some(file_id) = FileType::DataFile.parse_file_id_from_file_name(file_path) {
-        let file = File::options().read(true).open(file_path)?;
-        return Ok(IdentifiedFile {
-            file_type: FileType::DataFile,
-            file,
-            file_id: Some(file_id),
-        });
-    }
-    let file_name = file_path
-        .file_name()
-        .map(|s| s.to_str().unwrap_or(""))
-        .unwrap_or("");
-    Err(BitcaskError::InvalidFileName(file_name.into()))
 }
 
 fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {

@@ -65,7 +65,7 @@ impl MergeManager {
             // stop read/write
             let kd = keydir.write().unwrap();
             database.flush_writing_file()?;
-            let files = self.load_merged_files(
+            let files = self.open_stable_files_after_merge(
                 &file_ids,
                 known_max_file_id,
             ).map_err(|e| {
@@ -83,7 +83,7 @@ impl MergeManager {
 
         info!(target: "Bitcask", "purge files with id smaller than: {}", known_max_file_id);
 
-        fs::purge_outdated_data_files(&database.database_dir, known_max_file_id)?;
+        purge_outdated_data_files(&database.database_dir, known_max_file_id)?;
         let clear_ret = fs::clear_dir(&merge_dir_path);
         if clear_ret.is_err() {
             warn!(target: "Bitcask", "clear merge directory failed. {}", clear_ret.unwrap_err());
@@ -118,7 +118,7 @@ impl MergeManager {
             return Ok(());
         }
 
-        let mut merge_data_file_ids = fs::get_valid_data_file_ids(&merge_file_dir);
+        let mut merge_data_file_ids = fs::get_file_ids_in_dir(&merge_file_dir, FileType::DataFile);
         if merge_data_file_ids.is_empty() {
             return Ok(());
         }
@@ -139,7 +139,7 @@ impl MergeManager {
 
         commit_merge_files(&self.database_dir, &merge_data_file_ids)?;
 
-        fs::purge_outdated_data_files(&self.database_dir, merge_meta.known_max_file_id)?;
+        purge_outdated_data_files(&self.database_dir, merge_meta.known_max_file_id)?;
 
         let clear_ret = fs::clear_dir(&merge_file_dir);
         if clear_ret.is_err() {
@@ -190,7 +190,7 @@ impl MergeManager {
         Ok((file_ids.stable_file_ids, new_kd))
     }
 
-    fn load_merged_files(
+    fn open_stable_files_after_merge(
         &self,
         merged_file_ids: &Vec<u32>,
         known_max_file_id: u32,
@@ -212,12 +212,12 @@ impl MergeManager {
             })
             .collect::<BitcaskResult<Vec<Option<StableFile>>>>()?
             .into_iter()
-            .filter_map(|s| s)
+            .flatten()
             .collect::<Vec<StableFile>>())
     }
 
     fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
-        let mut data_file_ids = fs::get_valid_data_file_ids(&self.database_dir)
+        let mut data_file_ids = fs::get_file_ids_in_dir(&self.database_dir, FileType::DataFile)
             .into_iter()
             .filter(|id| *id >= known_max_file_id)
             .collect::<Vec<u32>>();
@@ -229,7 +229,12 @@ impl MergeManager {
         let mut new_file_ids = vec![];
         for from_id in data_file_ids {
             let new_file_id = &self.file_id_generator.generate_next_file_id();
-            fs::change_data_file_id(&self.database_dir, from_id, *new_file_id)?;
+            fs::change_file_id(
+                &self.database_dir,
+                FileType::DataFile,
+                from_id,
+                *new_file_id,
+            )?;
             new_file_ids.push(*new_file_id);
         }
         Ok(new_file_ids)
@@ -304,6 +309,17 @@ fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()>
     Ok(())
 }
 
+fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
+    fs::get_file_ids_in_dir(base_dir, FileType::DataFile)
+        .iter()
+        .filter(|id| **id < max_file_id)
+        .for_each(|id| {
+            fs::delete_file(base_dir, FileType::DataFile, Some(*id)).unwrap_or_default();
+            fs::delete_file(base_dir, FileType::HintFile, Some(*id)).unwrap_or_default();
+        });
+    Ok(())
+}
+
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 struct MergeMeta {
     pub known_max_file_id: u32,
@@ -373,15 +389,18 @@ mod tests {
 
         assert_eq!(
             vec![0, 1, 2,],
-            fs::get_data_file_ids_in_dir(&merge_file_path)
+            fs::get_file_ids_in_dir(&merge_file_path, FileType::DataFile)
         );
-        assert!(fs::get_data_file_ids_in_dir(&dir_path).is_empty());
+        assert!(fs::get_file_ids_in_dir(&dir_path, FileType::DataFile).is_empty());
 
         commit_merge_files(&dir_path, &vec![0, 1, 2]).unwrap();
 
         assert!(fs::is_empty_dir(&merge_file_path).unwrap());
 
-        assert_eq!(vec![0, 1, 2,], fs::get_data_file_ids_in_dir(&dir_path));
+        assert_eq!(
+            vec![0, 1, 2,],
+            fs::get_file_ids_in_dir(&dir_path, FileType::DataFile)
+        );
     }
 
     #[test]
@@ -599,7 +618,10 @@ mod tests {
                 DEFAULT_OPTIONS,
             );
             let files = merge_manager
-                .load_merged_files(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
+                .open_stable_files_after_merge(
+                    &db.get_file_ids().stable_file_ids,
+                    old_db.get_max_file_id(),
+                )
                 .unwrap();
             old_db.rebuild_data_files(files);
         }
