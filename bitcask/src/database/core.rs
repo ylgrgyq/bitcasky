@@ -76,10 +76,15 @@ impl Database {
 
         hint::clear_temp_hint_file_directory(&database_dir);
 
-        let opened_stable_files = SelfFs::open_data_files_under_path(&database_dir)?;
+        let opened_stable_files = SelfFs::open_files_in_dir(&database_dir, FileType::DataFile)?;
         if !opened_stable_files.is_empty() {
-            let writing_file_id = opened_stable_files.keys().max().unwrap_or(&0);
-            file_id_generator.update_file_id(*writing_file_id);
+            let writing_file_id = opened_stable_files
+                .iter()
+                // data file must have file id, so unwrap is ok
+                .map(|f| f.file_id.unwrap())
+                .max()
+                .unwrap_or(0);
+            file_id_generator.update_file_id(writing_file_id);
         }
         let writing_file = Mutex::new(WritingFile::new(
             &database_dir,
@@ -87,9 +92,14 @@ impl Database {
         )?);
         let stable_files = opened_stable_files
             .into_iter()
-            .map(|(k, v)| {
-                StableFile::new(&database_dir, k, v, options.tolerate_data_file_corruption)
-                    .map(|stable_file| (k, Mutex::new(stable_file)))
+            .map(|f| {
+                StableFile::new(
+                    &database_dir,
+                    f.file_id.unwrap(),
+                    f.file,
+                    options.tolerate_data_file_corruption,
+                )
+                .map(|stable_file| (f.file_id.unwrap(), Mutex::new(stable_file)))
             })
             .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
 

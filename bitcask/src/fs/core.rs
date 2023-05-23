@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fs::{self, File},
     path::{Path, PathBuf},
 };
@@ -169,34 +168,14 @@ pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
     actual_file_ids
 }
 
-pub fn open_data_files_under_path(base_dir: &Path) -> BitcaskResult<HashMap<u32, File>> {
-    let file_entries = get_valid_data_file_paths(base_dir);
-    let db_files = file_entries
-        .iter()
-        .map(|f| open_file_by_path(FileType::DataFile, f))
-        .collect::<BitcaskResult<Vec<IdentifiedFile>>>()?;
-    Ok(db_files
-        .into_iter()
-        .map(|f| match f.file_type {
-            FileType::DataFile => (f.file_id.unwrap(), f.file),
-            _ => unreachable!(),
-        })
-        .collect())
-}
-
-fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
+pub fn get_file_paths_in_dir(base_dir: &Path, file_type: &FileType) -> Vec<PathBuf> {
     WalkDir::new(base_dir)
         .follow_links(false)
         .max_depth(1)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| {
-            if FileType::DataFile.check_file_belongs_to_type(e.path())
-                && FileType::DataFile
-                    .parse_file_id_from_file_name(e.path())
-                    .map(|_| true)
-                    .unwrap_or(false)
-            {
+            if file_type.check_file_belongs_to_type(e.path()) {
                 Some(e.into_path())
             } else {
                 None
@@ -205,22 +184,86 @@ fn get_valid_data_file_paths(base_dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+pub fn open_files_in_dir(
+    base_dir: &Path,
+    file_type: FileType,
+) -> BitcaskResult<Vec<IdentifiedFile>> {
+    let file_entries = get_file_paths_in_dir(base_dir, &file_type);
+    file_entries
+        .iter()
+        .map(|f| open_file_by_path(file_type, f))
+        .collect::<BitcaskResult<Vec<IdentifiedFile>>>()
+}
+
 #[cfg(test)]
 mod tests {
-    use std::vec;
+    use std::{
+        io::{Read, Write},
+        vec,
+    };
 
     use super::*;
     use bitcask_tests::common::get_temporary_directory_path;
+    use bytes::{Buf, Bytes, BytesMut};
     use log::info;
     use test_log::test;
 
-    // #[test]
-    // fn test_clear_dir() {
-    //     let dir = get_temporary_directory_path();
-    //     let merge_file_path = create_merge_file_dir(&dir).unwrap();
-    //     create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
+    #[test]
+    fn test_create_file() {
+        let dir = get_temporary_directory_path();
+        let file_id = Some(123);
+        let file_path = FileType::DataFile.get_path(&dir, file_id);
+        assert!(!file_path.exists());
+        create_file(&dir, FileType::DataFile, file_id).unwrap();
+        assert!(file_path.exists());
+    }
 
-    //     clear_dir(&merge_file_path).unwrap();
-    //     assert!(!merge_file_path.exists());
-    // }
+    #[test]
+    fn test_delete_file() {
+        let dir = get_temporary_directory_path();
+        let file_id = Some(123);
+        let file_path = FileType::DataFile.get_path(&dir, file_id);
+        assert!(!file_path.exists());
+        create_file(&dir, FileType::DataFile, file_id).unwrap();
+        assert!(file_path.exists());
+        delete_file(&dir, FileType::DataFile, file_id).unwrap();
+        assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_open_file() {
+        let dir = get_temporary_directory_path();
+        let file_id = Some(123);
+        let mut file = create_file(&dir, FileType::DataFile, file_id).unwrap();
+        let mut bs = BytesMut::with_capacity(8);
+        let expect_val: u64 = 12345;
+        bs.extend_from_slice(&expect_val.to_be_bytes());
+        let bs = bs.freeze();
+        file.write_all(&bs).unwrap();
+
+        {
+            let mut f = open_file(&dir, FileType::DataFile, file_id).unwrap();
+            assert_eq!(file_id, f.file_id);
+            assert_eq!(FileType::DataFile, f.file_type);
+
+            let mut header_buf = vec![0; 8];
+            f.file.read_exact(&mut header_buf).unwrap();
+
+            let mut actual = Bytes::from(header_buf);
+            assert_eq!(expect_val, actual.get_u64());
+        }
+
+        {
+            let p = FileType::DataFile.get_path(&dir, file_id);
+            let mut f = open_file_by_path(FileType::DataFile, &p).unwrap();
+            assert_eq!(file_id, f.file_id);
+            assert_eq!(FileType::DataFile, f.file_type);
+
+            let mut header_buf = vec![0; 8];
+            f.file.read_exact(&mut header_buf).unwrap();
+
+            let mut actual = Bytes::from(header_buf);
+            assert_eq!(expect_val, actual.get_u64());
+        }
+    }
 }

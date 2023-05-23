@@ -6,7 +6,7 @@ const MERGE_META_FILE_EXTENSION: &str = "meta";
 const DATA_FILE_EXTENSION: &str = "data";
 const HINT_FILE_EXTENSION: &str = "hint";
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone)]
 pub enum FileType {
     Unknown,
     LockFile,
