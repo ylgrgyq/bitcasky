@@ -84,9 +84,9 @@ impl MergeManager {
         info!(target: "Bitcask", "purge files with id smaller than: {}", known_max_file_id);
 
         purge_outdated_data_files(&database.database_dir, known_max_file_id)?;
-        let clear_ret = fs::clear_dir(&merge_dir_path);
-        if clear_ret.is_err() {
-            warn!(target: "Bitcask", "clear merge directory failed. {}", clear_ret.unwrap_err());
+        let delete_ret = fs::delete_dir(&merge_dir_path);
+        if delete_ret.is_err() {
+            warn!(target: "Bitcask", "delete merge directory failed. {}", delete_ret.unwrap_err());
         }
         Ok(())
     }
@@ -103,7 +103,7 @@ impl MergeManager {
             match err {
                 BitcaskError::InvalidMergeDataFile(_, _) => {
                     // clear Merge directory when recover merge failed
-                    fs::clear_dir(&merge_file_dir(&self.database_dir))?;
+                    fs::delete_dir(&merge_file_dir(&self.database_dir))?;
                 }
                 _ => return Err(err),
             }
@@ -141,9 +141,9 @@ impl MergeManager {
 
         purge_outdated_data_files(&self.database_dir, merge_meta.known_max_file_id)?;
 
-        let clear_ret = fs::clear_dir(&merge_file_dir);
-        if clear_ret.is_err() {
-            warn!(target: "Database", "clear merge directory failed. {}", clear_ret.unwrap_err());
+        let delete_ret = fs::delete_dir(&merge_file_dir);
+        if delete_ret.is_err() {
+            warn!(target: "Database", "delete merge directory failed. {}", delete_ret.unwrap_err());
         }
         Ok(())
     }
@@ -271,15 +271,15 @@ fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
         break;
     }
     if !merge_dir_empty {
-        let clear_ret = fs::clear_dir(&merge_dir_path).and_then(|_| {
+        let delete_ret = fs::delete_dir(&merge_dir_path).and_then(|_| {
             std::fs::create_dir(merge_dir_path.clone())?;
             Ok(())
         });
-        if clear_ret.is_err() {
+        if delete_ret.is_err() {
             warn!(
                 target: DEFAULT_LOG_TARGET,
-                "clear merge directory failed. {}",
-                clear_ret.unwrap_err()
+                "delete merge directory failed. {}",
+                delete_ret.unwrap_err()
             );
             return Err(BitcaskError::MergeFileDirectoryNotEmpty(
                 merge_dir_path.display().to_string(),

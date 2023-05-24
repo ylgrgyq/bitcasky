@@ -131,7 +131,7 @@ pub fn create_dir(base_dir: &Path) -> BitcaskResult<()> {
     Ok(())
 }
 
-pub fn clear_dir(base_dir: &Path) -> BitcaskResult<()> {
+pub fn delete_dir(base_dir: &Path) -> BitcaskResult<()> {
     fs::remove_dir_all(base_dir)?;
     Ok(())
 }
@@ -168,7 +168,7 @@ pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
     actual_file_ids
 }
 
-pub fn get_file_paths_in_dir(base_dir: &Path, file_type: &FileType) -> Vec<PathBuf> {
+pub fn get_file_paths_in_dir(base_dir: &Path, file_type: FileType) -> Vec<PathBuf> {
     WalkDir::new(base_dir)
         .follow_links(false)
         .max_depth(1)
@@ -188,7 +188,7 @@ pub fn open_files_in_dir(
     base_dir: &Path,
     file_type: FileType,
 ) -> BitcaskResult<Vec<IdentifiedFile>> {
-    let file_entries = get_file_paths_in_dir(base_dir, &file_type);
+    let file_entries = get_file_paths_in_dir(base_dir, file_type);
     file_entries
         .iter()
         .map(|f| open_file_by_path(file_type, f))
@@ -265,5 +265,102 @@ mod tests {
             let mut actual = Bytes::from(header_buf);
             assert_eq!(expect_val, actual.get_u64());
         }
+    }
+
+    #[test]
+    fn test_commit_file() {
+        let from_dir = get_temporary_directory_path();
+        let to_dir = get_temporary_directory_path();
+        let file_id = Some(123);
+        create_file(&from_dir, FileType::DataFile, file_id).unwrap();
+        assert!(FileType::DataFile.get_path(&from_dir, file_id).exists());
+        commit_file(FileType::DataFile, file_id, &from_dir, &to_dir).unwrap();
+        assert!(!FileType::DataFile.get_path(&from_dir, file_id).exists());
+        assert!(FileType::DataFile.get_path(&to_dir, file_id).exists());
+    }
+
+    #[test]
+    fn test_change_file_id() {
+        let dir = get_temporary_directory_path();
+        let file_id = Some(123);
+        let new_file_id = 456;
+        create_file(&dir, FileType::DataFile, file_id).unwrap();
+        assert!(FileType::DataFile.get_path(&dir, file_id).exists());
+        change_file_id(&dir, FileType::DataFile, file_id.unwrap(), new_file_id).unwrap();
+        assert!(!FileType::DataFile.get_path(&dir, file_id).exists());
+        assert!(FileType::DataFile
+            .get_path(&dir, Some(new_file_id))
+            .exists());
+    }
+
+    #[test]
+    fn test_create_dir() {
+        let dir = get_temporary_directory_path().join(TESTING_DIRECTORY);
+        assert!(!dir.exists());
+        create_dir(&dir).unwrap();
+        assert!(dir.exists());
+    }
+
+    #[test]
+    fn test_delete_dir() {
+        let dir = get_temporary_directory_path().join(TESTING_DIRECTORY);
+        create_dir(&dir).unwrap();
+        create_file(&dir, FileType::DataFile, Some(1230)).unwrap();
+        assert!(dir.exists());
+        delete_dir(&dir).unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn test_is_empty_dir() {
+        let dir = get_temporary_directory_path().join(TESTING_DIRECTORY);
+        create_dir(&dir).unwrap();
+        assert!(is_empty_dir(&dir).unwrap());
+        create_file(&dir, FileType::DataFile, Some(1230)).unwrap();
+        assert!(!is_empty_dir(&dir).unwrap());
+    }
+
+    #[test]
+    fn test_get_file_ids_in_dir() {
+        let dir = get_temporary_directory_path();
+        create_file(&dir, FileType::DataFile, Some(103)).unwrap();
+        create_file(&dir, FileType::HintFile, Some(100)).unwrap();
+        create_file(&dir, FileType::DataFile, Some(102)).unwrap();
+        create_file(&dir, FileType::DataFile, Some(101)).unwrap();
+        let file_ids = get_file_ids_in_dir(&dir, FileType::DataFile);
+        assert_eq!(vec![101, 102, 103], file_ids);
+    }
+
+    #[test]
+    fn test_get_file_paths_in_dir() {
+        let dir = get_temporary_directory_path();
+        create_file(&dir, FileType::DataFile, Some(103)).unwrap();
+        create_file(&dir, FileType::HintFile, Some(100)).unwrap();
+        create_file(&dir, FileType::DataFile, Some(102)).unwrap();
+        let file_ids = get_file_paths_in_dir(&dir, FileType::DataFile);
+        assert_eq!(
+            vec![
+                FileType::DataFile.get_path(&dir, Some(103)),
+                FileType::DataFile.get_path(&dir, Some(102))
+            ],
+            file_ids
+        );
+    }
+
+    #[test]
+    fn test_open_files_in_dir() {
+        let dir = get_temporary_directory_path();
+        create_file(&dir, FileType::DataFile, Some(103)).unwrap();
+        create_file(&dir, FileType::HintFile, Some(100)).unwrap();
+        create_file(&dir, FileType::DataFile, Some(102)).unwrap();
+        let files = open_files_in_dir(&dir, FileType::DataFile).unwrap();
+        assert!(files.iter().all(|f| f.file_type == FileType::DataFile));
+        assert_eq!(
+            vec![103, 102],
+            files
+                .iter()
+                .map(|f| f.file_id.unwrap())
+                .collect::<Vec<u32>>()
+        );
     }
 }
