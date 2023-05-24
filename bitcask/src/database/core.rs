@@ -18,7 +18,7 @@ use log::{debug, error, info};
 
 use super::{common::RecoveredRow, writing_file::WritingFile};
 use super::{
-    common::{RowPosition, RowToRead, RowToWrite},
+    common::{RowLocation, RowToRead, RowToWrite},
     hint::HintFile,
     stable_file::{StableFile, StableFileIter},
 };
@@ -104,7 +104,7 @@ impl Database {
             .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
 
         let hint_file_writer = HintFileWriter::start(&database_dir);
-        info!(target: "Database", "database opened at directory: {:?}, with {} file recovered", directory, stable_files.len());
+        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, stable_files.len());
         Ok(Database {
             writing_file,
             file_id_generator,
@@ -125,7 +125,7 @@ impl Database {
         writing_file_ref.file_id()
     }
 
-    pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowPosition> {
+    pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new(key, value);
         self.do_write(row)
     }
@@ -135,7 +135,7 @@ impl Database {
         key: &Vec<u8>,
         value: &[u8],
         timestamp: u64,
-    ) -> BitcaskResult<RowPosition> {
+    ) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new_with_timestamp(key, value, timestamp);
         self.do_write(row)
     }
@@ -203,7 +203,7 @@ impl Database {
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_position: &RowPosition) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<Vec<u8>> {
         {
             let mut writing_file_ref = self.writing_file.lock().unwrap();
             if row_position.file_id == writing_file_ref.file_id() {
@@ -285,7 +285,7 @@ impl Database {
         Ok(())
     }
 
-    fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowPosition> {
+    fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowLocation> {
         let mut writing_file_ref = self.writing_file.lock().unwrap();
         if self.check_file_overflow(&writing_file_ref, &row) {
             self.do_flush_writing_file(&mut writing_file_ref)?;
@@ -496,7 +496,7 @@ impl Iterator for DatabaseRecoverIter {
 pub mod database_tests_utils {
     use bitcask_tests::common::TestingKV;
 
-    use crate::database::RowPosition;
+    use crate::database::RowLocation;
 
     use super::{DataBaseOptions, Database};
 
@@ -507,11 +507,11 @@ pub mod database_tests_utils {
 
     pub struct TestingRow {
         kv: TestingKV,
-        pos: RowPosition,
+        pos: RowLocation,
     }
 
     impl TestingRow {
-        fn new(kv: TestingKV, pos: RowPosition) -> Self {
+        fn new(kv: TestingKV, pos: RowLocation) -> Self {
             TestingRow { kv, pos }
         }
     }

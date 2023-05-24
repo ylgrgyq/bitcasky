@@ -5,13 +5,13 @@ use dashmap::{
 };
 
 use crate::{
-    database::{Database, RowPosition},
+    database::{Database, RowLocation},
     error::BitcaskResult,
 };
 
 #[derive(Clone)]
 pub struct KeyDir {
-    index: DashMap<Vec<u8>, RowPosition>,
+    index: DashMap<Vec<u8>, RowLocation>,
 }
 
 impl KeyDir {
@@ -29,7 +29,7 @@ impl KeyDir {
                 kd.delete(&item.key);
                 continue;
             }
-            let row_pos = RowPosition {
+            let row_pos = RowLocation {
                 file_id: item.file_id,
                 row_offset: item.row_offset,
                 row_size: item.row_size,
@@ -40,14 +40,14 @@ impl KeyDir {
         Ok(kd)
     }
 
-    pub fn put(&self, key: Vec<u8>, value: RowPosition) {
+    pub fn put(&self, key: Vec<u8>, value: RowLocation) {
         self.index.insert(key, value);
     }
 
-    pub fn checked_put(&self, key: Vec<u8>, value: RowPosition) {
+    pub fn checked_put(&self, key: Vec<u8>, value: RowLocation) {
         let r = self.index.get(&key);
         if let Some(pos) = r {
-            let old_pos: RowPosition = *(pos);
+            let old_pos: RowLocation = *(pos);
             // key was written again during merge
             if value.file_id < old_pos.file_id {
                 return;
@@ -56,7 +56,7 @@ impl KeyDir {
         self.index.insert(key, value);
     }
 
-    pub fn get(&self, key: &Vec<u8>) -> Option<Ref<Vec<u8>, RowPosition>> {
+    pub fn get(&self, key: &Vec<u8>) -> Option<Ref<Vec<u8>, RowLocation>> {
         self.index.get(key)
     }
 
@@ -80,17 +80,17 @@ impl KeyDir {
         }
     }
 
-    pub fn delete(&self, key: &Vec<u8>) -> Option<(Vec<u8>, RowPosition)> {
+    pub fn delete(&self, key: &Vec<u8>) -> Option<(Vec<u8>, RowLocation)> {
         self.index.remove(key)
     }
 }
 
 pub struct KeyDirIterator<'a> {
-    iter: Iter<'a, Vec<u8>, RowPosition>,
+    iter: Iter<'a, Vec<u8>, RowLocation>,
 }
 
 impl<'a> Iterator for KeyDirIterator<'a> {
-    type Item = RefMulti<'a, Vec<u8>, RowPosition>;
+    type Item = RefMulti<'a, Vec<u8>, RowLocation>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
@@ -98,11 +98,11 @@ impl<'a> Iterator for KeyDirIterator<'a> {
 }
 
 pub struct IntoKeyDirIterator {
-    iter: OwningIter<Vec<u8>, RowPosition>,
+    iter: OwningIter<Vec<u8>, RowLocation>,
 }
 
 impl Iterator for IntoKeyDirIterator {
-    type Item = (Vec<u8>, RowPosition);
+    type Item = (Vec<u8>, RowLocation);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()

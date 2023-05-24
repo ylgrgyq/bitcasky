@@ -205,7 +205,6 @@ mod tests {
     use super::*;
     use bitcask_tests::common::get_temporary_directory_path;
     use bytes::{Buf, Bytes, BytesMut};
-    use log::info;
     use test_log::test;
 
     #[test]
