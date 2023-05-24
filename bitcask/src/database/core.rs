@@ -76,33 +76,22 @@ impl Database {
 
         hint::clear_temp_hint_file_directory(&database_dir);
 
-        let opened_stable_files = SelfFs::open_files_in_dir(&database_dir, FileType::DataFile)?;
-        if !opened_stable_files.is_empty() {
-            let writing_file_id = opened_stable_files
-                .iter()
-                // data file must have file id, so unwrap is ok
-                .map(|f| f.file_id.unwrap())
-                .max()
-                .unwrap_or(0);
-            file_id_generator.update_file_id(writing_file_id);
+        let data_file_ids = SelfFs::get_file_ids_in_dir(&database_dir, FileType::DataFile);
+        if let Some(id) = data_file_ids.iter().max() {
+            file_id_generator.update_file_id(*id);
         }
+        let stable_files = data_file_ids
+            .iter()
+            .map(|id| StableFile::open(&database_dir, *id, options.tolerate_data_file_corruption))
+            .collect::<BitcaskResult<Vec<Option<StableFile>>>>()?
+            .into_iter()
+            .flatten()
+            .map(|stable_file| (stable_file.file_id, Mutex::new(stable_file)))
+            .collect::<DashMap<u32, Mutex<StableFile>>>();
         let writing_file = Mutex::new(WritingFile::new(
             &database_dir,
             file_id_generator.generate_next_file_id(),
         )?);
-        let stable_files = opened_stable_files
-            .into_iter()
-            .map(|f| {
-                StableFile::new(
-                    &database_dir,
-                    f.file_id.unwrap(),
-                    f.file,
-                    options.tolerate_data_file_corruption,
-                )
-                .map(|stable_file| (f.file_id.unwrap(), Mutex::new(stable_file)))
-            })
-            .collect::<BitcaskResult<DashMap<u32, Mutex<StableFile>>>>()?;
-
         let hint_file_writer = HintFileWriter::start(&database_dir);
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, stable_files.len());
         Ok(Database {
