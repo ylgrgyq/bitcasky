@@ -146,7 +146,7 @@ impl RandomTestingDataGenerator {
 
     pub fn generate_write_operator(&mut self) -> TestingOperator {
         let inx = self.rng.next_u64() % self.candidate_operators.len() as u64;
-        return self.candidate_operators[inx as usize].clone();
+        self.candidate_operators[inx as usize].clone()
     }
 }
 

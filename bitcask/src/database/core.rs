@@ -80,29 +80,24 @@ impl Database {
         if let Some(id) = data_file_ids.iter().max() {
             file_id_generator.update_file_id(*id);
         }
-        let stable_files = data_file_ids
-            .iter()
-            .map(|id| StableFile::open(&database_dir, *id, options.tolerate_data_file_corruption))
-            .collect::<BitcaskResult<Vec<Option<StableFile>>>>()?
-            .into_iter()
-            .flatten()
-            .map(|stable_file| (stable_file.file_id, Mutex::new(stable_file)))
-            .collect::<DashMap<u32, Mutex<StableFile>>>();
         let writing_file = Mutex::new(WritingFile::new(
             &database_dir,
             file_id_generator.generate_next_file_id(),
         )?);
         let hint_file_writer = HintFileWriter::start(&database_dir);
-        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, stable_files.len());
-        Ok(Database {
+
+        let db = Database {
             writing_file,
             file_id_generator,
             database_dir,
-            stable_files,
+            stable_files: DashMap::new(),
             options,
             hint_file_writer,
             is_error: Mutex::new(None),
-        })
+        };
+        db.reload_data_files(data_file_ids)?;
+        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, db.get_file_ids().stable_file_ids.len());
+        Ok(db)
     }
 
     pub fn get_database_dir(&self) -> &Path {
@@ -205,15 +200,22 @@ impl Database {
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
-    pub fn rebuild_data_files(&self, data_files: Vec<StableFile>) {
+    pub fn reload_data_files(&self, data_file_ids: Vec<u32>) -> BitcaskResult<()> {
         self.stable_files.clear();
 
-        for f in data_files {
-            if self.stable_files.contains_key(&f.file_id) {
-                core::panic!("file id: {} already loaded in database", f.file_id);
+        for file_id in data_file_ids {
+            if self.stable_files.contains_key(&file_id) {
+                core::panic!("file id: {} already loaded in database", file_id);
             }
-            self.stable_files.insert(f.file_id, Mutex::new(f));
+            if let Some(f) = StableFile::open(
+                &self.database_dir,
+                file_id,
+                self.options.tolerate_data_file_corruption,
+            )? {
+                self.stable_files.insert(file_id, Mutex::new(f));
+            }
         }
+        Ok(())
     }
 
     pub fn get_file_ids(&self) -> FileIds {

@@ -1,9 +1,7 @@
 use std::{
     fs::{self, File},
-    path::{Path, PathBuf},
+    path::Path,
 };
-
-use walkdir::WalkDir;
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
@@ -168,33 +166,6 @@ pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
     actual_file_ids
 }
 
-pub fn get_file_paths_in_dir(base_dir: &Path, file_type: FileType) -> Vec<PathBuf> {
-    WalkDir::new(base_dir)
-        .follow_links(false)
-        .max_depth(1)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            if file_type.check_file_belongs_to_type(e.path()) {
-                Some(e.into_path())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-pub fn open_files_in_dir(
-    base_dir: &Path,
-    file_type: FileType,
-) -> BitcaskResult<Vec<IdentifiedFile>> {
-    let file_entries = get_file_paths_in_dir(base_dir, file_type);
-    file_entries
-        .iter()
-        .map(|f| open_file_by_path(file_type, f))
-        .collect::<BitcaskResult<Vec<IdentifiedFile>>>()
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
@@ -328,38 +299,5 @@ mod tests {
         create_file(&dir, FileType::DataFile, Some(101)).unwrap();
         let file_ids = get_file_ids_in_dir(&dir, FileType::DataFile);
         assert_eq!(vec![101, 102, 103], file_ids);
-    }
-
-    #[test]
-    fn test_get_file_paths_in_dir() {
-        let dir = get_temporary_directory_path();
-        create_file(&dir, FileType::DataFile, Some(103)).unwrap();
-        create_file(&dir, FileType::HintFile, Some(100)).unwrap();
-        create_file(&dir, FileType::DataFile, Some(102)).unwrap();
-        let file_ids = get_file_paths_in_dir(&dir, FileType::DataFile);
-        assert_eq!(
-            vec![
-                FileType::DataFile.get_path(&dir, Some(103)),
-                FileType::DataFile.get_path(&dir, Some(102))
-            ],
-            file_ids
-        );
-    }
-
-    #[test]
-    fn test_open_files_in_dir() {
-        let dir = get_temporary_directory_path();
-        create_file(&dir, FileType::DataFile, Some(103)).unwrap();
-        create_file(&dir, FileType::HintFile, Some(100)).unwrap();
-        create_file(&dir, FileType::DataFile, Some(102)).unwrap();
-        let files = open_files_in_dir(&dir, FileType::DataFile).unwrap();
-        assert!(files.iter().all(|f| f.file_type == FileType::DataFile));
-        assert_eq!(
-            vec![103, 102],
-            files
-                .iter()
-                .map(|f| f.file_id.unwrap())
-                .collect::<Vec<u32>>()
-        );
     }
 }

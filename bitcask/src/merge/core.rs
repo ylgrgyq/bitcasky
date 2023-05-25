@@ -9,7 +9,7 @@ use bytes::{Buf, Bytes};
 use log::{debug, error, info, warn};
 
 use crate::{
-    database::{DataBaseOptions, Database, StableFile},
+    database::{DataBaseOptions, Database},
     error::{BitcaskError, BitcaskResult},
     file_id::FileIdGenerator,
     fs::{self, FileType},
@@ -53,28 +53,25 @@ impl MergeManager {
 
         let (kd, known_max_file_id) = self.flush_writing_file(database, keydir)?;
 
-        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
+        debug!(target: "Bitcask", "start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
 
         let merge_dir_path = create_merge_file_dir(database.get_database_dir())?;
         let (file_ids, new_kd) =
             self.write_merged_files(database, &merge_dir_path, &kd, known_max_file_id)?;
 
-        info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
+        info!(target: "Bitcask", "database merged to files with ids: {:?}", &file_ids);
 
         {
             // stop read/write
             let kd = keydir.write().unwrap();
             database.flush_writing_file()?;
-            let files = self.open_stable_files_after_merge(
-                &file_ids,
-                known_max_file_id,
-            ).map_err(|e| {
-                database.mark_db_error(e.to_string());
-                error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
-                e
-            })?;
-
-            database.rebuild_data_files(files);
+            self.commit_merge(&file_ids, known_max_file_id)
+                .and_then(|file_ids| database.reload_data_files(file_ids))
+                .map_err(|e| {
+                    database.mark_db_error(e.to_string());
+                    error!(target: "Bitcask", "database commit merge failed with error: {}", &e);
+                    e
+                })?;
 
             for (k, v) in new_kd.into_iter() {
                 kd.checked_put(k, v)
@@ -88,6 +85,9 @@ impl MergeManager {
         if delete_ret.is_err() {
             warn!(target: "Bitcask", "delete merge directory failed. {}", delete_ret.unwrap_err());
         }
+
+        debug!(target: "Bitcask", "merge success. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
+
         Ok(())
     }
 
@@ -190,30 +190,18 @@ impl MergeManager {
         Ok((file_ids.stable_file_ids, new_kd))
     }
 
-    fn open_stable_files_after_merge(
+    fn commit_merge(
         &self,
         merged_file_ids: &Vec<u32>,
         known_max_file_id: u32,
-    ) -> BitcaskResult<Vec<StableFile>> {
+    ) -> BitcaskResult<Vec<u32>> {
         let mut data_file_ids = self.shift_data_files(known_max_file_id)?;
 
         commit_merge_files(&self.database_dir, merged_file_ids)?;
 
         data_file_ids.extend(merged_file_ids.iter());
 
-        Ok(data_file_ids
-            .iter()
-            .map(|file_id| {
-                StableFile::open(
-                    &self.database_dir,
-                    *file_id,
-                    self.options.tolerate_data_file_corruption,
-                )
-            })
-            .collect::<BitcaskResult<Vec<Option<StableFile>>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<StableFile>>())
+        Ok(data_file_ids)
     }
 
     fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
@@ -618,12 +606,9 @@ mod tests {
                 DEFAULT_OPTIONS,
             );
             let files = merge_manager
-                .open_stable_files_after_merge(
-                    &db.get_file_ids().stable_file_ids,
-                    old_db.get_max_file_id(),
-                )
+                .commit_merge(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
                 .unwrap();
-            old_db.rebuild_data_files(files);
+            old_db.reload_data_files(files).unwrap();
         }
 
         assert_eq!(5, file_id_generator.get_file_id());
