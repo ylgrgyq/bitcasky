@@ -15,12 +15,14 @@ use crate::{
 use log::{error, info};
 
 use super::{
-    common::{io_error_to_bitcask_error, read_value_from_file, RowPosition, RowToRead},
+    common::{io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToRead},
     constants::{
         DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
         DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
     },
 };
+
+const DEFAULT_LOG_TARGET: &str = "DatabaseMerge";
 
 #[derive(Debug)]
 pub struct StableFile {
@@ -32,6 +34,33 @@ pub struct StableFile {
 }
 
 impl StableFile {
+    pub fn open(
+        database_dir: &Path,
+        file_id: u32,
+        tolerate_data_file_corruption: bool,
+    ) -> BitcaskResult<Option<StableFile>> {
+        let path = FileType::DataFile.get_path(database_dir, Some(file_id));
+        if !path.exists() {
+            return Ok(None);
+        }
+        let data_file = fs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
+        let meta = data_file.file.metadata()?;
+        if meta.len() == 0 {
+            info!(
+                target: DEFAULT_LOG_TARGET,
+                "skip load empty data file with id: {}", &file_id
+            );
+            return Ok(None);
+        }
+        let stable_file = StableFile::new(
+            database_dir,
+            file_id,
+            data_file.file,
+            tolerate_data_file_corruption,
+        )?;
+        Ok(Some(stable_file))
+    }
+
     pub fn new(
         database_dir: &Path,
         file_id: u32,
@@ -111,7 +140,7 @@ impl StableFile {
         Ok(Some(RowToRead {
             key: kv_bs.slice(0..key_size).into(),
             value: kv_bs.slice(key_size..).into(),
-            row_position: RowPosition {
+            row_position: RowLocation {
                 file_id: self.file_id,
                 row_offset: value_offset,
                 row_size: (DATA_FILE_KEY_OFFSET + key_size + value_size) as u64,

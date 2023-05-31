@@ -9,7 +9,7 @@ use crate::{
     fs::{create_file, FileType},
 };
 
-use super::common::{io_error_to_bitcask_error, read_value_from_file, RowPosition, RowToWrite};
+use super::common::{io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToWrite};
 
 #[derive(Debug)]
 pub struct WritingFile {
@@ -38,7 +38,7 @@ impl WritingFile {
         self.file_size
     }
 
-    pub fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowPosition> {
+    pub fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowLocation> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&data_to_write).map_err(|e| {
@@ -51,11 +51,11 @@ impl WritingFile {
         })?;
 
         self.file_size += data_to_write.len();
-        Ok(RowPosition {
+        Ok(RowLocation {
             file_id: self.file_id,
             row_offset: value_offset,
             row_size: row.size,
-            timestamp: row.tstamp,
+            timestamp: row.timestamp,
         })
     }
 

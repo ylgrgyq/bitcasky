@@ -17,7 +17,7 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     tolerate_data_file_corrption: true,
 };
 
-fn load_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
+fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
     for op in ops.operations() {
         match op.operator() {
             TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
@@ -63,33 +63,33 @@ fn test_random_put_and_delete() {
     let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
-    load_testing_operations(&bc, &ops);
+    execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
         assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
     }
 }
 
-// #[test]
-// fn test_random_put_delete_merge() {
-//     let mut gen = RandomTestingDataGenerator::new(
-//         64,
-//         512,
-//         vec![
-//             TestingOperator::PUT,
-//             TestingOperator::DELETE,
-//             TestingOperator::MERGE,
-//         ],
-//     );
-//     let ops = gen.generate_testing_operations(5000);
-//     let dir = get_temporary_directory_path();
-//     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
-//     load_testing_operations(&bc, &ops);
+#[test]
+fn test_random_put_delete_merge() {
+    let mut gen = RandomTestingDataGenerator::new(
+        64,
+        512,
+        vec![
+            TestingOperator::PUT,
+            TestingOperator::DELETE,
+            TestingOperator::MERGE,
+        ],
+    );
+    let ops = gen.generate_testing_operations(10);
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    execute_testing_operations(&bc, &ops);
 
-//     for op in ops.squash() {
-//         assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
-//     }
-// }
+    for op in ops.squash() {
+        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+    }
+}
 
 #[test]
 fn test_recovery() {
@@ -102,7 +102,7 @@ fn test_recovery() {
     let dir = get_temporary_directory_path();
     {
         let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
-        load_testing_operations(&bc, &ops);
+        execute_testing_operations(&bc, &ops);
     }
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     for op in ops.squash() {

@@ -27,7 +27,7 @@ pub trait Decoder<T> {
 #[derive(Debug)]
 pub struct RowToWrite<'a> {
     pub crc: u32,
-    pub tstamp: u64,
+    pub timestamp: u64,
     pub key_size: u64,
     pub value_size: u64,
     pub key: &'a Vec<u8>,
@@ -56,7 +56,7 @@ impl<'a> RowToWrite<'a> {
         ck.update(value);
         RowToWrite {
             crc: ck.finalize(),
-            tstamp: timestamp,
+            timestamp,
             key_size,
             value_size,
             key,
@@ -68,7 +68,7 @@ impl<'a> RowToWrite<'a> {
     pub fn to_bytes(&self) -> Bytes {
         let mut bs = BytesMut::with_capacity(self.size as usize);
         bs.extend_from_slice(&self.crc.to_be_bytes());
-        bs.extend_from_slice(&self.tstamp.to_be_bytes());
+        bs.extend_from_slice(&self.timestamp.to_be_bytes());
         bs.extend_from_slice(&self.key_size.to_be_bytes());
         bs.extend_from_slice(&self.value_size.to_be_bytes());
         bs.extend_from_slice(self.key);
@@ -96,7 +96,7 @@ pub fn io_error_to_bitcask_error(
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct RowPosition {
+pub struct RowLocation {
     pub file_id: u32,
     pub row_offset: u64,
     pub row_size: u64,
@@ -148,7 +148,7 @@ pub trait BitcaskDataFile {
 pub struct RowToRead {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
-    pub row_position: RowPosition,
+    pub row_position: RowLocation,
 }
 
 pub struct RecoveredRow {

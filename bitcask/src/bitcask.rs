@@ -1,15 +1,16 @@
 use std::fs::File;
 use std::path::Path;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
-use log::{debug, error, info, warn};
+use log::{debug, error};
 use uuid::Uuid;
 
 use crate::database::{DataBaseOptions, Database};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
-use crate::fs::{self, MergeMeta};
+use crate::fs::{self};
 use crate::keydir::KeyDir;
+use crate::merge::MergeManager;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
 #[derive(Debug, Clone, Copy)]
@@ -84,11 +85,9 @@ pub struct Bitcask {
     instance_id: String,
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
-    file_id_generator: Arc<FileIdGenerator>,
     options: BitcaskOptions,
     database: Database,
-    merge_lock: Mutex<()>,
-    is_error: Mutex<Option<String>>,
+    merge_manager: MergeManager,
 }
 
 impl Bitcask {
@@ -106,24 +105,30 @@ impl Bitcask {
             }
         };
 
+        validate_database_directory(directory)?;
+
+        let id = Uuid::new_v4();
         let file_id_generator = Arc::new(FileIdGenerator::new());
-        let database = Database::open(
+        let merge_manager = MergeManager::new(
+            id.to_string(),
             directory,
             file_id_generator.clone(),
             options.get_database_options(),
-        )?;
-        let keydir = KeyDir::new(&database)?;
-        let id = Uuid::new_v4();
-        debug!(target: "Bitcask", "Bitcask created. instanceId = {}", id);
+        );
+        merge_manager.recover_merge()?;
+
+        let database =
+            Database::open(directory, file_id_generator, options.get_database_options())?;
+        let keydir = RwLock::new(KeyDir::new(&database)?);
+
+        debug!(target: "Bitcask", "Bitcask created. instanceId: {}", id);
         Ok(Bitcask {
             instance_id: id.to_string(),
             directory_lock_file,
-            keydir: RwLock::new(keydir),
-            file_id_generator,
+            keydir,
             database,
             options,
-            merge_lock: Mutex::new(()),
-            is_error: Mutex::new(None),
+            merge_manager,
         })
     }
 
@@ -141,7 +146,7 @@ impl Bitcask {
             ));
         }
 
-        self.check_db_error()?;
+        self.database.check_db_error()?;
 
         let kd = self.keydir.write().unwrap();
         let ret = self.database.write(&key, value).map_err(|e| {
@@ -153,7 +158,7 @@ impl Bitcask {
                 }
                 _ => true,
             } {
-                self.mark_db_error(e.to_string());
+                self.database.mark_db_error(e.to_string());
             }
             e
         })?;
@@ -165,7 +170,7 @@ impl Bitcask {
     }
 
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
-        self.check_db_error()?;
+        self.database.check_db_error()?;
 
         let row_pos = { self.keydir.read().unwrap().get(key).map(|r| *r.value()) };
 
@@ -191,7 +196,7 @@ impl Bitcask {
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
-        self.check_db_error()?;
+        self.database.check_db_error()?;
         let kd = self.keydir.write().unwrap();
 
         if kd.contains_key(key) {
@@ -203,50 +208,9 @@ impl Bitcask {
     }
 
     pub fn merge(&self) -> BitcaskResult<()> {
-        self.check_db_error()?;
+        self.database.check_db_error()?;
 
-        let lock_ret = self.merge_lock.try_lock();
-
-        if lock_ret.is_err() {
-            return Err(BitcaskError::MergeInProgress());
-        }
-
-        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}", self.instance_id);
-
-        let (kd, known_max_file_id) = self.flush_writing_file()?;
-
-        debug!(target: "Bitcask", "Bitcask start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
-
-        let merge_dir_path = fs::create_merge_file_dir(self.database.get_database_dir())?;
-        let (file_ids, new_kd) =
-            self.write_merged_files(&merge_dir_path, &kd, known_max_file_id)?;
-
-        info!(target: "BitcaskMerge", "database merged to files with ids: {:?}", &file_ids);
-
-        {
-            // stop read/write
-            let kd = self.keydir.write().unwrap();
-            self.database
-                .load_merged_files(&file_ids, known_max_file_id)
-                .map_err(|e| {
-                    self.mark_db_error(e.to_string());
-                    error!(target: "BitcaskMerge", "database load merged files failed with error: {}", &e);
-                    e
-                })?;
-
-            for (k, v) in new_kd.into_iter() {
-                kd.checked_put(k, v)
-            }
-        }
-
-        info!(target: "Bitcask", "purge files with id smaller than: {}", known_max_file_id);
-
-        fs::purge_outdated_data_files(&self.database.database_dir, known_max_file_id)?;
-        let clear_ret = fs::clear_dir(&merge_dir_path);
-        if clear_ret.is_err() {
-            warn!(target: "Bitcask", "clear merge directory failed. {}", clear_ret.unwrap_err());
-        }
-        Ok(())
+        self.merge_manager.merge(&self.database, &self.keydir)
     }
 
     pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
@@ -260,62 +224,6 @@ impl Bitcask {
             number_of_keys: key_size,
         })
     }
-
-    fn mark_db_error(&self, error_string: String) {
-        let mut err = self.is_error.lock().expect("lock db is error mutex failed");
-        *err = Some(error_string)
-    }
-
-    fn check_db_error(&self) -> Result<(), BitcaskError> {
-        let err = self.is_error.lock().expect("lock db is error mutex failed");
-        if err.is_some() {
-            return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
-        }
-        Ok(())
-    }
-
-    fn flush_writing_file(&self) -> BitcaskResult<(KeyDir, u32)> {
-        // stop writing and switch the writing file to stable files
-        let _kd = self.keydir.write().unwrap();
-        self.database.flush_writing_file()?;
-        let known_max_file_id = self.database.get_max_file_id();
-        Ok((_kd.clone(), known_max_file_id))
-    }
-
-    fn write_merged_files(
-        &self,
-        merge_file_dir: &Path,
-        key_dir_to_write: &KeyDir,
-        known_max_file_id: u32,
-    ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
-        fs::write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
-
-        let new_kd = KeyDir::new_empty_key_dir();
-        let merge_db = Database::open(
-            merge_file_dir,
-            self.file_id_generator.clone(),
-            self.options.get_database_options(),
-        )?;
-
-        for r in key_dir_to_write.iter() {
-            let k = r.key();
-            let v = self.database.read_value(r.value())?;
-            if !is_tombstone(&v) {
-                let pos = merge_db.write_with_timestamp(k, &v, r.value().timestamp)?;
-                new_kd.checked_put(k.clone(), pos);
-                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-                    k, v, pos.file_id, pos.row_offset, pos.row_size, pos.timestamp);
-            }
-        }
-        debug!(target:"Bitcask", "write merge db done. {}", self.file_id_generator.get_file_id());
-        merge_db.flush_writing_file()?;
-        debug!(target:"Bitcask", "write merge db done2. {}", self.file_id_generator.get_file_id());
-        let file_ids = merge_db.get_file_ids();
-        debug!(target:"Bitcask", "write merge db done3. {} {:?}", self.file_id_generator.get_file_id(), file_ids.stable_file_ids);
-        // we do not write anything in writing file
-        // so we can only use stable files
-        Ok((file_ids.stable_file_ids, new_kd))
-    }
 }
 
 impl Drop for Bitcask {
@@ -323,4 +231,15 @@ impl Drop for Bitcask {
         fs::unlock_directory(&self.directory_lock_file);
         debug!(target: "Bitcask", "Bitcask shutdown. instanceId = {}", self.instance_id);
     }
+}
+
+fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
+    std::fs::create_dir_all(dir)?;
+    if !fs::check_directory_is_writable(dir) {
+        return Err(BitcaskError::PermissionDenied(format!(
+            "do not have writable permission for path: {}",
+            dir.display()
+        )));
+    }
+    Ok(())
 }
