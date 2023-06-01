@@ -263,6 +263,20 @@ impl Database {
         Ok(())
     }
 
+    pub fn drop(&self) -> BitcaskResult<()> {
+        self.flush_writing_file()?;
+        for file_id in self.stable_files.iter().map(|v| v.lock().unwrap().file_id) {
+            SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
+        }
+        self.stable_files.clear();
+        Ok(())
+    }
+
+    pub fn sync(&self) -> BitcaskResult<()> {
+        let mut f = self.writing_file.lock().unwrap();
+        f.flush()
+    }
+
     pub fn mark_db_error(&self, error_string: String) {
         let mut err = self.is_error.lock().expect("lock db is error mutex failed");
         *err = Some(error_string)

@@ -83,6 +83,10 @@ impl KeyDir {
     pub fn delete(&self, key: &Vec<u8>) -> Option<(Vec<u8>, RowLocation)> {
         self.index.remove(key)
     }
+
+    pub fn clear(&self) {
+        self.index.clear();
+    }
 }
 
 pub struct KeyDirIterator<'a> {

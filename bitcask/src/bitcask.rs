@@ -63,14 +63,20 @@ impl Default for BitcaskOptions {
     }
 }
 
-#[derive(PartialEq)]
-enum FoldStatus {
+#[derive(PartialEq, Eq)]
+pub enum FoldStatus {
     Stopped,
     Continue,
 }
+
 pub struct FoldResult<T> {
-    accumulator: T,
+    accumulator: Option<T>,
     status: FoldStatus,
+}
+
+struct Folder<T> {
+    func: Option<fn(key: &Vec<u8>, acc: Option<T>) -> BitcaskResult<FoldResult<T>>>,
+    init: Option<T>,
 }
 
 #[derive(Debug)]
@@ -186,13 +192,36 @@ impl Bitcask {
         }
     }
 
-    pub fn foreach_key<T>(&self, func: fn(key: &Vec<u8>) -> FoldResult<T>) {
-        let kd = self.keydir.read().unwrap();
-        for r in kd.iter() {
-            if func(r.key()).status == FoldStatus::Stopped {
-                break;
+    pub fn has(&self, key: &Vec<u8>) -> BitcaskResult<bool> {
+        self.database.check_db_error()?;
+
+        Ok(self
+            .keydir
+            .read()
+            .unwrap()
+            .get(key)
+            .map(|r| *r.value())
+            .is_some())
+    }
+
+    pub fn fold_key<T>(
+        &self,
+        func: fn(key: &Vec<u8>, acc: Option<T>) -> BitcaskResult<FoldResult<T>>,
+        init: Option<T>,
+    ) -> BitcaskResult<()> {
+        let mut init_acc = init;
+        for kd in self.keydir.read().unwrap().iter() {
+            let func_ret = func(kd.key(), init_acc);
+            if let Ok(ret) = func_ret {
+                if ret.status == FoldStatus::Stopped {
+                    break;
+                }
+                init_acc = ret.accumulator;
+            } else {
+                return func_ret.map(|_| {});
             }
         }
+        Ok(())
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
@@ -205,6 +234,23 @@ impl Bitcask {
         }
 
         Ok(())
+    }
+
+    pub fn drop(&self) -> BitcaskResult<()> {
+        let kd = self.keydir.write().unwrap();
+
+        if let Err(e) = self.database.drop() {
+            self.database
+                .mark_db_error(format!("drop database failed. {}", e));
+            return Err(e);
+        }
+
+        kd.clear();
+        Ok(())
+    }
+
+    pub fn sync(&self) -> BitcaskResult<()> {
+        self.database.sync()
     }
 
     pub fn merge(&self) -> BitcaskResult<()> {

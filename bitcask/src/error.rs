@@ -26,6 +26,8 @@ pub enum BitcaskError {
     LockDirectoryFailed(String),
     #[error("Invalid file id {0} in MergeMeta file. Min file ids in Merge directory is {1}")]
     InvalidMergeDataFile(u32, u32),
+    #[error("Unknown server error: {0}")]
+    UnknownServerError(String),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;
