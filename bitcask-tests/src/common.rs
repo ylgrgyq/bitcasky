@@ -1,4 +1,3 @@
-use bytes::BytesMut;
 use rand::{rngs::ThreadRng, RngCore};
 use std::{collections::HashMap, path::PathBuf};
 
@@ -126,11 +125,13 @@ impl RandomTestingDataGenerator {
     }
 
     pub fn generate_testing_kv(&mut self) -> TestingKV {
-        let mut k = BytesMut::with_capacity(self.key_size);
-        self.rng.fill_bytes(k.as_mut());
+        let mut k = Vec::with_capacity(self.key_size);
+        k.resize(self.key_size, 0);
+        self.rng.fill_bytes(&mut k);
 
-        let mut v = BytesMut::with_capacity(self.value_size);
-        self.rng.fill_bytes(v.as_mut());
+        let mut v = Vec::with_capacity(self.value_size);
+        v.resize(self.key_size, 0);
+        self.rng.fill_bytes(&mut v);
 
         TestingKV::from_bytes(&k, &v)
     }

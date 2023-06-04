@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::collections::HashSet;
 
 use bitcask::{
     bitcask::{Bitcask, BitcaskOptions},
@@ -150,4 +150,103 @@ fn test_delete_not_exists_key() {
         .map(|e| e.metadata().unwrap())
         .filter(|m| !m.is_dir())
         .all(|meta| { meta.len() == 0 }));
+}
+
+#[test]
+fn test_foreach_keys() {
+    let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
+    let ops = gen.generate_testing_operations(100);
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    execute_testing_operations(&bc, &ops);
+
+    let mut expected_set: HashSet<Vec<u8>> = HashSet::new();
+    let mut actual_set: HashSet<Vec<u8>> = HashSet::new();
+    for op in ops.squash() {
+        expected_set.insert(op.key());
+    }
+
+    bc.foreach_key(|k| {
+        actual_set.insert(k.clone());
+    })
+    .unwrap();
+    assert_eq!(expected_set, actual_set);
+}
+
+#[test]
+fn test_fold_keys() {
+    let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
+    let ops = gen.generate_testing_operations(100);
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    execute_testing_operations(&bc, &ops);
+
+    let mut expected_set: HashSet<Vec<u8>> = HashSet::new();
+    let mut actual_set: HashSet<Vec<u8>> = HashSet::new();
+    for op in ops.squash() {
+        expected_set.insert(op.key());
+    }
+
+    let ret = bc
+        .fold_key(
+            |k, acc| {
+                actual_set.insert(k.clone());
+                Ok(Some(acc.unwrap() + 1))
+            },
+            Some(0),
+        )
+        .unwrap();
+    assert_eq!(expected_set.len(), ret.unwrap());
+    assert_eq!(expected_set, actual_set);
+}
+
+#[test]
+fn test_foreach() {
+    let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
+    let ops = gen.generate_testing_operations(100);
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    execute_testing_operations(&bc, &ops);
+
+    let expected_pair = ops
+        .squash()
+        .iter()
+        .map(|op| (op.key(), op.value()))
+        .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
+
+    let mut actual_pair: Vec<(Vec<u8>, Vec<u8>)> = vec![];
+    bc.foreach(|k, v| {
+        actual_pair.push((k.clone(), v.clone()));
+    })
+    .unwrap();
+
+    assert_eq!(expected_pair, actual_pair);
+}
+
+#[test]
+fn test_fold() {
+    let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
+    let ops = gen.generate_testing_operations(100);
+    let dir = get_temporary_directory_path();
+    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    execute_testing_operations(&bc, &ops);
+
+    let expected_pair = ops
+        .squash()
+        .iter()
+        .map(|op| (op.key(), op.value()))
+        .collect::<Vec<(Vec<u8>, Vec<u8>)>>();
+
+    let mut actual_pair: Vec<(Vec<u8>, Vec<u8>)> = vec![];
+    let ret = bc
+        .fold(
+            |k, v, acc| {
+                actual_pair.push((k.clone(), v.clone()));
+                Ok(Some(acc.unwrap() + 1))
+            },
+            Some(0),
+        )
+        .unwrap();
+    assert_eq!(expected_pair.len(), ret.unwrap());
+    assert_eq!(expected_pair, actual_pair);
 }

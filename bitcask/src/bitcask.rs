@@ -188,9 +188,9 @@ impl Bitcask {
             .is_some())
     }
 
-    pub fn foreach_key<F>(&self, f: F) -> BitcaskResult<()>
+    pub fn foreach_key<F>(&self, mut f: F) -> BitcaskResult<()>
     where
-        F: Fn(&Vec<u8>),
+        F: FnMut(&Vec<u8>),
     {
         let kd = self.keydir.read().unwrap();
         for k in kd.iter() {
@@ -199,25 +199,20 @@ impl Bitcask {
         Ok(())
     }
 
-    pub fn fold_key<T, F>(&self, f: F, init: Option<T>) -> BitcaskResult<()>
+    pub fn fold_key<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskResult<Option<T>>
     where
-        F: Fn(&Vec<u8>, Option<T>) -> BitcaskResult<T>,
+        F: FnMut(&Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
     {
-        let mut init_acc = init;
+        let mut acc = init;
         for kd in self.keydir.read().unwrap().iter() {
-            let func_ret = f(kd.key(), init_acc);
-            if let Ok(ret) = func_ret {
-                init_acc = Some(ret);
-            } else {
-                return func_ret.map(|_| {});
-            }
+            acc = f(kd.key(), acc)?;
         }
-        Ok(())
+        Ok(acc)
     }
 
-    pub fn foreach<F>(&self, f: F) -> BitcaskResult<()>
+    pub fn foreach<F>(&self, mut f: F) -> BitcaskResult<()>
     where
-        F: Fn(&Vec<u8>, &Vec<u8>),
+        F: FnMut(&Vec<u8>, &Vec<u8>),
     {
         let _kd = self.keydir.read().unwrap();
         for row_ret in self.database.iter()? {
@@ -231,20 +226,20 @@ impl Bitcask {
         Ok(())
     }
 
-    pub fn fold<T, F>(&self, f: F, init: Option<T>) -> BitcaskResult<()>
+    pub fn fold<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskResult<Option<T>>
     where
-        F: Fn(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<T>,
+        F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
     {
         let _kd = self.keydir.read().unwrap();
-        let mut init_acc = init;
+        let mut acc = init;
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
-                init_acc = Some(f(&row.key, &row.value, init_acc)?);
+                acc = f(&row.key, &row.value, acc)?;
             } else {
                 return Err(row_ret.unwrap_err());
             }
         }
-        Ok(())
+        Ok(acc)
     }
 
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
