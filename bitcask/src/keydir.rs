@@ -9,7 +9,7 @@ use crate::{
     error::BitcaskResult,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KeyDir {
     index: DashMap<Vec<u8>, RowLocation>,
 }

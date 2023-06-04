@@ -63,23 +63,7 @@ impl Default for BitcaskOptions {
     }
 }
 
-#[derive(PartialEq, Eq)]
-pub enum FoldStatus {
-    Stopped,
-    Continue,
-}
-
-pub struct FoldResult<T> {
-    accumulator: Option<T>,
-    status: FoldStatus,
-}
-
-struct Folder<T> {
-    func: Option<fn(key: &Vec<u8>, acc: Option<T>) -> BitcaskResult<FoldResult<T>>>,
-    init: Option<T>,
-}
-
-#[derive(Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct BitcaskStats {
     pub number_of_data_files: usize,
     pub total_data_size_in_bytes: u64,
@@ -204,21 +188,60 @@ impl Bitcask {
             .is_some())
     }
 
-    pub fn fold_key<T>(
-        &self,
-        func: fn(key: &Vec<u8>, acc: Option<T>) -> BitcaskResult<FoldResult<T>>,
-        init: Option<T>,
-    ) -> BitcaskResult<()> {
+    pub fn foreach_key<F>(&self, f: F) -> BitcaskResult<()>
+    where
+        F: Fn(&Vec<u8>),
+    {
+        let kd = self.keydir.read().unwrap();
+        for k in kd.iter() {
+            f(k.key());
+        }
+        Ok(())
+    }
+
+    pub fn fold_key<T, F>(&self, f: F, init: Option<T>) -> BitcaskResult<()>
+    where
+        F: Fn(&Vec<u8>, Option<T>) -> BitcaskResult<T>,
+    {
         let mut init_acc = init;
         for kd in self.keydir.read().unwrap().iter() {
-            let func_ret = func(kd.key(), init_acc);
+            let func_ret = f(kd.key(), init_acc);
             if let Ok(ret) = func_ret {
-                if ret.status == FoldStatus::Stopped {
-                    break;
-                }
-                init_acc = ret.accumulator;
+                init_acc = Some(ret);
             } else {
                 return func_ret.map(|_| {});
+            }
+        }
+        Ok(())
+    }
+
+    pub fn foreach<F>(&self, f: F) -> BitcaskResult<()>
+    where
+        F: Fn(&Vec<u8>, &Vec<u8>),
+    {
+        let _kd = self.keydir.read().unwrap();
+        for row_ret in self.database.iter()? {
+            if let Ok(row) = row_ret {
+                f(&row.key, &row.value);
+            } else {
+                return Err(row_ret.unwrap_err());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn fold<T, F>(&self, f: F, init: Option<T>) -> BitcaskResult<()>
+    where
+        F: Fn(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<T>,
+    {
+        let _kd = self.keydir.read().unwrap();
+        let mut init_acc = init;
+        for row_ret in self.database.iter()? {
+            if let Ok(row) = row_ret {
+                init_acc = Some(f(&row.key, &row.value, init_acc)?);
+            } else {
+                return Err(row_ret.unwrap_err());
             }
         }
         Ok(())
