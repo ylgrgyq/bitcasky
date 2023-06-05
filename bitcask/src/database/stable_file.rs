@@ -82,7 +82,7 @@ impl StableFile {
     }
 
     fn read_next_row(&mut self) -> BitcaskResult<Option<RowToRead>> {
-        let value_offset = self.file.seek(SeekFrom::Current(0))?;
+        let value_offset = self.file.stream_position()?;
         if value_offset >= self.file_size {
             return Ok(None);
         }

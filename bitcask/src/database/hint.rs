@@ -237,7 +237,6 @@ impl HintFileWriter {
         let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_file_id)?;
         m.values()
-            .into_iter()
             .map(|r| hint_file.write_hint_row(r))
             .collect::<BitcaskResult<Vec<_>>>()?;
         fs::commit_file(

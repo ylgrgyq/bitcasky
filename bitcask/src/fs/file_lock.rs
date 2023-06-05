@@ -17,7 +17,7 @@ pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
         .write(true)
         .create(true)
         .read(true)
-        .open(&p)?;
+        .open(p)?;
     match file.try_lock_exclusive() {
         Ok(_) => Ok(Some(file)),
         _ => Ok(None),
