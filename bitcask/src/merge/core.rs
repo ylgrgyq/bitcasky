@@ -353,7 +353,7 @@ mod tests {
 
         create_merge_file_dir(&dir).unwrap();
 
-        let paths = std::fs::read_dir(merge_file_path.clone()).unwrap();
+        let paths = std::fs::read_dir(merge_file_path).unwrap();
         assert!(!paths.into_iter().any(|p| {
             let file_path = p.unwrap();
             if file_path.path().is_dir() {
@@ -362,7 +362,7 @@ mod tests {
             if FileType::MergeMeta.check_file_belongs_to_type(&file_path.path()) {
                 return false;
             }
-            return true;
+            true
         }));
     }
 
@@ -567,12 +567,8 @@ mod tests {
         perms.set_readonly(true);
         std::fs::set_permissions(&merge_file_dir, perms).unwrap();
 
-        let merge_manager = MergeManager::new(
-            INSTANCE_ID,
-            &dir,
-            file_id_generator.clone(),
-            DEFAULT_OPTIONS,
-        );
+        let merge_manager =
+            MergeManager::new(INSTANCE_ID, &dir, file_id_generator, DEFAULT_OPTIONS);
         let ret = merge_manager.recover_merge();
         assert!(ret.is_err());
     }

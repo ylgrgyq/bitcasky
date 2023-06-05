@@ -125,11 +125,10 @@ impl RandomTestingDataGenerator {
     }
 
     pub fn generate_testing_kv(&mut self) -> TestingKV {
-        let mut k = Vec::with_capacity(self.key_size);
-        k.resize(self.key_size, 0);
+        let mut k = vec![0; self.key_size];
         self.rng.fill_bytes(&mut k);
 
-        let mut v = Vec::with_capacity(self.value_size);
+        let mut v = vec![0; self.value_size];
         v.resize(self.key_size, 0);
         self.rng.fill_bytes(&mut v);
 
