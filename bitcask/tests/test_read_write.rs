@@ -33,10 +33,10 @@ fn test_open_db_twice() {
     let _bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     let bc2 = Bitcask::open(&dir, DEFAULT_OPTIONS);
     assert!(bc2.is_err());
-    match bc2.err() {
-        Some(BitcaskError::LockDirectoryFailed(_)) => assert!(true),
-        _ => assert!(false),
-    }
+    assert!(matches!(
+        bc2.err(),
+        Some(BitcaskError::LockDirectoryFailed(_))
+    ));
 }
 
 #[test]

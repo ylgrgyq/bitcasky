@@ -327,7 +327,7 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = WritingFile::new(&dir.clone(), file_id).unwrap();
+        let mut writing_file = WritingFile::new(&dir, file_id).unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file.write_row(RowToWrite::new(&key, &val)).unwrap();
