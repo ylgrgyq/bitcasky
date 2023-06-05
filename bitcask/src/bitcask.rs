@@ -192,6 +192,7 @@ impl Bitcask {
     where
         F: FnMut(&Vec<u8>),
     {
+        self.database.check_db_error()?;
         let kd = self.keydir.read().unwrap();
         for k in kd.iter() {
             f(k.key());
@@ -203,6 +204,7 @@ impl Bitcask {
     where
         F: FnMut(&Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
     {
+        self.database.check_db_error()?;
         let mut acc = init;
         for kd in self.keydir.read().unwrap().iter() {
             acc = f(kd.key(), acc)?;
@@ -214,6 +216,7 @@ impl Bitcask {
     where
         F: FnMut(&Vec<u8>, &Vec<u8>),
     {
+        self.database.check_db_error()?;
         let _kd = self.keydir.read().unwrap();
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
@@ -230,6 +233,7 @@ impl Bitcask {
     where
         F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
     {
+        self.database.check_db_error()?;
         let _kd = self.keydir.read().unwrap();
         let mut acc = init;
         for row_ret in self.database.iter()? {
