@@ -295,15 +295,7 @@ impl Database {
         if self.check_file_overflow(&writing_file_ref, &row) {
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
-        let write_row_ret = writing_file_ref.write_row(row);
-        if self.options.tolerate_data_file_corruption {
-            if let Err(BitcaskError::DataFileCorrupted(_, _, _)) = write_row_ret {
-                // tolerate data file corruption, so when write data file failed
-                // we switch to a new data file
-                self.do_flush_writing_file(&mut writing_file_ref)?;
-            }
-        }
-        write_row_ret
+        writing_file_ref.write_row(row)
     }
 
     fn check_file_overflow(

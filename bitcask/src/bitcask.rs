@@ -13,11 +13,18 @@ use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
 use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
 
+/// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
+    // maximum datafile size
     pub max_file_size: u64,
+    // maximum key size
     pub max_key_size: usize,
+    // maximum value size
     pub max_value_size: usize,
+    // On data file corruption, when this option is true,
+    // we recover data from it as many as we can and don't throw any error.
+    // Otherwise, we throw error and stop recover data from the corrupted file
     pub tolerate_data_file_corrption: bool,
 }
 
@@ -52,6 +59,7 @@ impl BitcaskOptions {
     }
 }
 
+/// Default Bitcask Options
 impl Default for BitcaskOptions {
     fn default() -> Self {
         Self {
@@ -81,6 +89,7 @@ pub struct Bitcask {
 }
 
 impl Bitcask {
+    /// Open opens the database at the given path with optional options.
     pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
         let valid_opt = options.validate();
         if let Some(e) = valid_opt {
@@ -122,6 +131,7 @@ impl Bitcask {
         })
     }
 
+    /// Stores the key and value in the database.
     pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
         if key.len() > self.options.max_key_size {
             return Err(BitcaskError::InvalidParameter(
@@ -142,14 +152,7 @@ impl Bitcask {
         let ret = self.database.write(&key, value).map_err(|e| {
             error!(target: "BitcaskPut", "put data failed with error: {}", &e);
 
-            if match e {
-                BitcaskError::DataFileCorrupted(_, _, _) => {
-                    !self.options.tolerate_data_file_corrption
-                }
-                _ => true,
-            } {
-                self.database.mark_db_error(e.to_string());
-            }
+            self.database.mark_db_error(e.to_string());
             e
         })?;
 
@@ -159,6 +162,7 @@ impl Bitcask {
         Ok(())
     }
 
+    /// Fetches value for a key
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         self.database.check_db_error()?;
 
@@ -176,6 +180,7 @@ impl Bitcask {
         }
     }
 
+    /// Returns true if the key exists in the database, false otherwise.
     pub fn has(&self, key: &Vec<u8>) -> BitcaskResult<bool> {
         self.database.check_db_error()?;
 
@@ -188,6 +193,7 @@ impl Bitcask {
             .is_some())
     }
 
+    /// Iterates all the keys in database and apply each of them to the function f
     pub fn foreach_key<F>(&self, mut f: F) -> BitcaskResult<()>
     where
         F: FnMut(&Vec<u8>),
@@ -200,6 +206,7 @@ impl Bitcask {
         Ok(())
     }
 
+    /// Iterates all the keys in database and apply them to the function f with a initial accumulator.
     pub fn fold_key<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskResult<Option<T>>
     where
         F: FnMut(&Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
@@ -212,6 +219,7 @@ impl Bitcask {
         Ok(acc)
     }
 
+    /// Iterates all the key value pair in database and apply each of them to the function f
     pub fn foreach<F>(&self, mut f: F) -> BitcaskResult<()>
     where
         F: FnMut(&Vec<u8>, &Vec<u8>),
@@ -229,6 +237,7 @@ impl Bitcask {
         Ok(())
     }
 
+    /// Iterates all the key value pair in database and apply them to the function f with a initial accumulator.
     pub fn fold<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskResult<Option<T>>
     where
         F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
@@ -246,6 +255,7 @@ impl Bitcask {
         Ok(acc)
     }
 
+    /// Deletes the named key.
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
         self.database.check_db_error()?;
         let kd = self.keydir.write().unwrap();
@@ -258,6 +268,7 @@ impl Bitcask {
         Ok(())
     }
 
+    /// Drop this entire database
     pub fn drop(&self) -> BitcaskResult<()> {
         let kd = self.keydir.write().unwrap();
 
@@ -271,16 +282,21 @@ impl Bitcask {
         Ok(())
     }
 
+    /// Flushes all buffers to disk ensuring all data is written
     pub fn sync(&self) -> BitcaskResult<()> {
         self.database.sync()
     }
 
+    /// Merges all datafiles in the database. Old keys are squashed and deleted keys removes.
+    /// Duplicate key/value pairs are also removed. Call this function periodically to reclaim disk space.
     pub fn merge(&self) -> BitcaskResult<()> {
         self.database.check_db_error()?;
 
         self.merge_manager.merge(&self.database, &self.keydir)
     }
 
+    /// Returns statistics about the database, like the number of data files,
+    /// keys and overall size on disk of the data
     pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
         let kd = self.keydir.read().unwrap();
         let key_size = kd.len();
