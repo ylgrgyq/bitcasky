@@ -1,8 +1,9 @@
 use std::fs::File;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use log::{debug, error};
+use parking_lot::RwLock;
 use uuid::Uuid;
 
 use crate::database::{DataBaseOptions, Database};
@@ -148,7 +149,7 @@ impl Bitcask {
 
         self.database.check_db_error()?;
 
-        let kd = self.keydir.write().unwrap();
+        let kd = self.keydir.write();
         let ret = self.database.write(&key, value).map_err(|e| {
             error!(target: "BitcaskPut", "put data failed with error: {}", &e);
 
@@ -166,7 +167,7 @@ impl Bitcask {
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         self.database.check_db_error()?;
 
-        let row_pos = { self.keydir.read().unwrap().get(key).map(|r| *r.value()) };
+        let row_pos = { self.keydir.read().get(key).map(|r| *r.value()) };
 
         match row_pos {
             Some(e) => {
@@ -184,13 +185,7 @@ impl Bitcask {
     pub fn has(&self, key: &Vec<u8>) -> BitcaskResult<bool> {
         self.database.check_db_error()?;
 
-        Ok(self
-            .keydir
-            .read()
-            .unwrap()
-            .get(key)
-            .map(|r| *r.value())
-            .is_some())
+        Ok(self.keydir.read().get(key).map(|r| *r.value()).is_some())
     }
 
     /// Iterates all the keys in database and apply each of them to the function f
@@ -199,7 +194,7 @@ impl Bitcask {
         F: FnMut(&Vec<u8>),
     {
         self.database.check_db_error()?;
-        let kd = self.keydir.read().unwrap();
+        let kd = self.keydir.read();
         for k in kd.iter() {
             f(k.key());
         }
@@ -213,7 +208,7 @@ impl Bitcask {
     {
         self.database.check_db_error()?;
         let mut acc = init;
-        for kd in self.keydir.read().unwrap().iter() {
+        for kd in self.keydir.read().iter() {
             acc = f(kd.key(), acc)?;
         }
         Ok(acc)
@@ -225,7 +220,7 @@ impl Bitcask {
         F: FnMut(&Vec<u8>, &Vec<u8>),
     {
         self.database.check_db_error()?;
-        let _kd = self.keydir.read().unwrap();
+        let _kd = self.keydir.read();
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
                 f(&row.key, &row.value);
@@ -243,7 +238,7 @@ impl Bitcask {
         F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
     {
         self.database.check_db_error()?;
-        let _kd = self.keydir.read().unwrap();
+        let _kd = self.keydir.read();
         let mut acc = init;
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
@@ -258,7 +253,7 @@ impl Bitcask {
     /// Deletes the named key.
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
         self.database.check_db_error()?;
-        let kd = self.keydir.write().unwrap();
+        let kd = self.keydir.write();
 
         if kd.contains_key(key) {
             self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
@@ -270,7 +265,7 @@ impl Bitcask {
 
     /// Drop this entire database
     pub fn drop(&self) -> BitcaskResult<()> {
-        let kd = self.keydir.write().unwrap();
+        let kd = self.keydir.write();
 
         if let Err(e) = self.database.drop() {
             self.database
@@ -298,7 +293,7 @@ impl Bitcask {
     /// Returns statistics about the database, like the number of data files,
     /// keys and overall size on disk of the data
     pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
-        let kd = self.keydir.read().unwrap();
+        let kd = self.keydir.read();
         let key_size = kd.len();
         let db_stats = self.database.stats()?;
         Ok(BitcaskStats {

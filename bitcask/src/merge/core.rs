@@ -1,12 +1,13 @@
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
 };
 
 use bytes::{Buf, Bytes};
 
 use log::{debug, error, info, warn};
+use parking_lot::{Mutex, RwLock};
 
 use crate::{
     database::{DataBaseOptions, Database},
@@ -47,7 +48,7 @@ impl MergeManager {
     pub fn merge(&self, database: &Database, keydir: &RwLock<KeyDir>) -> BitcaskResult<()> {
         let lock_ret = self.merge_lock.try_lock();
 
-        if lock_ret.is_err() {
+        if lock_ret.is_none() {
             return Err(BitcaskError::MergeInProgress());
         }
 
@@ -63,7 +64,7 @@ impl MergeManager {
 
         {
             // stop read/write
-            let kd = keydir.write().unwrap();
+            let kd = keydir.write();
             database.flush_writing_file()?;
             self.commit_merge(&file_ids, known_max_file_id)
                 .and_then(|file_ids| database.reload_data_files(file_ids))
@@ -154,7 +155,7 @@ impl MergeManager {
         keydir: &RwLock<KeyDir>,
     ) -> BitcaskResult<(KeyDir, u32)> {
         // stop writing and switch the writing file to stable files
-        let _kd = keydir.write().unwrap();
+        let _kd = keydir.write();
         database.flush_writing_file()?;
         let known_max_file_id = database.get_max_file_id();
         Ok((_kd.clone(), known_max_file_id))

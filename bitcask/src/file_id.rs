@@ -1,6 +1,7 @@
-use std::{ops::Add, sync::Mutex};
+use std::ops::Add;
 
 use log::info;
+use parking_lot::Mutex;
 
 #[derive(Debug)]
 pub struct FileIdGenerator {
@@ -15,14 +16,14 @@ impl FileIdGenerator {
     }
 
     pub fn generate_next_file_id(&self) -> u32 {
-        let mut id = self.file_id.lock().unwrap();
+        let mut id = self.file_id.lock();
         let next_id = id.add(1);
         *id = next_id;
         next_id
     }
 
     pub fn update_file_id(&self, known_max_file_id: u32) {
-        let mut id = self.file_id.lock().unwrap();
+        let mut id = self.file_id.lock();
         if known_max_file_id < *id {
             return;
         }
@@ -31,7 +32,7 @@ impl FileIdGenerator {
     }
 
     pub fn get_file_id(&self) -> u32 {
-        *self.file_id.lock().unwrap()
+        *self.file_id.lock()
     }
 }
 

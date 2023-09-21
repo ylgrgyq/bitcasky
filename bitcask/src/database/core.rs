@@ -2,10 +2,11 @@ use std::{
     cell::Cell,
     mem,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
 };
 
 use dashmap::{mapref::one::RefMut, DashMap};
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::{
     database::hint::{self, HintFileWriter},
@@ -105,7 +106,7 @@ impl Database {
     }
 
     pub fn get_max_file_id(&self) -> u32 {
-        let writing_file_ref = self.writing_file.lock().unwrap();
+        let writing_file_ref = self.writing_file.lock();
         writing_file_ref.file_id()
     }
 
@@ -125,7 +126,7 @@ impl Database {
     }
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock();
         // flush file only when we actually wrote something
         if writing_file_ref.file_size() > 0 {
             self.do_flush_writing_file(&mut writing_file_ref)?;
@@ -136,13 +137,13 @@ impl Database {
     pub fn recovery_iter(&self) -> BitcaskResult<DatabaseRecoverIter> {
         let mut file_ids: Vec<u32>;
         {
-            let writing_file = self.writing_file.lock().unwrap();
+            let writing_file = self.writing_file.lock();
             let writing_file_id = writing_file.file_id();
 
             file_ids = self
                 .stable_files
                 .iter()
-                .map(|f| f.lock().unwrap().file_id)
+                .map(|f| f.lock().file_id)
                 .collect::<Vec<u32>>();
             file_ids.push(writing_file_id);
             file_ids.sort();
@@ -154,13 +155,13 @@ impl Database {
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
         let mut file_ids: Vec<u32>;
         {
-            let writing_file = self.writing_file.lock().unwrap();
+            let writing_file = self.writing_file.lock();
             let writing_file_id = writing_file.file_id();
 
             file_ids = self
                 .stable_files
                 .iter()
-                .map(|f| f.lock().unwrap().file_id)
+                .map(|f| f.lock().file_id)
                 .collect::<Vec<u32>>();
             file_ids.push(writing_file_id);
         }
@@ -189,14 +190,14 @@ impl Database {
 
     pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<Vec<u8>> {
         {
-            let mut writing_file_ref = self.writing_file.lock().unwrap();
+            let mut writing_file_ref = self.writing_file.lock();
             if row_position.file_id == writing_file_ref.file_id() {
                 return writing_file_ref.read_value(row_position.row_offset, row_position.row_size);
             }
         }
 
         let l = self.get_file_to_read(row_position.file_id)?;
-        let mut f = l.lock().unwrap();
+        let mut f = l.lock();
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
@@ -219,12 +220,12 @@ impl Database {
     }
 
     pub fn get_file_ids(&self) -> FileIds {
-        let writing_file_ref = self.writing_file.lock().unwrap();
+        let writing_file_ref = self.writing_file.lock();
         let writing_file_id = writing_file_ref.file_id();
         let stable_file_ids: Vec<u32> = self
             .stable_files
             .iter()
-            .map(|f| f.value().lock().unwrap().file_id)
+            .map(|f| f.value().lock().file_id)
             .collect();
         FileIds {
             stable_file_ids,
@@ -235,13 +236,13 @@ impl Database {
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
         let writing_file_size: u64;
         {
-            writing_file_size = self.writing_file.lock().unwrap().file_size() as u64;
+            writing_file_size = self.writing_file.lock().file_size() as u64;
         }
         let mut total_data_size_in_bytes: u64 = self
             .stable_files
             .iter()
             .map(|f| {
-                let file = f.value().lock().unwrap();
+                let file = f.value().lock();
                 file.file_size
             })
             .collect::<Vec<u64>>()
@@ -258,14 +259,14 @@ impl Database {
     }
 
     pub fn close(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock();
         writing_file_ref.flush()?;
         Ok(())
     }
 
     pub fn drop(&self) -> BitcaskResult<()> {
         self.flush_writing_file()?;
-        for file_id in self.stable_files.iter().map(|v| v.lock().unwrap().file_id) {
+        for file_id in self.stable_files.iter().map(|v| v.lock().file_id) {
             SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         }
         self.stable_files.clear();
@@ -273,17 +274,17 @@ impl Database {
     }
 
     pub fn sync(&self) -> BitcaskResult<()> {
-        let mut f = self.writing_file.lock().unwrap();
+        let mut f = self.writing_file.lock();
         f.flush()
     }
 
     pub fn mark_db_error(&self, error_string: String) {
-        let mut err = self.is_error.lock().expect("lock db is error mutex failed");
+        let mut err = self.is_error.lock();
         *err = Some(error_string)
     }
 
     pub fn check_db_error(&self) -> Result<(), BitcaskError> {
-        let err = self.is_error.lock().expect("lock db is error mutex failed");
+        let err = self.is_error.lock();
         if err.is_some() {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
@@ -291,7 +292,7 @@ impl Database {
     }
 
     fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowLocation> {
-        let mut writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock();
         if self.check_file_overflow(&writing_file_ref, &row) {
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
