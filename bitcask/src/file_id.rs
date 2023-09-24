@@ -3,9 +3,11 @@ use std::ops::Add;
 use log::info;
 use parking_lot::Mutex;
 
+pub type FileId = u32;
+
 #[derive(Debug)]
 pub struct FileIdGenerator {
-    file_id: Mutex<u32>,
+    file_id: Mutex<FileId>,
 }
 
 impl FileIdGenerator {
@@ -15,14 +17,14 @@ impl FileIdGenerator {
         }
     }
 
-    pub fn generate_next_file_id(&self) -> u32 {
+    pub fn generate_next_file_id(&self) -> FileId {
         let mut id = self.file_id.lock();
         let next_id = id.add(1);
         *id = next_id;
         next_id
     }
 
-    pub fn update_file_id(&self, known_max_file_id: u32) {
+    pub fn update_file_id(&self, known_max_file_id: FileId) {
         let mut id = self.file_id.lock();
         if known_max_file_id < *id {
             return;
@@ -31,7 +33,7 @@ impl FileIdGenerator {
         info!(target: "FileIdGenerator", "update file id to {}", *id);
     }
 
-    pub fn get_file_id(&self) -> u32 {
+    pub fn get_file_id(&self) -> FileId {
         *self.file_id.lock()
     }
 }

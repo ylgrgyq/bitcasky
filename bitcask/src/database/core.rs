@@ -12,14 +12,14 @@ use parking_lot::{Mutex, MutexGuard};
 use crate::{
     database::hint::{self, HintFileWriter},
     error::{BitcaskError, BitcaskResult},
-    file_id::FileIdGenerator,
+    file_id::{FileId, FileIdGenerator},
     fs::{self as SelfFs, FileType},
     utils,
 };
 use log::{debug, error, info};
 
 use super::{
-    common::{RecoveredRow, TimedValue, Value},
+    common::{RecoveredRow, TimedValue},
     writing_file::WritingFile,
 };
 use super::{
@@ -48,8 +48,8 @@ pub struct DatabaseStats {
 
 #[derive(Debug)]
 pub struct FileIds {
-    pub stable_file_ids: Vec<u32>,
-    pub writing_file_id: u32,
+    pub stable_file_ids: Vec<FileId>,
+    pub writing_file_id: FileId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,7 +63,7 @@ pub struct Database {
     pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
     writing_file: Mutex<WritingFile>,
-    stable_files: DashMap<u32, Mutex<StableFile>>,
+    stable_files: DashMap<FileId, Mutex<StableFile>>,
     options: DataBaseOptions,
     hint_file_writer: HintFileWriter,
     is_error: Mutex<Option<String>>,
@@ -109,7 +109,7 @@ impl Database {
         &self.database_dir
     }
 
-    pub fn get_max_file_id(&self) -> u32 {
+    pub fn get_max_file_id(&self) -> FileId {
         let writing_file_ref = self.writing_file.lock();
         writing_file_ref.file_id()
     }
@@ -123,10 +123,10 @@ impl Database {
         self.do_write(row)
     }
 
-    pub fn write_with_timestamp(
+    pub fn write_with_timestamp<V: Deref<Target = [u8]>>(
         &self,
         key: &Vec<u8>,
-        value: &[u8],
+        value: V,
         timestamp: u64,
     ) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new_with_timestamp(key, value, timestamp);
@@ -143,7 +143,7 @@ impl Database {
     }
 
     pub fn recovery_iter(&self) -> BitcaskResult<DatabaseRecoverIter> {
-        let mut file_ids: Vec<u32>;
+        let mut file_ids: Vec<FileId>;
         {
             let writing_file = self.writing_file.lock();
             let writing_file_id = writing_file.file_id();
@@ -152,7 +152,7 @@ impl Database {
                 .stable_files
                 .iter()
                 .map(|f| f.lock().file_id)
-                .collect::<Vec<u32>>();
+                .collect::<Vec<FileId>>();
             file_ids.push(writing_file_id);
             file_ids.sort();
             file_ids.reverse();
@@ -161,7 +161,7 @@ impl Database {
     }
 
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
-        let mut file_ids: Vec<u32>;
+        let mut file_ids: Vec<FileId>;
         {
             let writing_file = self.writing_file.lock();
             let writing_file_id = writing_file.file_id();
@@ -170,7 +170,7 @@ impl Database {
                 .stable_files
                 .iter()
                 .map(|f| f.lock().file_id)
-                .collect::<Vec<u32>>();
+                .collect::<Vec<FileId>>();
             file_ids.push(writing_file_id);
         }
 
@@ -209,7 +209,7 @@ impl Database {
         f.read_value(row_position.row_offset, row_position.row_size)
     }
 
-    pub fn reload_data_files(&self, data_file_ids: Vec<u32>) -> BitcaskResult<()> {
+    pub fn reload_data_files(&self, data_file_ids: Vec<FileId>) -> BitcaskResult<()> {
         self.stable_files.clear();
 
         for file_id in data_file_ids {
@@ -230,7 +230,7 @@ impl Database {
     pub fn get_file_ids(&self) -> FileIds {
         let writing_file_ref = self.writing_file.lock();
         let writing_file_id = writing_file_ref.file_id();
-        let stable_file_ids: Vec<u32> = self
+        let stable_file_ids: Vec<FileId> = self
             .stable_files
             .iter()
             .map(|f| f.value().lock().file_id)
@@ -336,7 +336,10 @@ impl Database {
         Ok(())
     }
 
-    fn get_file_to_read(&self, file_id: u32) -> BitcaskResult<RefMut<u32, Mutex<StableFile>>> {
+    fn get_file_to_read(
+        &self,
+        file_id: FileId,
+    ) -> BitcaskResult<RefMut<FileId, Mutex<StableFile>>> {
         self.stable_files
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
@@ -396,7 +399,7 @@ impl Iterator for DatabaseIter {
 
 fn recovered_iter(
     database_dir: &Path,
-    file_id: u32,
+    file_id: FileId,
     tolerate_data_file_corruption: bool,
 ) -> BitcaskResult<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>> {
     if FileType::HintFile
@@ -432,7 +435,7 @@ fn recovered_iter(
 
 pub struct DatabaseRecoverIter {
     current_iter: Cell<Option<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>>>,
-    data_file_ids: Vec<u32>,
+    data_file_ids: Vec<FileId>,
     database_dir: PathBuf,
     tolerate_data_file_corruption: bool,
 }
@@ -440,7 +443,7 @@ pub struct DatabaseRecoverIter {
 impl DatabaseRecoverIter {
     fn new(
         database_dir: PathBuf,
-        mut iters: Vec<u32>,
+        mut iters: Vec<FileId>,
         options: DataBaseOptions,
     ) -> BitcaskResult<Self> {
         if let Some(file_id) = iters.pop() {

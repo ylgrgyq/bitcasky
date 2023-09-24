@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
+    file_id::FileId,
     fs::FileType,
 };
 
@@ -13,7 +14,7 @@ const TESTING_DIRECTORY: &str = "Testing";
 pub struct IdentifiedFile {
     pub file_type: FileType,
     pub file: File,
-    pub file_id: Option<u32>,
+    pub file_id: Option<FileId>,
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
@@ -42,7 +43,7 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
 pub fn create_file(
     base_dir: &Path,
     file_type: FileType,
-    file_id: Option<u32>,
+    file_id: Option<FileId>,
 ) -> BitcaskResult<File> {
     let path = file_type.get_path(base_dir, file_id);
     Ok(File::options()
@@ -55,7 +56,7 @@ pub fn create_file(
 pub fn open_file(
     base_dir: &Path,
     file_type: FileType,
-    file_id: Option<u32>,
+    file_id: Option<FileId>,
 ) -> BitcaskResult<IdentifiedFile> {
     let path = file_type.get_path(base_dir, file_id);
     let file = File::options().read(true).open(path)?;
@@ -86,7 +87,7 @@ fn open_file_by_path(file_type: FileType, file_path: &Path) -> BitcaskResult<Ide
 pub fn delete_file(
     base_dir: &Path,
     file_type: FileType,
-    file_id: Option<u32>,
+    file_id: Option<FileId>,
 ) -> BitcaskResult<()> {
     let path = file_type.get_path(base_dir, file_id);
     if path.exists() {
@@ -97,7 +98,7 @@ pub fn delete_file(
 
 pub fn commit_file(
     file_type: FileType,
-    file_id: Option<u32>,
+    file_id: Option<FileId>,
     from_dir: &Path,
     to_dir: &Path,
 ) -> Result<(), std::io::Error> {
@@ -112,8 +113,8 @@ pub fn commit_file(
 pub fn change_file_id(
     base_dir: &Path,
     file_type: FileType,
-    from_file_id: u32,
-    to_file_id: u32,
+    from_file_id: FileId,
+    to_file_id: FileId,
 ) -> BitcaskResult<()> {
     let from_p = file_type.get_path(base_dir, Some(from_file_id));
     let to_p = file_type.get_path(base_dir, Some(to_file_id));
@@ -147,7 +148,7 @@ pub fn is_empty_dir(dir: &Path) -> BitcaskResult<bool> {
     Ok(true)
 }
 
-pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
+pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> {
     let mut actual_file_ids = vec![];
     for path in fs::read_dir(dir_path).unwrap() {
         let file_dir_entry = path.unwrap();

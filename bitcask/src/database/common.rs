@@ -10,7 +10,10 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use crate::error::{BitcaskError, BitcaskResult};
+use crate::{
+    error::{BitcaskError, BitcaskResult},
+    file_id::FileId,
+};
 
 use super::constants::{
     DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
@@ -80,7 +83,7 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
 
 pub fn io_error_to_bitcask_error(
     database_dir: &Path,
-    file_id: u32,
+    file_id: FileId,
     e: std::io::Error,
     hint: &str,
 ) -> BitcaskError {
@@ -97,7 +100,7 @@ pub fn io_error_to_bitcask_error(
 }
 
 pub fn read_value_from_file(
-    file_id: u32,
+    file_id: FileId,
     data_file: &mut File,
     value_offset: u64,
     size: u64,
@@ -146,7 +149,7 @@ pub trait BitcaskDataFile {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowLocation {
-    pub file_id: u32,
+    pub file_id: FileId,
     pub row_offset: u64,
     pub row_size: u64,
 }
@@ -189,7 +192,7 @@ pub struct RowToRead {
 }
 
 pub struct RecoveredRow {
-    pub file_id: u32,
+    pub file_id: FileId,
     pub timestamp: u64,
     pub row_offset: u64,
     pub row_size: u64,

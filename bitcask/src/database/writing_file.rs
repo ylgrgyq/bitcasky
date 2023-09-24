@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     error::BitcaskResult,
+    file_id::FileId,
     fs::{create_file, FileType},
 };
 
@@ -17,13 +18,13 @@ use super::common::{
 #[derive(Debug)]
 pub struct WritingFile {
     database_dir: PathBuf,
-    file_id: u32,
+    file_id: FileId,
     data_file: File,
     file_size: usize,
 }
 
 impl WritingFile {
-    pub fn new(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+    pub fn new(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
         let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
         Ok(WritingFile {
             database_dir: database_dir.to_path_buf(),
@@ -33,7 +34,7 @@ impl WritingFile {
         })
     }
 
-    pub fn file_id(&self) -> u32 {
+    pub fn file_id(&self) -> FileId {
         self.file_id
     }
 
@@ -68,7 +69,7 @@ impl WritingFile {
         read_value_from_file(self.file_id, &mut self.data_file, value_offset, size)
     }
 
-    pub fn transit_to_readonly(mut self) -> BitcaskResult<(u32, File)> {
+    pub fn transit_to_readonly(mut self) -> BitcaskResult<(FileId, File)> {
         self.data_file.flush()?;
         let file_id = self.file_id;
         let mut perms = self.data_file.metadata()?.permissions();

@@ -13,6 +13,7 @@ use log::{debug, error, warn};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
+    file_id::FileId,
     fs::{self, FileType},
     utils,
 };
@@ -45,12 +46,12 @@ const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct HintFile {
-    file_id: u32,
+    file_id: FileId,
     file: File,
 }
 
 impl HintFile {
-    pub fn create(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+    pub fn create(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
         let file = fs::create_file(database_dir, FileType::HintFile, Some(file_id))?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -59,7 +60,7 @@ impl HintFile {
         Ok(HintFile { file_id, file })
     }
 
-    pub fn open_iterator(database_dir: &Path, file_id: u32) -> BitcaskResult<HintFileIterator> {
+    pub fn open_iterator(database_dir: &Path, file_id: FileId) -> BitcaskResult<HintFileIterator> {
         let file = Self::open(database_dir, file_id)?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -118,7 +119,7 @@ impl HintFile {
         bs.freeze()
     }
 
-    fn open(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+    fn open(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
         let file = fs::open_file(database_dir, FileType::HintFile, Some(file_id))?;
         Ok(HintFile {
             file_id,
@@ -162,7 +163,7 @@ impl Iterator for HintFileIterator {
 
 #[derive(Debug)]
 pub struct HintFileWriter {
-    sender: ManuallyDrop<Sender<u32>>,
+    sender: ManuallyDrop<Sender<FileId>>,
     worker_join_handle: Option<JoinHandle<()>>,
 }
 
@@ -191,7 +192,7 @@ impl HintFileWriter {
         }
     }
 
-    pub fn async_write_hint_file(&self, data_file_id: u32) {
+    pub fn async_write_hint_file(&self, data_file_id: FileId) {
         if let Err(e) = self.sender.send(data_file_id) {
             error!(
                 target: DEFAULT_LOG_TARGET,
@@ -204,7 +205,7 @@ impl HintFileWriter {
         self.sender.len()
     }
 
-    fn write_hint_file(database_dir: &Path, data_file_id: u32) -> BitcaskResult<()> {
+    fn write_hint_file(database_dir: &Path, data_file_id: FileId) -> BitcaskResult<()> {
         let stable_file_opt = StableFile::open(database_dir, data_file_id, false)?;
         if stable_file_opt.is_none() {
             return Ok(());

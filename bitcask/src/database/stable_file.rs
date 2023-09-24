@@ -10,6 +10,7 @@ use crc::{Crc, CRC_32_CKSUM};
 
 use crate::{
     error::{BitcaskError, BitcaskResult},
+    file_id::FileId,
     fs::{self, FileType},
 };
 use log::{error, info};
@@ -27,7 +28,7 @@ const DEFAULT_LOG_TARGET: &str = "DatabaseMerge";
 #[derive(Debug)]
 pub struct StableFile {
     database_dir: PathBuf,
-    pub file_id: u32,
+    pub file_id: FileId,
     file: File,
     pub file_size: u64,
     tolerate_data_file_corrption: bool,
@@ -36,7 +37,7 @@ pub struct StableFile {
 impl StableFile {
     pub fn open(
         database_dir: &Path,
-        file_id: u32,
+        file_id: FileId,
         tolerate_data_file_corruption: bool,
     ) -> BitcaskResult<Option<StableFile>> {
         let path = FileType::DataFile.get_path(database_dir, Some(file_id));
@@ -63,7 +64,7 @@ impl StableFile {
 
     pub fn new(
         database_dir: &Path,
-        file_id: u32,
+        file_id: FileId,
         file: File,
         tolerate_data_file_corrption: bool,
     ) -> BitcaskResult<Self> {
