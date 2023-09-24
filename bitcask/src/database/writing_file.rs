@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{Seek, SeekFrom, Write},
+    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -38,7 +39,10 @@ impl WritingFile {
         self.file_size
     }
 
-    pub fn write_row(&mut self, row: RowToWrite) -> BitcaskResult<RowLocation> {
+    pub fn write_row<V: Deref<Target = [u8]>>(
+        &mut self,
+        row: RowToWrite<V>,
+    ) -> BitcaskResult<RowLocation> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&data_to_write).map_err(|e| {

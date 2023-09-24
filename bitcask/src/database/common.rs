@@ -1,6 +1,7 @@
 use std::{
     fs::File,
     io::{ErrorKind, Read, Seek, SeekFrom},
+    ops::Deref,
     path::Path,
     time::{Duration, SystemTime, UNIX_EPOCH},
     vec,
@@ -25,18 +26,18 @@ pub trait Decoder<T> {
 }
 
 #[derive(Debug)]
-pub struct RowToWrite<'a> {
+pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
     pub crc: u32,
     pub timestamp: u64,
     pub key_size: u64,
     pub value_size: u64,
     pub key: &'a Vec<u8>,
-    pub value: &'a [u8],
+    pub value: V,
     pub size: u64,
 }
 
-impl<'a> RowToWrite<'a> {
-    pub fn new(key: &'a Vec<u8>, value: &'a [u8]) -> RowToWrite<'a> {
+impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
+    pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -44,7 +45,7 @@ impl<'a> RowToWrite<'a> {
         RowToWrite::new_with_timestamp(key, value, now)
     }
 
-    pub fn new_with_timestamp(key: &'a Vec<u8>, value: &'a [u8], timestamp: u64) -> RowToWrite<'a> {
+    pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
         let key_size = key.len() as u64;
         let value_size = value.len() as u64;
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
@@ -53,7 +54,7 @@ impl<'a> RowToWrite<'a> {
         ck.update(&key_size.to_be_bytes());
         ck.update(&value_size.to_be_bytes());
         ck.update(key);
-        ck.update(value);
+        ck.update(&*value);
         RowToWrite {
             crc: ck.finalize(),
             timestamp,
@@ -72,7 +73,7 @@ impl<'a> RowToWrite<'a> {
         bs.extend_from_slice(&self.key_size.to_be_bytes());
         bs.extend_from_slice(&self.value_size.to_be_bytes());
         bs.extend_from_slice(self.key);
-        bs.extend_from_slice(self.value);
+        bs.extend_from_slice(&self.value);
         bs.freeze()
     }
 }

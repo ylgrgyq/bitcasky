@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -133,7 +134,7 @@ impl Bitcask {
     }
 
     /// Stores the key and value in the database.
-    pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
+    pub fn put<V: Deref<Target = [u8]>>(&self, key: Vec<u8>, value: V) -> BitcaskResult<()> {
         if key.len() > self.options.max_key_size {
             return Err(BitcaskError::InvalidParameter(
                 "key".into(),
@@ -157,8 +158,8 @@ impl Bitcask {
             e
         })?;
 
-        debug!(target: "Bitcask", "put data success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-            key, value, ret.file_id, ret.row_offset, ret.row_size, ret.timestamp);
+        debug!(target: "Bitcask", "put data success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
+            key, ret.file_id, ret.row_offset, ret.row_size, ret.timestamp);
         kd.put(key, ret);
         Ok(())
     }

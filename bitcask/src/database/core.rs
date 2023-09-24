@@ -1,6 +1,7 @@
 use std::{
     cell::Cell,
     mem,
+    ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -110,7 +111,11 @@ impl Database {
         writing_file_ref.file_id()
     }
 
-    pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowLocation> {
+    pub fn write<V: Deref<Target = [u8]>>(
+        &self,
+        key: &Vec<u8>,
+        value: V,
+    ) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new(key, value);
         self.do_write(row)
     }
@@ -291,7 +296,7 @@ impl Database {
         Ok(())
     }
 
-    fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowLocation> {
+    fn do_write<V: Deref<Target = [u8]>>(&self, row: RowToWrite<V>) -> BitcaskResult<RowLocation> {
         let mut writing_file_ref = self.writing_file.lock();
         if self.check_file_overflow(&writing_file_ref, &row) {
             self.do_flush_writing_file(&mut writing_file_ref)?;
@@ -299,10 +304,10 @@ impl Database {
         writing_file_ref.write_row(row)
     }
 
-    fn check_file_overflow(
+    fn check_file_overflow<V: Deref<Target = [u8]>>(
         &self,
         writing_file_ref: &MutexGuard<WritingFile>,
-        row: &RowToWrite,
+        row: &RowToWrite<V>,
     ) -> bool {
         row.size + writing_file_ref.file_size() as u64 > self.options.max_file_size
     }
@@ -540,7 +545,7 @@ pub mod database_tests_utils {
     pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
         kvs.into_iter()
             .map(|kv| {
-                let pos = db.write(&kv.key(), &kv.value()).unwrap();
+                let pos = db.write(&kv.key(), kv.value()).unwrap();
                 TestingRow::new(kv, pos)
             })
             .collect::<Vec<TestingRow>>()
