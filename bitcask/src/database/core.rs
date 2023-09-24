@@ -19,7 +19,7 @@ use crate::{
 use log::{debug, error, info};
 
 use super::{
-    common::{RecoveredRow, TimedValue},
+    common::{RecoveredRow, TimedValue, Value},
     writing_file::WritingFile,
 };
 use super::{
@@ -196,7 +196,7 @@ impl Database {
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue> {
+    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue<Value>> {
         {
             let mut writing_file_ref = self.writing_file.lock();
             if row_position.file_id == writing_file_ref.file_id() {

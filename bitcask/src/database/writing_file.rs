@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::common::{
-    io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToWrite, TimedValue,
+    io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToWrite, TimedValue, Value,
 };
 
 #[derive(Debug)]
@@ -65,7 +65,7 @@ impl WritingFile {
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<TimedValue> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<TimedValue<Value>> {
         read_value_from_file(self.file_id, &mut self.data_file, value_offset, size)
     }
 

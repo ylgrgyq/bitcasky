@@ -104,7 +104,7 @@ pub fn read_value_from_file(
     data_file: &mut File,
     value_offset: u64,
     size: u64,
-) -> BitcaskResult<TimedValue> {
+) -> BitcaskResult<TimedValue<Value>> {
     data_file.seek(SeekFrom::Start(value_offset))?;
     let mut buf = vec![0; size as usize];
     data_file.read_exact(&mut buf)?;
@@ -170,12 +170,12 @@ impl Deref for Value {
 }
 
 #[derive(Debug)]
-pub struct TimedValue {
-    pub value: Value,
+pub struct TimedValue<V: Deref<Target = [u8]>> {
+    pub value: V,
     pub timestamp: u64,
 }
 
-impl Deref for TimedValue {
+impl<V: Deref<Target = [u8]>> Deref for TimedValue<V> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {

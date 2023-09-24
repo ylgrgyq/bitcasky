@@ -16,7 +16,9 @@ use crate::{
 use log::{error, info};
 
 use super::{
-    common::{io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToRead, TimedValue},
+    common::{
+        io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToRead, TimedValue, Value,
+    },
     constants::{
         DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
         DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
@@ -78,7 +80,7 @@ impl StableFile {
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<TimedValue> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<TimedValue<Value>> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
     }
 
