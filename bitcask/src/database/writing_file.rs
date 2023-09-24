@@ -10,7 +10,9 @@ use crate::{
     fs::{create_file, FileType},
 };
 
-use super::common::{io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToWrite};
+use super::common::{
+    io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToWrite, TimedValue,
+};
 
 #[derive(Debug)]
 pub struct WritingFile {
@@ -59,11 +61,10 @@ impl WritingFile {
             file_id: self.file_id,
             row_offset: value_offset,
             row_size: row.size,
-            timestamp: row.timestamp,
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<TimedValue> {
         read_value_from_file(self.file_id, &mut self.data_file, value_offset, size)
     }
 

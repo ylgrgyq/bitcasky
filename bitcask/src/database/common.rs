@@ -13,8 +13,8 @@ use crc::{Crc, CRC_32_CKSUM};
 use crate::error::{BitcaskError, BitcaskResult};
 
 use super::constants::{
-    DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE,
-    VALUE_SIZE_SIZE,
+    DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
+    DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
 };
 
 pub trait Encoder<T> {
@@ -96,20 +96,12 @@ pub fn io_error_to_bitcask_error(
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct RowLocation {
-    pub file_id: u32,
-    pub row_offset: u64,
-    pub row_size: u64,
-    pub timestamp: u64,
-}
-
 pub fn read_value_from_file(
     file_id: u32,
     data_file: &mut File,
     value_offset: u64,
     size: u64,
-) -> BitcaskResult<Vec<u8>> {
+) -> BitcaskResult<TimedValue> {
     data_file.seek(SeekFrom::Start(value_offset))?;
     let mut buf = vec![0; size as usize];
     data_file.read_exact(&mut buf)?;
@@ -129,6 +121,9 @@ pub fn read_value_from_file(
             actual_crc,
         ));
     }
+    let timestamp = bs
+        .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
+        .get_u64();
 
     let key_size = bs
         .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
@@ -137,12 +132,52 @@ pub fn read_value_from_file(
         .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
         .get_u64() as usize;
     let val_offset = DATA_FILE_KEY_OFFSET + key_size;
-    let ret = bs.slice(val_offset..val_offset + val_size).into();
-    Ok(ret)
+    let ret = bs.slice(val_offset..val_offset + val_size);
+
+    Ok(TimedValue {
+        value: Value::VectorBytes(ret.into()),
+        timestamp,
+    })
 }
 
 pub trait BitcaskDataFile {
     fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>>;
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct RowLocation {
+    pub file_id: u32,
+    pub row_offset: u64,
+    pub row_size: u64,
+}
+
+#[derive(Debug)]
+pub enum Value {
+    VectorBytes(Vec<u8>),
+}
+
+impl Deref for Value {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Value::VectorBytes(v) => v,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TimedValue {
+    pub value: Value,
+    pub timestamp: u64,
+}
+
+impl Deref for TimedValue {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }
 
 #[derive(Debug)]
@@ -150,6 +185,7 @@ pub struct RowToRead {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
     pub row_position: RowLocation,
+    pub timestamp: u64,
 }
 
 pub struct RecoveredRow {

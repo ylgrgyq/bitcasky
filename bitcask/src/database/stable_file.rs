@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek},
     path::{Path, PathBuf},
     vec,
 };
@@ -15,7 +15,7 @@ use crate::{
 use log::{error, info};
 
 use super::{
-    common::{io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToRead},
+    common::{io_error_to_bitcask_error, read_value_from_file, RowLocation, RowToRead, TimedValue},
     constants::{
         DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
         DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
@@ -77,7 +77,7 @@ impl StableFile {
         })
     }
 
-    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&mut self, value_offset: u64, size: u64) -> BitcaskResult<TimedValue> {
         read_value_from_file(self.file_id, &mut self.file, value_offset, size)
     }
 
@@ -144,8 +144,8 @@ impl StableFile {
                 file_id: self.file_id,
                 row_offset: value_offset,
                 row_size: (DATA_FILE_KEY_OFFSET + key_size + value_size) as u64,
-                timestamp: tstmp,
             },
+            timestamp: tstmp,
         }))
     }
 

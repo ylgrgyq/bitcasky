@@ -18,7 +18,10 @@ use crate::{
 };
 use log::{debug, error, info};
 
-use super::{common::RecoveredRow, writing_file::WritingFile};
+use super::{
+    common::{RecoveredRow, TimedValue, Value},
+    writing_file::WritingFile,
+};
 use super::{
     common::{RowLocation, RowToRead, RowToWrite},
     hint::HintFile,
@@ -193,7 +196,7 @@ impl Database {
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue> {
         {
             let mut writing_file_ref = self.writing_file.lock();
             if row_position.file_id == writing_file_ref.file_id() {
@@ -415,7 +418,7 @@ fn recovered_iter(
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
                     file_id: r.row_position.file_id,
-                    timestamp: r.row_position.timestamp,
+                    timestamp: r.timestamp,
                     row_offset: r.row_position.row_offset,
                     row_size: r.row_position.row_size,
                     key: r.key,
@@ -527,7 +530,7 @@ pub mod database_tests_utils {
 
     pub fn assert_row_value(db: &Database, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
-        assert_eq!(*expect.kv.value(), actual);
+        assert_eq!(*expect.kv.value(), *actual.value);
     }
 
     pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {

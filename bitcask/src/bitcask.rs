@@ -158,8 +158,8 @@ impl Bitcask {
             e
         })?;
 
-        debug!(target: "Bitcask", "put data success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-            key, ret.file_id, ret.row_offset, ret.row_size, ret.timestamp);
+        debug!(target: "Bitcask", "put data success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}", 
+            key, ret.file_id, ret.row_offset, ret.row_size);
         kd.put(key, ret);
         Ok(())
     }
@@ -176,7 +176,7 @@ impl Bitcask {
                 if is_tombstone(&v) {
                     return Ok(None);
                 }
-                Ok(Some(v))
+                Ok(Some(v.value.to_vec()))
             }
             None => Ok(None),
         }

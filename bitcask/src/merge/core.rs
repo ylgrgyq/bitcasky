@@ -177,11 +177,11 @@ impl MergeManager {
         for r in key_dir_to_write.iter() {
             let k = r.key();
             let v = database.read_value(r.value())?;
-            if !is_tombstone(&v) {
-                let pos = merge_db.write_with_timestamp(k, &v, r.value().timestamp)?;
+            if !is_tombstone(&v.value) {
+                let pos = merge_db.write_with_timestamp(k, &v.value, v.timestamp)?;
                 new_kd.checked_put(k.clone(), pos);
                 debug!(target: "Bitcask", "put data to merged file success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-                    k, v, pos.file_id, pos.row_offset, pos.row_size, pos.timestamp);
+                    k, v.value, pos.file_id, pos.row_offset, pos.row_size, v.timestamp);
             }
         }
         merge_db.flush_writing_file()?;

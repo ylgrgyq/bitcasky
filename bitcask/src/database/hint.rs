@@ -221,7 +221,7 @@ impl HintFileWriter {
                         m.insert(
                             r.key.clone(),
                             HintRow {
-                                timestamp: r.row_position.timestamp,
+                                timestamp: r.timestamp,
                                 key_size: r.key.len() as u64,
                                 value_size: r.value.len() as u64,
                                 row_offset: r.row_position.row_offset,
@@ -346,6 +346,5 @@ mod tests {
         assert_eq!(key.len() as u64, hint_row.key_size);
         assert_eq!(val.len() as u64, hint_row.value_size);
         assert_eq!(pos.row_offset, hint_row.row_offset);
-        assert_eq!(pos.timestamp, hint_row.timestamp);
     }
 }
