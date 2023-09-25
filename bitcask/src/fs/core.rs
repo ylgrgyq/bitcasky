@@ -253,12 +253,12 @@ mod tests {
     #[test]
     fn test_change_file_id() {
         let dir = get_temporary_directory_path();
-        let file_id = Some(123);
+        let file_id = 123;
         let new_file_id = 456;
-        create_file(&dir, FileType::DataFile, file_id).unwrap();
-        assert!(FileType::DataFile.get_path(&dir, file_id).exists());
-        change_file_id(&dir, FileType::DataFile, file_id.unwrap(), new_file_id).unwrap();
-        assert!(!FileType::DataFile.get_path(&dir, file_id).exists());
+        create_file(&dir, FileType::DataFile, Some(file_id)).unwrap();
+        assert!(FileType::DataFile.get_path(&dir, Some(file_id)).exists());
+        change_file_id(&dir, FileType::DataFile, file_id, new_file_id).unwrap();
+        assert!(!FileType::DataFile.get_path(&dir, Some(file_id)).exists());
         assert!(FileType::DataFile
             .get_path(&dir, Some(new_file_id))
             .exists());

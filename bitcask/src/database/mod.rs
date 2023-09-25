@@ -2,7 +2,7 @@ mod core;
 pub use self::core::*;
 
 mod common;
-pub use self::common::RowLocation;
+pub use self::common::{deleted_value, RowLocation, TimedValue};
 
 mod constants;
 mod hint;

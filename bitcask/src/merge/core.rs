@@ -10,7 +10,7 @@ use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
 use crate::{
-    database::{DataBaseOptions, Database},
+    database::{DataBaseOptions, Database, TimedValue},
     error::{BitcaskError, BitcaskResult},
     file_id::{FileId, FileIdGenerator},
     fs::{self, FileType},
@@ -178,7 +178,7 @@ impl MergeManager {
             let k = r.key();
             let v = database.read_value(r.value())?;
             if !is_tombstone(&v.value) {
-                let pos = merge_db.write_with_timestamp(k, v.value, v.timestamp)?;
+                let pos = merge_db.write(k, TimedValue::has_time_value(v.value, v.timestamp))?;
                 new_kd.checked_put(k.clone(), pos);
                 debug!(target: "Bitcask", "put data to merged file success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
                     k, pos.file_id, pos.row_offset, pos.row_size, v.timestamp);

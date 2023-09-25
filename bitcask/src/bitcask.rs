@@ -7,13 +7,13 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::database::{DataBaseOptions, Database};
+use crate::database::{deleted_value, DataBaseOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
 use crate::fs::{self};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
-use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
+use crate::utils::is_tombstone;
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
@@ -151,12 +151,15 @@ impl Bitcask {
         self.database.check_db_error()?;
 
         let kd = self.keydir.write();
-        let ret = self.database.write(&key, value).map_err(|e| {
-            error!(target: "BitcaskPut", "put data failed with error: {}", &e);
+        let ret = self
+            .database
+            .write(&key, TimedValue::immortal_value(value))
+            .map_err(|e| {
+                error!(target: "BitcaskPut", "put data failed with error: {}", &e);
 
-            self.database.mark_db_error(e.to_string());
-            e
-        })?;
+                self.database.mark_db_error(e.to_string());
+                e
+            })?;
 
         debug!(target: "Bitcask", "put data success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}", 
             key, ret.file_id, ret.row_offset, ret.row_size);
@@ -257,7 +260,7 @@ impl Bitcask {
         let kd = self.keydir.write();
 
         if kd.contains_key(key) {
-            self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
+            self.database.write(key, deleted_value())?;
             kd.delete(key);
         }
 

@@ -13,6 +13,7 @@ use crc::{Crc, CRC_32_CKSUM};
 use crate::{
     error::{BitcaskError, BitcaskResult},
     file_id::FileId,
+    utils::TOMBSTONE_VALUE,
 };
 
 use super::constants::{
@@ -57,7 +58,7 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
         ck.update(&key_size.to_be_bytes());
         ck.update(&value_size.to_be_bytes());
         ck.update(key);
-        ck.update(&*value);
+        ck.update(&value);
         RowToWrite {
             crc: ck.finalize(),
             timestamp,
@@ -180,6 +181,23 @@ impl<V: Deref<Target = [u8]>> Deref for TimedValue<V> {
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+pub fn deleted_value() -> TimedValue<Vec<u8>> {
+    TimedValue::immortal_value(TOMBSTONE_VALUE.as_bytes().to_vec())
+}
+
+impl<V: Deref<Target = [u8]>> TimedValue<V> {
+    pub fn immortal_value(value: V) -> TimedValue<V> {
+        TimedValue {
+            value,
+            timestamp: 0,
+        }
+    }
+
+    pub fn has_time_value(value: V, timestamp: u64) -> TimedValue<V> {
+        TimedValue { value, timestamp }
     }
 }
 

@@ -117,19 +117,9 @@ impl Database {
     pub fn write<V: Deref<Target = [u8]>>(
         &self,
         key: &Vec<u8>,
-        value: V,
+        value: TimedValue<V>,
     ) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new(key, value);
-        self.do_write(row)
-    }
-
-    pub fn write_with_timestamp<V: Deref<Target = [u8]>>(
-        &self,
-        key: &Vec<u8>,
-        value: V,
-        timestamp: u64,
-    ) -> BitcaskResult<RowLocation> {
-        let row = RowToWrite::new_with_timestamp(key, value, timestamp);
         self.do_write(row)
     }
 
@@ -505,7 +495,7 @@ impl Iterator for DatabaseRecoverIter {
 pub mod database_tests_utils {
     use bitcask_tests::common::TestingKV;
 
-    use crate::database::RowLocation;
+    use crate::database::{common::TimedValue, RowLocation};
 
     use super::{DataBaseOptions, Database};
 
@@ -551,7 +541,9 @@ pub mod database_tests_utils {
     pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
         kvs.into_iter()
             .map(|kv| {
-                let pos = db.write(&kv.key(), kv.value()).unwrap();
+                let pos = db
+                    .write(&kv.key(), TimedValue::immortal_value(kv.value()))
+                    .unwrap();
                 TestingRow::new(kv, pos)
             })
             .collect::<Vec<TestingRow>>()
