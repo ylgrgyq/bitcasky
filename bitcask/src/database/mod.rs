@@ -9,4 +9,6 @@ mod hint;
 
 mod stable_file;
 pub use self::stable_file::*;
-mod writing_file;
+
+mod storage;
+pub use self::storage::StorageError;

@@ -12,6 +12,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use log::{debug, error, warn};
 
 use crate::{
+    database::storage::{FileStorage, RowStorage, WriteRowResult},
     error::{BitcaskError, BitcaskResult},
     file_id::FileId,
     fs::{self, FileType},
@@ -295,7 +296,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{common::RowToWrite, writing_file::WritingFile};
+    use crate::database::{common::RowToWrite, storage::FileStorage};
 
     use super::*;
     use test_log::test;
@@ -327,7 +328,7 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = WritingFile::new(&dir, file_id).unwrap();
+        let mut writing_file = FileStorage::new(&dir, file_id).unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file

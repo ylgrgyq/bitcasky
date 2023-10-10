@@ -20,7 +20,7 @@ use log::{debug, error, info};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
-    writing_file::WritingFile,
+    storage::{FileStorage, RowStorage},
 };
 use super::{
     common::{RowLocation, RowToRead, RowToWrite},
@@ -62,7 +62,7 @@ pub struct DataBaseOptions {
 pub struct Database {
     pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
-    writing_file: Mutex<WritingFile>,
+    writing_file: Mutex<FileStorage>,
     stable_files: DashMap<FileId, Mutex<StableFile>>,
     options: DataBaseOptions,
     hint_file_writer: HintFileWriter,
@@ -85,7 +85,7 @@ impl Database {
         if let Some(id) = data_file_ids.iter().max() {
             file_id_generator.update_file_id(*id);
         }
-        let writing_file = Mutex::new(WritingFile::new(
+        let writing_file = Mutex::new(FileStorage::new(
             &database_dir,
             file_id_generator.generate_next_file_id(),
         )?);
@@ -111,7 +111,7 @@ impl Database {
 
     pub fn get_max_file_id(&self) -> FileId {
         let writing_file_ref = self.writing_file.lock();
-        writing_file_ref.file_id()
+        writing_file_ref.get_file_id()
     }
 
     pub fn write<V: Deref<Target = [u8]>>(
@@ -136,7 +136,7 @@ impl Database {
         let mut file_ids: Vec<FileId>;
         {
             let writing_file = self.writing_file.lock();
-            let writing_file_id = writing_file.file_id();
+            let writing_file_id = writing_file.get_file_id();
 
             file_ids = self
                 .stable_files
@@ -154,7 +154,7 @@ impl Database {
         let mut file_ids: Vec<FileId>;
         {
             let writing_file = self.writing_file.lock();
-            let writing_file_id = writing_file.file_id();
+            let writing_file_id = writing_file.get_file_id();
 
             file_ids = self
                 .stable_files
@@ -189,8 +189,10 @@ impl Database {
     pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue<Value>> {
         {
             let mut writing_file_ref = self.writing_file.lock();
-            if row_position.file_id == writing_file_ref.file_id() {
-                return writing_file_ref.read_value(row_position.row_offset, row_position.row_size);
+            if row_position.file_id == writing_file_ref.get_file_id() {
+                return Ok(
+                    writing_file_ref.read_value(row_position.row_offset, row_position.row_size)?
+                );
             }
         }
 
@@ -219,7 +221,7 @@ impl Database {
 
     pub fn get_file_ids(&self) -> FileIds {
         let writing_file_ref = self.writing_file.lock();
-        let writing_file_id = writing_file_ref.file_id();
+        let writing_file_id = writing_file_ref.get_file_id();
         let stable_file_ids: Vec<FileId> = self
             .stable_files
             .iter()
@@ -273,7 +275,8 @@ impl Database {
 
     pub fn sync(&self) -> BitcaskResult<()> {
         let mut f = self.writing_file.lock();
-        f.flush()
+        f.flush()?;
+        Ok(())
     }
 
     pub fn mark_db_error(&self, error_string: String) {
@@ -294,12 +297,12 @@ impl Database {
         if self.check_file_overflow(&writing_file_ref, &row) {
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
-        writing_file_ref.write_row(row)
+        Ok(writing_file_ref.write_row(row)?)
     }
 
     fn check_file_overflow<V: Deref<Target = [u8]>>(
         &self,
-        writing_file_ref: &MutexGuard<WritingFile>,
+        writing_file_ref: &MutexGuard<FileStorage>,
         row: &RowToWrite<V>,
     ) -> bool {
         row.size + writing_file_ref.file_size() as u64 > self.options.max_file_size
@@ -307,22 +310,22 @@ impl Database {
 
     fn do_flush_writing_file(
         &self,
-        writing_file_ref: &mut MutexGuard<WritingFile>,
+        writing_file_ref: &mut MutexGuard<FileStorage>,
     ) -> BitcaskResult<()> {
         let next_file_id = self.file_id_generator.generate_next_file_id();
-        let next_writing_file = WritingFile::new(&self.database_dir, next_file_id)?;
+        let next_writing_file = FileStorage::new(&self.database_dir, next_file_id)?;
         let mut old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_file.flush()?;
-        let (file_id, file) = old_file.transit_to_readonly()?;
-        let stable_file = StableFile::new(
-            &self.database_dir,
-            file_id,
-            file,
-            self.options.tolerate_data_file_corruption,
-        )?;
-        self.stable_files.insert(file_id, Mutex::new(stable_file));
-        self.hint_file_writer.async_write_hint_file(file_id);
-        debug!(target: "Database", "writing file id changed from {} to {}", file_id, next_file_id);
+        // let (file_id, file) = old_file.transit_to_readonly()?;
+        // let stable_file = StableFile::new(
+        //     &self.database_dir,
+        //     file_id,
+        //     file,
+        //     self.options.tolerate_data_file_corruption,
+        // )?;
+        // self.stable_files.insert(file_id, Mutex::new(stable_file));
+        // self.hint_file_writer.async_write_hint_file(file_id);
+        // debug!(target: "Database", "writing file id changed from {} to {}", file_id, next_file_id);
         Ok(())
     }
 
@@ -544,7 +547,14 @@ pub mod database_tests_utils {
                 let pos = db
                     .write(&kv.key(), TimedValue::immortal_value(kv.value()))
                     .unwrap();
-                TestingRow::new(kv, pos)
+                TestingRow::new(
+                    kv,
+                    RowLocation {
+                        file_id: pos.file_id,
+                        row_offset: pos.row_offset,
+                        row_size: pos.row_size,
+                    },
+                )
             })
             .collect::<Vec<TestingRow>>()
     }

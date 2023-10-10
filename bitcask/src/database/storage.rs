@@ -35,6 +35,7 @@ pub enum StorageError {
 pub type Result<T> = std::result::Result<T, StorageError>;
 
 pub struct WriteRowResult {
+    pub file_id: FileId,
     pub row_offset: u64,
     pub row_size: u64,
 }
@@ -42,9 +43,11 @@ pub struct WriteRowResult {
 pub trait RowStorage {
     fn get_file_id(&self) -> FileId;
 
+    fn file_size(&self) -> usize;
+
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
 
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<WriteRowResult>;
+    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 
@@ -61,7 +64,7 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    pub fn new(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
+    pub fn new(database_dir: &Path, file_id: FileId) -> Result<Self> {
         let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
         let meta = data_file.metadata()?;
         Ok(FileStorage {
@@ -77,14 +80,19 @@ impl RowStorage for FileStorage {
         self.file_id
     }
 
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<WriteRowResult> {
+    fn file_size(&self) -> usize {
+        self.file_size as usize
+    }
+
+    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&data_to_write)?;
 
         self.file_size += row.size;
 
-        Ok(WriteRowResult {
+        Ok(RowLocation {
+            file_id: self.file_id,
             row_offset: value_offset,
             row_size: row.size,
         })

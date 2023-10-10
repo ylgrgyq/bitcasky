@@ -44,13 +44,13 @@ pub fn create_file(
     base_dir: &Path,
     file_type: FileType,
     file_id: Option<FileId>,
-) -> BitcaskResult<File> {
+) -> std::io::Result<File> {
     let path = file_type.get_path(base_dir, file_id);
-    Ok(File::options()
+    File::options()
         .write(true)
         .create(true)
         .read(true)
-        .open(path)?)
+        .open(path)
 }
 
 pub fn open_file(
