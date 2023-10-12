@@ -1,5 +1,6 @@
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
+use log::error;
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -202,5 +203,26 @@ impl RowStorage for FileStorage {
 
     fn flush(&mut self) -> Result<()> {
         Ok(self.data_file.flush()?)
+    }
+}
+
+#[derive(Debug)]
+pub struct StableFileIter<S: RowStorage> {
+    stable_file: S,
+}
+
+impl<S: RowStorage> Iterator for StableFileIter<S> {
+    type Item = Result<RowToRead>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.stable_file.read_next_row();
+        match ret {
+            Ok(o) => o.map(Ok),
+            Err(e) => {
+                error!(target: "Database", "Data file with file id {} was corrupted. Error: {}", 
+                self.stable_file.get_file_id(), &e);
+                None
+            }
+        }
     }
 }
