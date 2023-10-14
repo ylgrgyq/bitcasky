@@ -5,14 +5,14 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
     ops::Deref,
-    path::Path,
+    path::{Path, PathBuf},
 };
 use thiserror::Error;
 
 use crate::{
     error::BitcaskResult,
     file_id::FileId,
-    fs::{create_file, FileType},
+    fs::{self, create_file, FileType},
 };
 
 use super::{
@@ -41,24 +41,97 @@ pub struct WriteRowResult {
     pub row_size: u64,
 }
 
-pub trait RowStorage {
-    fn get_file_id(&self) -> FileId;
-
-    fn file_size(&self) -> usize;
-
-    fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
-
+pub trait StorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
-
-    fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 
     fn transit_to_readonly(&mut self) -> Result<()>;
 
     fn flush(&mut self) -> Result<()>;
 }
 
+pub trait StorageReader {
+    fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
+
+    fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
+
+    fn file_size(&self) -> usize;
+}
+
+#[derive(Debug)]
+pub enum RowStorage {
+    FileStorage(FileStorage),
+}
+
+impl RowStorage {
+    pub fn new(database_dir: &Path, file_id: FileId) -> Result<Self> {
+        Ok(RowStorage::FileStorage(FileStorage::new(
+            database_dir,
+            file_id,
+        )?))
+    }
+
+    pub fn get_file_id(&self) -> FileId {
+        match self {
+            RowStorage::FileStorage(s) => s.get_file_id(),
+        }
+    }
+
+    pub fn file_size(&self) -> usize {
+        match self {
+            RowStorage::FileStorage(s) => s.file_size(),
+        }
+    }
+
+    pub fn iter(&self) -> Result<StableFileIter> {
+        match self {
+            RowStorage::FileStorage(s) => s.iter(),
+        }
+    }
+}
+
+impl StorageWriter for RowStorage {
+    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
+        match self {
+            RowStorage::FileStorage(s) => s.write_row(row),
+        }
+    }
+
+    fn transit_to_readonly(&mut self) -> Result<()> {
+        match self {
+            RowStorage::FileStorage(s) => s.transit_to_readonly(),
+        }
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        match self {
+            RowStorage::FileStorage(s) => s.flush(),
+        }
+    }
+}
+
+impl StorageReader for RowStorage {
+    fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
+        match self {
+            RowStorage::FileStorage(s) => s.read_value(row_offset, row_size),
+        }
+    }
+
+    fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
+        match self {
+            RowStorage::FileStorage(s) => s.read_next_row(),
+        }
+    }
+
+    fn file_size(&self) -> usize {
+        match self {
+            RowStorage::FileStorage(s) => s.file_size(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FileStorage {
+    database_dir: PathBuf,
     data_file: File,
     file_size: u64,
     pub file_id: FileId,
@@ -69,6 +142,7 @@ impl FileStorage {
         let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
         let meta = data_file.metadata()?;
         Ok(FileStorage {
+            database_dir: database_dir.to_path_buf(),
             data_file,
             file_id,
             file_size: meta.len(),
@@ -76,7 +150,7 @@ impl FileStorage {
     }
 }
 
-impl RowStorage for FileStorage {
+impl FileStorage {
     fn get_file_id(&self) -> FileId {
         self.file_id
     }
@@ -85,6 +159,14 @@ impl RowStorage for FileStorage {
         self.file_size as usize
     }
 
+    fn iter(&self) -> Result<StableFileIter> {
+        let file = fs::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
+        let stable_file = FileStorage::new(&self.database_dir, self.file_id)?;
+        Ok(StableFileIter { stable_file })
+    }
+}
+
+impl StorageWriter for FileStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
@@ -97,6 +179,25 @@ impl RowStorage for FileStorage {
             row_offset: value_offset,
             row_size: row.size,
         })
+    }
+
+    fn transit_to_readonly(&mut self) -> Result<()> {
+        self.data_file.flush()?;
+        let file_id = self.file_id;
+        let mut perms = self.data_file.metadata()?.permissions();
+        perms.set_readonly(true);
+        self.data_file.set_permissions(perms)?;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        Ok(self.data_file.flush()?)
+    }
+}
+
+impl StorageReader for FileStorage {
+    fn file_size(&self) -> usize {
+        self.file_size as usize
     }
 
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
@@ -191,27 +292,14 @@ impl RowStorage for FileStorage {
             timestamp: tstmp,
         }))
     }
-
-    fn transit_to_readonly(&mut self) -> Result<()> {
-        self.data_file.flush()?;
-        let file_id = self.file_id;
-        let mut perms = self.data_file.metadata()?.permissions();
-        perms.set_readonly(true);
-        self.data_file.set_permissions(perms)?;
-        Ok(())
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        Ok(self.data_file.flush()?)
-    }
 }
 
 #[derive(Debug)]
-pub struct StableFileIter<S: RowStorage> {
-    stable_file: S,
+pub struct StableFileIter {
+    stable_file: FileStorage,
 }
 
-impl<S: RowStorage> Iterator for StableFileIter<S> {
+impl Iterator for StableFileIter {
     type Item = Result<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
