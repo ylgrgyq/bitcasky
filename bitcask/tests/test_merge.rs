@@ -6,8 +6,8 @@ use test_log::test;
 
 #[test]
 fn test_merge_delete_no_remain() {
-    // let db_path = get_temporary_directory_path();
-    let db_path = PathBuf::from("/tmp/haha");
+    let db_path = get_temporary_directory_path();
+    // let db_path = PathBuf::from("/tmp/haha");
     let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();

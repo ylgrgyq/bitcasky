@@ -122,10 +122,10 @@ impl Database {
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
         let mut writing_file_ref = self.writing_file.lock();
+        debug!("Flush writing file with id: {}", writing_file_ref.file_id());
         // flush file only when we actually wrote something
-        if writing_file_ref.file_size() > 0 {
-            self.do_flush_writing_file(&mut writing_file_ref)?;
-        }
+        self.do_flush_writing_file(&mut writing_file_ref)?;
+
         Ok(())
     }
 
@@ -259,7 +259,17 @@ impl Database {
     }
 
     pub fn drop(&self) -> BitcaskResult<()> {
-        self.flush_writing_file()?;
+        debug!("Drop database called");
+
+        {
+            let mut writing_file_ref = self.writing_file.lock();
+            debug!(
+                "Flush writing file with id: {} on drop database",
+                writing_file_ref.file_id()
+            );
+            // flush file only when we actually wrote something
+            self.do_flush_writing_file(&mut writing_file_ref)?;
+        }
         for file_id in self.stable_files.iter().map(|v| v.lock().file_id()) {
             SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         }
@@ -289,6 +299,10 @@ impl Database {
     fn do_write<V: Deref<Target = [u8]>>(&self, row: RowToWrite<V>) -> BitcaskResult<RowLocation> {
         let mut writing_file_ref = self.writing_file.lock();
         if self.check_file_overflow(&writing_file_ref, &row) {
+            debug!(
+                "Flush writing file with id: {} on overflow",
+                writing_file_ref.file_id()
+            );
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
         Ok(writing_file_ref.write_row(row)?)
@@ -306,11 +320,16 @@ impl Database {
         &self,
         writing_file_ref: &mut MutexGuard<RowStorage>,
     ) -> BitcaskResult<()> {
+        if writing_file_ref.file_size() <= 0 {
+            debug!(
+                "Skip flush empty wirting file with id: {}",
+                writing_file_ref.file_id()
+            );
+            return Ok(());
+        }
         let next_file_id = self.file_id_generator.generate_next_file_id();
         let next_writing_file = RowStorage::new(&self.database_dir, next_file_id)?;
-        let mut old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
-
-        old_file.flush()?;
+        let old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
 
         let stable_storage = old_file.transit_to_readonly()?;
 

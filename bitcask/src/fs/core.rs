@@ -4,6 +4,8 @@ use std::{
     path::Path,
 };
 
+use log::debug;
+
 use crate::{file_id::FileId, fs::FileType};
 
 const TESTING_DIRECTORY: &str = "Testing";
@@ -68,11 +70,19 @@ pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>
     let path = file_type.get_path(base_dir, file_id);
     if path.exists() {
         fs::remove_file(path)?;
+        if let Some(id) = file_id {
+            debug!(
+                "Delete {} type file with id: {} under path: {:?}",
+                file_type, id, base_dir
+            )
+        } else {
+            debug!("Delete {} type file under path: {:?}", file_type, base_dir)
+        }
     }
     Ok(())
 }
 
-pub fn commit_file(
+pub fn move_file(
     file_type: FileType,
     file_id: Option<FileId>,
     from_dir: &Path,
@@ -92,6 +102,7 @@ pub fn change_file_id(
     from_file_id: FileId,
     to_file_id: FileId,
 ) -> Result<()> {
+    debug!("Change file id from {} to {}", from_file_id, to_file_id);
     let from_p = file_type.get_path(base_dir, Some(from_file_id));
     let to_p = file_type.get_path(base_dir, Some(to_file_id));
     fs::rename(from_p, to_p)?;
@@ -243,7 +254,7 @@ mod tests {
         let file_id = Some(123);
         create_file(&from_dir, FileType::DataFile, file_id).unwrap();
         assert!(FileType::DataFile.get_path(&from_dir, file_id).exists());
-        commit_file(FileType::DataFile, file_id, &from_dir, &to_dir).unwrap();
+        move_file(FileType::DataFile, file_id, &from_dir, &to_dir).unwrap();
         assert!(!FileType::DataFile.get_path(&from_dir, file_id).exists());
         assert!(FileType::DataFile.get_path(&to_dir, file_id).exists());
     }

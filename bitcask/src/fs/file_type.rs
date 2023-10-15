@@ -68,6 +68,18 @@ impl FileType {
     }
 }
 
+impl std::fmt::Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileType::Unknown => f.write_str("Unknown"),
+            FileType::LockFile => f.write_str("LockFile"),
+            FileType::MergeMeta => f.write_str("MergeMetaFile"),
+            FileType::DataFile => f.write_str("DataFile"),
+            FileType::HintFile => f.write_str("HintFile"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -245,7 +245,7 @@ impl HintFileWriter {
         m.values()
             .map(|r| hint_file.write_hint_row(r))
             .collect::<BitcaskResult<Vec<_>>>()?;
-        fs::commit_file(
+        fs::move_file(
             FileType::HintFile,
             Some(data_file_id),
             &hint_file_tmp_dir,

@@ -57,10 +57,8 @@ impl MergeManager {
         debug!(target: "Bitcask", "start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
 
         let merge_dir_path = create_merge_file_dir(database.get_database_dir())?;
-        let (file_ids, new_kd) =
+        let (file_ids, merged_key_dir) =
             self.write_merged_files(database, &merge_dir_path, &kd, known_max_file_id)?;
-
-        info!(target: "Bitcask", "database merged to files with ids: {:?}", &file_ids);
 
         {
             // stop read/write
@@ -74,7 +72,7 @@ impl MergeManager {
                     e
                 })?;
 
-            for (k, v) in new_kd.into_iter() {
+            for (k, v) in merged_key_dir.into_iter() {
                 kd.checked_put(k, v)
             }
         }
@@ -93,6 +91,7 @@ impl MergeManager {
     }
 
     pub fn recover_merge(&self) -> BitcaskResult<()> {
+        debug!(target: "Bitcask", "start recover merge");
         let recover_ret = self.do_recover_merge();
         if let Err(err) = recover_ret {
             let merge_dir = merge_file_dir(&self.database_dir);
@@ -170,25 +169,29 @@ impl MergeManager {
     ) -> BitcaskResult<(Vec<FileId>, KeyDir)> {
         write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
 
-        let new_kd = KeyDir::new_empty_key_dir();
+        let merged_key_dir = KeyDir::new_empty_key_dir();
         let merge_db =
             Database::open(merge_file_dir, self.file_id_generator.clone(), self.options)?;
 
+        let mut write_key_count = 0;
         for r in key_dir_to_write.iter() {
             let k = r.key();
             let v = database.read_value(r.value())?;
             if !is_tombstone(&v.value) {
                 let pos = merge_db.write(k, TimedValue::has_time_value(v.value, v.timestamp))?;
-                new_kd.checked_put(k.clone(), pos);
+                merged_key_dir.checked_put(k.clone(), pos);
                 debug!(target: "Bitcask", "put data to merged file success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
                     k, pos.file_id, pos.row_offset, pos.row_size, v.timestamp);
+                write_key_count += 1;
             }
         }
+
         merge_db.flush_writing_file()?;
         let file_ids = merge_db.get_file_ids();
+        info!(target: "Bitcask", "{} keys in database merged to files with ids: {:?}", write_key_count, &file_ids.stable_file_ids);
         // we do not write anything in writing file
         // so we can only use stable files
-        Ok((file_ids.stable_file_ids, new_kd))
+        Ok((file_ids.stable_file_ids, merged_key_dir))
     }
 
     fn commit_merge(
@@ -282,13 +285,13 @@ fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
 fn commit_merge_files(base_dir: &Path, file_ids: &Vec<FileId>) -> BitcaskResult<()> {
     let merge_dir_path = merge_file_dir(base_dir);
     for file_id in file_ids {
-        fs::commit_file(
+        fs::move_file(
             FileType::DataFile,
             Some(*file_id),
             &merge_dir_path,
             base_dir,
         )?;
-        fs::commit_file(
+        fs::move_file(
             FileType::HintFile,
             Some(*file_id),
             &merge_dir_path,
@@ -595,9 +598,7 @@ mod tests {
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
             db.flush_writing_file().unwrap();
-            debug!("dfdfd {:?}", old_db.get_file_ids().stable_file_ids);
             old_db.flush_writing_file().unwrap();
-            debug!("dfdfd22 {:?}", old_db.get_file_ids().stable_file_ids);
             let merge_manager = MergeManager::new(
                 INSTANCE_ID,
                 &dir,
@@ -605,23 +606,14 @@ mod tests {
                 DEFAULT_OPTIONS,
             );
 
-            debug!(
-                "sdfsdf4 {:?} {:?}",
-                db.get_file_ids().stable_file_ids,
-                old_db.get_max_file_id()
-            );
-
             let files = merge_manager
                 .commit_merge(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
                 .unwrap();
-            debug!("sdfsdf2 {:?}", old_db.get_file_ids().stable_file_ids);
-            debug!("sdfsdf3 {:?}", files);
 
             old_db.reload_data_files(files).unwrap();
         }
 
         assert_eq!(5, file_id_generator.get_file_id());
-        debug!("sdfsdf {:?}", old_db.get_file_ids().stable_file_ids);
         assert_eq!(1, old_db.get_file_ids().stable_file_ids.len());
     }
 }

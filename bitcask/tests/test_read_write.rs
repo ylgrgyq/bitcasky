@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
 use bitcask::{
     bitcask::{Bitcask, BitcaskOptions},
@@ -80,7 +80,7 @@ fn test_random_put_delete_merge() {
             TestingOperator::MERGE,
         ],
     );
-    let ops = gen.generate_testing_operations(3);
+    let ops = gen.generate_testing_operations(10);
     let dir = get_temporary_directory_path();
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     execute_testing_operations(&bc, &ops);

@@ -1,6 +1,6 @@
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -10,7 +10,6 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    error::BitcaskResult,
     file_id::FileId,
     fs::{self, create_file, open_file, FileType},
 };
@@ -27,19 +26,21 @@ use super::{
 #[derive(Error, Debug)]
 #[error("{}")]
 pub enum StorageError {
-    #[error("Index path type should be a non-negative integer number, but is: {0}")]
+    #[error("Write data file with id: {0} failed. error: {1}")]
+    WriteRowFailed(FileId, String),
+    #[error("Read data file with id: {0} failed. error: {1}")]
+    ReadRowFailed(FileId, String),
+    #[error("Flush writing data file with id: {0} failed. error: {1}")]
+    FlushStorageFailed(FileId, String),
+    #[error("Transit writing data file with id: {0} to readonly failed. error: {1}")]
+    TransitToReadOnlyFailed(FileId, String),
+    #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]
     CrcCheckFailed(u32, u64, u32, u32),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
-
-pub struct WriteRowResult {
-    pub file_id: FileId,
-    pub row_offset: u64,
-    pub row_size: u64,
-}
 
 pub trait StorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
@@ -65,6 +66,10 @@ pub enum RowStorage {
 impl RowStorage {
     pub fn new(database_dir: &Path, file_id: FileId) -> Result<Self> {
         let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
+        debug!(
+            "Create row storage under path: {:?} with file id: {}",
+            database_dir, file_id
+        );
         Ok(RowStorage::FileStorage(FileStorage::new(
             database_dir,
             file_id,
@@ -107,19 +112,27 @@ impl RowStorage {
 impl StorageWriter for RowStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
         match self {
-            RowStorage::FileStorage(s) => s.write_row(row),
+            RowStorage::FileStorage(s) => s
+                .write_row(row)
+                .map_err(|e| StorageError::WriteRowFailed(s.file_id, e.to_string())),
         }
     }
 
     fn transit_to_readonly(self) -> Result<RowStorage> {
         match self {
-            RowStorage::FileStorage(s) => s.transit_to_readonly(),
+            RowStorage::FileStorage(s) => {
+                let file_id = s.file_id;
+                s.transit_to_readonly()
+                    .map_err(|e| StorageError::TransitToReadOnlyFailed(file_id, e.to_string()))
+            }
         }
     }
 
     fn flush(&mut self) -> Result<()> {
         match self {
-            RowStorage::FileStorage(s) => s.flush(),
+            RowStorage::FileStorage(s) => s
+                .flush()
+                .map_err(|e| StorageError::FlushStorageFailed(s.file_id, e.to_string())),
         }
     }
 }
@@ -127,7 +140,9 @@ impl StorageWriter for RowStorage {
 impl StorageReader for RowStorage {
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         match self {
-            RowStorage::FileStorage(s) => s.read_value(row_offset, row_size),
+            RowStorage::FileStorage(s) => s
+                .read_value(row_offset, row_size)
+                .map_err(|e| StorageError::ReadRowFailed(s.file_id, e.to_string())),
         }
     }
 
@@ -200,18 +215,13 @@ impl StorageWriter for FileStorage {
 
     fn transit_to_readonly(mut self) -> Result<RowStorage> {
         self.data_file.flush()?;
-        debug!("sdfsdf");
         let mut perms = self.data_file.metadata()?.permissions();
-        debug!("sdfsdf2222");
         perms.set_readonly(true);
-        debug!("sdfsdf3333");
         self.data_file.set_permissions(perms)?;
-        debug!("sdfsdf4444");
-        let data_file = open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
         Ok(RowStorage::FileStorage(FileStorage::new(
             &self.database_dir,
             self.file_id,
-            data_file.file,
+            self.data_file,
         )?))
     }
 
