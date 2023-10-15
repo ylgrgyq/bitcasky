@@ -1,13 +1,10 @@
 use std::{
     fs::{self, File},
+    io::Result,
     path::Path,
 };
 
-use crate::{
-    error::{BitcaskError, BitcaskResult},
-    file_id::FileId,
-    fs::FileType,
-};
+use crate::{file_id::FileId, fs::FileType};
 
 const TESTING_DIRECTORY: &str = "Testing";
 
@@ -67,28 +64,7 @@ pub fn open_file(
     })
 }
 
-fn open_file_by_path(file_type: FileType, file_path: &Path) -> BitcaskResult<IdentifiedFile> {
-    if file_type.check_file_belongs_to_type(file_path) {
-        let file_id = file_type.parse_file_id_from_file_name(file_path);
-        let file = File::options().read(true).open(file_path)?;
-        return Ok(IdentifiedFile {
-            file_type,
-            file,
-            file_id,
-        });
-    }
-    let file_name = file_path
-        .file_name()
-        .map(|s| s.to_str().unwrap_or(""))
-        .unwrap_or("");
-    Err(BitcaskError::InvalidFileName(file_name.into()))
-}
-
-pub fn delete_file(
-    base_dir: &Path,
-    file_type: FileType,
-    file_id: Option<FileId>,
-) -> BitcaskResult<()> {
+pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>) -> Result<()> {
     let path = file_type.get_path(base_dir, file_id);
     if path.exists() {
         fs::remove_file(path)?;
@@ -101,7 +77,7 @@ pub fn commit_file(
     file_id: Option<FileId>,
     from_dir: &Path,
     to_dir: &Path,
-) -> Result<(), std::io::Error> {
+) -> Result<()> {
     let from_p = file_type.get_path(from_dir, file_id);
     if from_p.exists() {
         let to_p = file_type.get_path(to_dir, file_id);
@@ -115,14 +91,14 @@ pub fn change_file_id(
     file_type: FileType,
     from_file_id: FileId,
     to_file_id: FileId,
-) -> BitcaskResult<()> {
+) -> Result<()> {
     let from_p = file_type.get_path(base_dir, Some(from_file_id));
     let to_p = file_type.get_path(base_dir, Some(to_file_id));
     fs::rename(from_p, to_p)?;
     Ok(())
 }
 
-pub fn create_dir(base_dir: &Path) -> BitcaskResult<()> {
+pub fn create_dir(base_dir: &Path) -> Result<()> {
     if !base_dir.exists() {
         std::fs::create_dir(base_dir)?;
     }
@@ -130,22 +106,9 @@ pub fn create_dir(base_dir: &Path) -> BitcaskResult<()> {
     Ok(())
 }
 
-pub fn delete_dir(base_dir: &Path) -> BitcaskResult<()> {
+pub fn delete_dir(base_dir: &Path) -> Result<()> {
     fs::remove_dir_all(base_dir)?;
     Ok(())
-}
-
-pub fn is_empty_dir(dir: &Path) -> BitcaskResult<bool> {
-    let paths = fs::read_dir(dir)?;
-
-    for path in paths {
-        let file_path = path?;
-        if file_path.path() == dir {
-            continue;
-        }
-        return Ok(false);
-    }
-    Ok(true)
 }
 
 pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> {
@@ -167,10 +130,25 @@ pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> 
     actual_file_ids
 }
 
+// used by some tests
+#[allow(dead_code)]
+pub fn is_empty_dir(dir: &Path) -> Result<bool> {
+    let paths = fs::read_dir(dir)?;
+
+    for path in paths {
+        let file_path = path?;
+        if file_path.path() == dir {
+            continue;
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
-        io::{Read, Write},
+        io::{ErrorKind, Read, Result, Write},
         vec,
     };
 
@@ -178,6 +156,26 @@ mod tests {
     use bitcask_tests::common::get_temporary_directory_path;
     use bytes::{Buf, Bytes, BytesMut};
     use test_log::test;
+
+    fn open_file_by_path(file_type: FileType, file_path: &Path) -> Result<IdentifiedFile> {
+        if file_type.check_file_belongs_to_type(file_path) {
+            let file_id = file_type.parse_file_id_from_file_name(file_path);
+            let file = File::options().read(true).open(file_path)?;
+            return Ok(IdentifiedFile {
+                file_type,
+                file,
+                file_id,
+            });
+        }
+        let file_name = file_path
+            .file_name()
+            .map(|s| s.to_str().unwrap_or(""))
+            .unwrap_or("");
+        Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid file name: {}", file_name),
+        ))
+    }
 
     #[test]
     fn test_create_file() {
