@@ -33,6 +33,7 @@ impl FileIdGenerator {
         info!(target: "FileIdGenerator", "update file id to {}", *id);
     }
 
+    #[allow(dead_code)]
     pub fn get_file_id(&self) -> FileId {
         *self.file_id.lock()
     }

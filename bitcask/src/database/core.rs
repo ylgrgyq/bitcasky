@@ -163,9 +163,7 @@ impl Database {
 
         let files: BitcaskResult<Vec<Storage>> = file_ids
             .iter()
-            .map(|f| {
-                Storage::open(&self.database_dir, *f).map_err(|e| BitcaskError::StorageError(e))
-            })
+            .map(|f| Storage::open(&self.database_dir, *f).map_err(BitcaskError::StorageError))
             .collect();
 
         let mut opened_stable_files = files?;
@@ -320,7 +318,7 @@ impl Database {
         &self,
         writing_file_ref: &mut MutexGuard<Storage>,
     ) -> BitcaskResult<()> {
-        if writing_file_ref.file_size() <= 0 {
+        if writing_file_ref.file_size() == 0 {
             debug!(
                 "Skip flush empty wirting file with id: {}",
                 writing_file_ref.file_id()
@@ -391,7 +389,7 @@ impl Iterator for DatabaseIter {
                     None => {
                         self.current_iter.replace(self.remain_iters.pop());
                     }
-                    other => return other.map(|r| r.map_err(|e| BitcaskError::StorageError(e))),
+                    other => return other.map(|r| r.map_err(BitcaskError::StorageError)),
                 },
             }
         }
@@ -422,7 +420,7 @@ fn recovered_iter(
                     key: r.key,
                     is_tombstone: utils::is_tombstone(&r.value),
                 })
-                .map_err(|e| BitcaskError::StorageError(e))
+                .map_err(BitcaskError::StorageError)
             })
         })?;
         Ok(Box::new(i))

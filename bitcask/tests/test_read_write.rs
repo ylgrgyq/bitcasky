@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::collections::HashSet;
 
 use bitcask::{
     bitcask::{Bitcask, BitcaskOptions},
