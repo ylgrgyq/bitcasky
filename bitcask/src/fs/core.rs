@@ -57,7 +57,7 @@ pub fn open_file(
     base_dir: &Path,
     file_type: FileType,
     file_id: Option<FileId>,
-) -> BitcaskResult<IdentifiedFile> {
+) -> std::io::Result<IdentifiedFile> {
     let path = file_type.get_path(base_dir, file_id);
     let file = File::options().read(true).open(path)?;
     Ok(IdentifiedFile {
