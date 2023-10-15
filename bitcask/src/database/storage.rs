@@ -71,37 +71,39 @@ pub struct Storage {
 
 impl Storage {
     pub fn new<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
-        let data_file = create_file(database_dir.as_ref(), FileType::DataFile, Some(file_id))?;
+        let path = database_dir.as_ref().to_path_buf();
+        let data_file = create_file(&path, FileType::DataFile, Some(file_id))?;
         debug!(
-            "Create row storage under path: {:?} with file id: {}",
-            database_dir.as_ref(),
-            file_id
+            "Create storage under path: {:?} with file id: {}",
+            &path, file_id
         );
         Ok(Storage {
-            storage_impl: StorageImpl::FileStorage(FileStorage::new(
-                database_dir.as_ref(),
-                file_id,
-                data_file,
-            )?),
+            storage_impl: StorageImpl::FileStorage(FileStorage::new(&path, file_id, data_file, 0)?),
             file_id,
-            database_dir: database_dir.as_ref().to_path_buf(),
+            database_dir: path,
             file_size: 0,
         })
     }
 
     pub fn open<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
-        let data_file = fs::open_file(database_dir.as_ref(), FileType::DataFile, Some(file_id))?;
+        let path = database_dir.as_ref().to_path_buf();
+        let data_file = fs::open_file(&path, FileType::DataFile, Some(file_id))?;
+        debug!(
+            "Open storage under path: {:?} with file id: {}",
+            &path, file_id
+        );
         let meta = data_file.file.metadata()?;
-
+        let file_size = meta.len();
         Ok(Storage {
             storage_impl: StorageImpl::FileStorage(FileStorage::new(
-                database_dir.as_ref(),
+                &path,
                 file_id,
                 data_file.file,
+                file_size,
             )?),
             file_id,
-            database_dir: database_dir.as_ref().to_path_buf(),
-            file_size: meta.len(),
+            database_dir: path,
+            file_size,
         })
     }
 
@@ -200,14 +202,17 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    pub fn new<P: AsRef<Path>>(database_dir: P, file_id: FileId, data_file: File) -> Result<Self> {
-        let meta = data_file.metadata()?;
-
+    pub fn new<P: AsRef<Path>>(
+        database_dir: P,
+        file_id: FileId,
+        data_file: File,
+        capacity: u64,
+    ) -> Result<Self> {
         Ok(FileStorage {
             database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             file_id,
-            capacity: meta.len(),
+            capacity,
         })
     }
 }
@@ -236,6 +241,7 @@ impl StorageWriter for FileStorage {
                 &self.database_dir,
                 self.file_id,
                 self.data_file,
+                file_size,
             )?),
             file_id: self.file_id,
             database_dir: self.database_dir,
