@@ -595,20 +595,33 @@ mod tests {
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
             db.flush_writing_file().unwrap();
+            debug!("dfdfd {:?}", old_db.get_file_ids().stable_file_ids);
             old_db.flush_writing_file().unwrap();
+            debug!("dfdfd22 {:?}", old_db.get_file_ids().stable_file_ids);
             let merge_manager = MergeManager::new(
                 INSTANCE_ID,
                 &dir,
                 file_id_generator.clone(),
                 DEFAULT_OPTIONS,
             );
+
+            debug!(
+                "sdfsdf4 {:?} {:?}",
+                db.get_file_ids().stable_file_ids,
+                old_db.get_max_file_id()
+            );
+
             let files = merge_manager
                 .commit_merge(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
                 .unwrap();
+            debug!("sdfsdf2 {:?}", old_db.get_file_ids().stable_file_ids);
+            debug!("sdfsdf3 {:?}", files);
+
             old_db.reload_data_files(files).unwrap();
         }
 
         assert_eq!(5, file_id_generator.get_file_id());
+        debug!("sdfsdf {:?}", old_db.get_file_ids().stable_file_ids);
         assert_eq!(1, old_db.get_file_ids().stable_file_ids.len());
     }
 }

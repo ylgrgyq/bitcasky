@@ -1,6 +1,6 @@
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
-use log::error;
+use log::{debug, error, info};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::{
     error::BitcaskResult,
     file_id::FileId,
-    fs::{self, create_file, FileType},
+    fs::{self, create_file, open_file, FileType},
 };
 
 use super::{
@@ -44,7 +44,7 @@ pub struct WriteRowResult {
 pub trait StorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
 
-    fn transit_to_readonly(&mut self) -> Result<()>;
+    fn transit_to_readonly(self) -> Result<RowStorage>;
 
     fn flush(&mut self) -> Result<()>;
 }
@@ -64,13 +64,24 @@ pub enum RowStorage {
 
 impl RowStorage {
     pub fn new(database_dir: &Path, file_id: FileId) -> Result<Self> {
+        let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
         Ok(RowStorage::FileStorage(FileStorage::new(
             database_dir,
             file_id,
+            data_file,
         )?))
     }
 
-    pub fn get_file_id(&self) -> FileId {
+    pub fn open(database_dir: &Path, file_id: FileId) -> Result<Self> {
+        let data_file = fs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
+        Ok(RowStorage::FileStorage(FileStorage::new(
+            database_dir,
+            file_id,
+            data_file.file,
+        )?))
+    }
+
+    pub fn file_id(&self) -> FileId {
         match self {
             RowStorage::FileStorage(s) => s.get_file_id(),
         }
@@ -80,6 +91,10 @@ impl RowStorage {
         match self {
             RowStorage::FileStorage(s) => s.file_size(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.file_size() == 0
     }
 
     pub fn iter(&self) -> Result<StableFileIter> {
@@ -96,7 +111,7 @@ impl StorageWriter for RowStorage {
         }
     }
 
-    fn transit_to_readonly(&mut self) -> Result<()> {
+    fn transit_to_readonly(self) -> Result<RowStorage> {
         match self {
             RowStorage::FileStorage(s) => s.transit_to_readonly(),
         }
@@ -138,9 +153,9 @@ pub struct FileStorage {
 }
 
 impl FileStorage {
-    pub fn new(database_dir: &Path, file_id: FileId) -> Result<Self> {
-        let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
+    pub fn new(database_dir: &Path, file_id: FileId, data_file: File) -> Result<Self> {
         let meta = data_file.metadata()?;
+
         Ok(FileStorage {
             database_dir: database_dir.to_path_buf(),
             data_file,
@@ -161,8 +176,10 @@ impl FileStorage {
 
     fn iter(&self) -> Result<StableFileIter> {
         let file = fs::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
-        let stable_file = FileStorage::new(&self.database_dir, self.file_id)?;
-        Ok(StableFileIter { stable_file })
+        let stable_file = FileStorage::new(&self.database_dir, self.file_id, file.file)?;
+        Ok(StableFileIter {
+            stable_file: RowStorage::FileStorage(stable_file),
+        })
     }
 }
 
@@ -181,13 +198,21 @@ impl StorageWriter for FileStorage {
         })
     }
 
-    fn transit_to_readonly(&mut self) -> Result<()> {
+    fn transit_to_readonly(mut self) -> Result<RowStorage> {
         self.data_file.flush()?;
-        let file_id = self.file_id;
+        debug!("sdfsdf");
         let mut perms = self.data_file.metadata()?.permissions();
+        debug!("sdfsdf2222");
         perms.set_readonly(true);
+        debug!("sdfsdf3333");
         self.data_file.set_permissions(perms)?;
-        Ok(())
+        debug!("sdfsdf4444");
+        let data_file = open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
+        Ok(RowStorage::FileStorage(FileStorage::new(
+            &self.database_dir,
+            self.file_id,
+            data_file.file,
+        )?))
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -296,7 +321,7 @@ impl StorageReader for FileStorage {
 
 #[derive(Debug)]
 pub struct StableFileIter {
-    stable_file: FileStorage,
+    stable_file: RowStorage,
 }
 
 impl Iterator for StableFileIter {
@@ -308,7 +333,7 @@ impl Iterator for StableFileIter {
             Ok(o) => o.map(Ok),
             Err(e) => {
                 error!(target: "Database", "Data file with file id {} was corrupted. Error: {}", 
-                self.stable_file.get_file_id(), &e);
+                self.stable_file.file_id(), &e);
                 None
             }
         }

@@ -9,10 +9,10 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 
 use crate::{
-    database::storage::{FileStorage, RowStorage, WriteRowResult},
+    database::storage::RowStorage,
     error::{BitcaskError, BitcaskResult},
     file_id::FileId,
     fs::{self, FileType},
@@ -25,7 +25,6 @@ use super::{
     constants::{
         DATA_FILE_KEY_OFFSET, KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE,
     },
-    StableFile,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -207,11 +206,16 @@ impl HintFileWriter {
     }
 
     fn write_hint_file(database_dir: &Path, data_file_id: FileId) -> BitcaskResult<()> {
-        let stable_file_opt = StableFile::open(database_dir, data_file_id, false)?;
-        if stable_file_opt.is_none() {
+        let stable_file_opt = RowStorage::open(database_dir, data_file_id)?;
+        if stable_file_opt.is_empty() {
+            info!(
+                target: DEFAULT_LOG_TARGET,
+                "skip write hint for empty data file with id: {}", &data_file_id
+            );
             return Ok(());
         }
-        let data_itr = stable_file_opt.unwrap().iter()?;
+
+        let data_itr = stable_file_opt.iter()?;
 
         let mut m = HashMap::new();
         for row in data_itr {
@@ -232,7 +236,7 @@ impl HintFileWriter {
                         );
                     }
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(BitcaskError::StorageError(e)),
             }
         }
 
@@ -296,7 +300,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{common::RowToWrite, storage::FileStorage};
+    use crate::database::{common::RowToWrite, storage::StorageWriter};
 
     use super::*;
     use test_log::test;
@@ -328,7 +332,7 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = FileStorage::new(&dir, file_id).unwrap();
+        let mut writing_file = RowStorage::new(&dir, file_id).unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file
