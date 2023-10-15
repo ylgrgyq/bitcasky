@@ -25,7 +25,7 @@ use super::{
 
 #[derive(Error, Debug)]
 #[error("{}")]
-pub enum StorageError {
+pub enum DataStorageError {
     #[error("Write data file with id: {0} failed. error: {1}")]
     WriteRowFailed(FileId, String),
     #[error("Read data file with id: {0} failed. error: {1}")]
@@ -40,36 +40,36 @@ pub enum StorageError {
     CrcCheckFailed(u32, u64, u32, u32),
 }
 
-pub type Result<T> = std::result::Result<T, StorageError>;
+pub type Result<T> = std::result::Result<T, DataStorageError>;
 
-pub trait StorageWriter {
+pub trait DataStorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
 
-    fn transit_to_readonly(self) -> Result<Storage>;
+    fn transit_to_readonly(self) -> Result<DataStorage>;
 
     fn flush(&mut self) -> Result<()>;
 }
 
-pub trait StorageReader {
+pub trait DataStorageReader {
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 }
 
 #[derive(Debug)]
-pub enum StorageImpl {
-    FileStorage(FileStorage),
+enum DataStorageImpl {
+    FileStorage(FileDataStorage),
 }
 
 #[derive(Debug)]
-pub struct Storage {
+pub struct DataStorage {
     database_dir: PathBuf,
     file_id: FileId,
-    storage_impl: StorageImpl,
+    storage_impl: DataStorageImpl,
     file_size: u64,
 }
 
-impl Storage {
+impl DataStorage {
     pub fn new<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(&path, FileType::DataFile, Some(file_id))?;
@@ -77,8 +77,10 @@ impl Storage {
             "Create storage under path: {:?} with file id: {}",
             &path, file_id
         );
-        Ok(Storage {
-            storage_impl: StorageImpl::FileStorage(FileStorage::new(&path, file_id, data_file, 0)?),
+        Ok(DataStorage {
+            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
+                &path, file_id, data_file, 0,
+            )?),
             file_id,
             database_dir: path,
             file_size: 0,
@@ -94,8 +96,8 @@ impl Storage {
         );
         let meta = data_file.file.metadata()?;
         let file_size = meta.len();
-        Ok(Storage {
-            storage_impl: StorageImpl::FileStorage(FileStorage::new(
+        Ok(DataStorage {
+            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 &path,
                 file_id,
                 data_file.file,
@@ -121,60 +123,60 @@ impl Storage {
 
     pub fn iter(&self) -> Result<StorageIter> {
         Ok(StorageIter {
-            storage: Storage::open(&self.database_dir, self.file_id)?,
+            storage: DataStorage::open(&self.database_dir, self.file_id)?,
         })
     }
 }
 
-impl StorageWriter for Storage {
+impl DataStorageWriter for DataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
         let r = match &mut self.storage_impl {
-            StorageImpl::FileStorage(s) => s
+            DataStorageImpl::FileStorage(s) => s
                 .write_row(row)
-                .map_err(|e| StorageError::WriteRowFailed(s.file_id, e.to_string())),
+                .map_err(|e| DataStorageError::WriteRowFailed(s.file_id, e.to_string())),
         }?;
         self.file_size += r.row_size;
         Ok(r)
     }
 
-    fn transit_to_readonly(self) -> Result<Storage> {
+    fn transit_to_readonly(self) -> Result<DataStorage> {
         match self.storage_impl {
-            StorageImpl::FileStorage(s) => {
+            DataStorageImpl::FileStorage(s) => {
                 let file_id = s.file_id;
                 s.transit_to_readonly()
-                    .map_err(|e| StorageError::TransitToReadOnlyFailed(file_id, e.to_string()))
+                    .map_err(|e| DataStorageError::TransitToReadOnlyFailed(file_id, e.to_string()))
             }
         }
     }
 
     fn flush(&mut self) -> Result<()> {
         match &mut self.storage_impl {
-            StorageImpl::FileStorage(s) => s
+            DataStorageImpl::FileStorage(s) => s
                 .flush()
-                .map_err(|e| StorageError::FlushStorageFailed(s.file_id, e.to_string())),
+                .map_err(|e| DataStorageError::FlushStorageFailed(s.file_id, e.to_string())),
         }
     }
 }
 
-impl StorageReader for Storage {
+impl DataStorageReader for DataStorage {
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         match &mut self.storage_impl {
-            StorageImpl::FileStorage(s) => s
+            DataStorageImpl::FileStorage(s) => s
                 .read_value(row_offset, row_size)
-                .map_err(|e| StorageError::ReadRowFailed(s.file_id, e.to_string())),
+                .map_err(|e| DataStorageError::ReadRowFailed(s.file_id, e.to_string())),
         }
     }
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         match &mut self.storage_impl {
-            StorageImpl::FileStorage(s) => s.read_next_row(),
+            DataStorageImpl::FileStorage(s) => s.read_next_row(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct StorageIter {
-    storage: Storage,
+    storage: DataStorage,
 }
 
 impl Iterator for StorageIter {
@@ -194,21 +196,21 @@ impl Iterator for StorageIter {
 }
 
 #[derive(Debug)]
-pub struct FileStorage {
+pub struct FileDataStorage {
     database_dir: PathBuf,
     data_file: File,
     pub file_id: FileId,
     capacity: u64,
 }
 
-impl FileStorage {
+impl FileDataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         file_id: FileId,
         data_file: File,
         capacity: u64,
     ) -> Result<Self> {
-        Ok(FileStorage {
+        Ok(FileDataStorage {
             database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             file_id,
@@ -217,7 +219,7 @@ impl FileStorage {
     }
 }
 
-impl StorageWriter for FileStorage {
+impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
         let value_offset = self.data_file.seek(SeekFrom::End(0))?;
         let data_to_write = row.to_bytes();
@@ -230,14 +232,14 @@ impl StorageWriter for FileStorage {
         })
     }
 
-    fn transit_to_readonly(mut self) -> Result<Storage> {
+    fn transit_to_readonly(mut self) -> Result<DataStorage> {
         self.data_file.flush()?;
         let mut perms = self.data_file.metadata()?.permissions();
         perms.set_readonly(true);
         self.data_file.set_permissions(perms)?;
         let file_size = self.data_file.metadata()?.len();
-        Ok(Storage {
-            storage_impl: StorageImpl::FileStorage(FileStorage::new(
+        Ok(DataStorage {
+            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 &self.database_dir,
                 self.file_id,
                 self.data_file,
@@ -254,7 +256,7 @@ impl StorageWriter for FileStorage {
     }
 }
 
-impl StorageReader for FileStorage {
+impl DataStorageReader for FileDataStorage {
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
         let mut buf = vec![0; row_size as usize];
@@ -268,7 +270,7 @@ impl StorageReader for FileStorage {
         ck.update(&bs.slice(4..));
         let actual_crc = ck.finalize();
         if expected_crc != actual_crc {
-            return Err(StorageError::CrcCheckFailed(
+            return Err(DataStorageError::CrcCheckFailed(
                 self.file_id,
                 row_offset,
                 expected_crc,
@@ -328,7 +330,7 @@ impl StorageReader for FileStorage {
         ck.update(&kv_bs);
         let actual_crc = ck.finalize();
         if expected_crc != actual_crc {
-            return Err(StorageError::CrcCheckFailed(
+            return Err(DataStorageError::CrcCheckFailed(
                 self.file_id,
                 value_offset,
                 expected_crc,

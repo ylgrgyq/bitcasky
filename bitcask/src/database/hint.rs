@@ -12,7 +12,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use log::{debug, error, info, warn};
 
 use crate::{
-    database::storage::Storage,
+    database::data_storage::DataStorage,
     error::{BitcaskError, BitcaskResult},
     file_id::FileId,
     fs::{self, FileType},
@@ -162,13 +162,13 @@ impl Iterator for HintFileIterator {
 }
 
 #[derive(Debug)]
-pub struct HintFileWriter {
+pub struct HintWriter {
     sender: ManuallyDrop<Sender<FileId>>,
     worker_join_handle: Option<JoinHandle<()>>,
 }
 
-impl HintFileWriter {
-    pub fn start(database_dir: &Path) -> HintFileWriter {
+impl HintWriter {
+    pub fn start(database_dir: &Path) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
@@ -186,7 +186,7 @@ impl HintFileWriter {
             }
         }));
 
-        HintFileWriter {
+        HintWriter {
             sender: ManuallyDrop::new(sender),
             worker_join_handle,
         }
@@ -206,7 +206,7 @@ impl HintFileWriter {
     }
 
     fn write_hint_file(database_dir: &Path, data_file_id: FileId) -> BitcaskResult<()> {
-        let stable_file_opt = Storage::open(database_dir, data_file_id)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_file_id)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
@@ -255,7 +255,7 @@ impl HintFileWriter {
     }
 }
 
-impl Drop for HintFileWriter {
+impl Drop for HintWriter {
     fn drop(&mut self) {
         unsafe { ManuallyDrop::drop(&mut self.sender) }
         if let Some(join_handle) = self.worker_join_handle.take() {
@@ -300,7 +300,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{common::RowToWrite, storage::StorageWriter};
+    use crate::database::{common::RowToWrite, data_storage::DataStorageWriter};
 
     use super::*;
     use test_log::test;
@@ -332,7 +332,7 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = Storage::new(&dir, file_id).unwrap();
+        let mut writing_file = DataStorage::new(&dir, file_id).unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file
@@ -341,7 +341,7 @@ mod tests {
         writing_file.transit_to_readonly().unwrap();
 
         {
-            let writer = HintFileWriter::start(&dir);
+            let writer = HintWriter::start(&dir);
             writer.async_write_hint_file(file_id);
         }
 

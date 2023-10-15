@@ -7,5 +7,5 @@ pub use self::common::{deleted_value, RowLocation, TimedValue};
 mod constants;
 mod hint;
 
-mod storage;
-pub use self::storage::StorageError;
+mod data_storage;
+pub use self::data_storage::DataStorageError;

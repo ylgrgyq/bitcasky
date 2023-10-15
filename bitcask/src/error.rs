@@ -29,7 +29,7 @@ pub enum BitcaskError {
     #[error("Unknown server error: {0}")]
     UnknownServerError(String),
     #[error(transparent)]
-    StorageError(#[from] crate::database::StorageError),
+    StorageError(#[from] crate::database::DataStorageError),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;
