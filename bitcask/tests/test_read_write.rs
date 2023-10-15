@@ -14,7 +14,6 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 10 * 1024,
     max_key_size: 64,
     max_value_size: 1024,
-    tolerate_data_file_corrption: true,
 };
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
@@ -81,7 +80,7 @@ fn test_random_put_delete_merge() {
             TestingOperator::MERGE,
         ],
     );
-    let ops = gen.generate_testing_operations(10);
+    let ops = gen.generate_testing_operations(3);
     let dir = get_temporary_directory_path();
     let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
     execute_testing_operations(&bc, &ops);

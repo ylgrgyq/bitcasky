@@ -54,7 +54,6 @@ pub struct FileIds {
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub max_file_size: u64,
-    pub tolerate_data_file_corruption: bool,
 }
 
 #[derive(Debug)]
@@ -478,7 +477,6 @@ pub mod database_tests_utils {
 
     pub const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: 1024,
-        tolerate_data_file_corruption: true,
     };
 
     pub struct TestingRow {
@@ -624,10 +622,7 @@ mod tests {
         let db = Database::open(
             &dir,
             file_id_generator,
-            DataBaseOptions {
-                max_file_size: 100,
-                tolerate_data_file_corruption: true,
-            },
+            DataBaseOptions { max_file_size: 100 },
         )
         .unwrap();
         let kvs = vec![

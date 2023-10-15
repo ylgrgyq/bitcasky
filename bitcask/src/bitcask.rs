@@ -24,10 +24,6 @@ pub struct BitcaskOptions {
     pub max_key_size: usize,
     // maximum value size
     pub max_value_size: usize,
-    // On data file corruption, when this option is true,
-    // we recover data from it as many as we can and don't throw any error.
-    // Otherwise, we throw error and stop recover data from the corrupted file
-    pub tolerate_data_file_corrption: bool,
 }
 
 impl BitcaskOptions {
@@ -56,7 +52,6 @@ impl BitcaskOptions {
     fn get_database_options(&self) -> DataBaseOptions {
         DataBaseOptions {
             max_file_size: self.max_file_size,
-            tolerate_data_file_corruption: self.tolerate_data_file_corrption,
         }
     }
 }
@@ -68,7 +63,6 @@ impl Default for BitcaskOptions {
             max_file_size: 128 * 1024 * 1024,
             max_key_size: 64,
             max_value_size: 100 * 1024,
-            tolerate_data_file_corrption: true,
         }
     }
 }
