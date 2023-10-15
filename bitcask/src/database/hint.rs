@@ -12,7 +12,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use log::{debug, error, info, warn};
 
 use crate::{
-    database::storage::RowStorage,
+    database::storage::Storage,
     error::{BitcaskError, BitcaskResult},
     file_id::FileId,
     fs::{self, FileType},
@@ -206,7 +206,7 @@ impl HintFileWriter {
     }
 
     fn write_hint_file(database_dir: &Path, data_file_id: FileId) -> BitcaskResult<()> {
-        let stable_file_opt = RowStorage::open(database_dir, data_file_id)?;
+        let stable_file_opt = Storage::open(database_dir, data_file_id)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
@@ -332,7 +332,7 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = RowStorage::new(&dir, file_id).unwrap();
+        let mut writing_file = Storage::new(&dir, file_id).unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file

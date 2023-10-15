@@ -20,7 +20,7 @@ use log::{debug, error, info};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
-    storage::{RowStorage, StableFileIter, StorageReader, StorageWriter},
+    storage::{Storage, StorageIter, StorageReader, StorageWriter},
 };
 use super::{
     common::{RowLocation, RowToRead, RowToWrite},
@@ -60,8 +60,8 @@ pub struct DataBaseOptions {
 pub struct Database {
     pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
-    writing_file: Mutex<RowStorage>,
-    stable_files: DashMap<FileId, Mutex<RowStorage>>,
+    writing_file: Mutex<Storage>,
+    stable_files: DashMap<FileId, Mutex<Storage>>,
     options: DataBaseOptions,
     hint_file_writer: HintFileWriter,
     is_error: Mutex<Option<String>>,
@@ -84,7 +84,7 @@ impl Database {
             file_id_generator.update_file_id(*id);
         }
         let writing_file_id = file_id_generator.generate_next_file_id();
-        let writing_file = Mutex::new(RowStorage::new(&database_dir, writing_file_id)?);
+        let writing_file = Mutex::new(Storage::new(&database_dir, writing_file_id)?);
         debug!(target: "Database", "create writing file with id: {}", writing_file_id);
         let hint_file_writer = HintFileWriter::start(&database_dir);
 
@@ -161,16 +161,16 @@ impl Database {
             file_ids.push(writing_file_id);
         }
 
-        let files: BitcaskResult<Vec<RowStorage>> = file_ids
+        let files: BitcaskResult<Vec<Storage>> = file_ids
             .iter()
             .map(|f| {
-                RowStorage::open(&self.database_dir, *f).map_err(|e| BitcaskError::StorageError(e))
+                Storage::open(&self.database_dir, *f).map_err(|e| BitcaskError::StorageError(e))
             })
             .collect();
 
         let mut opened_stable_files = files?;
         opened_stable_files.sort_by_key(|e| e.file_id());
-        let iters: crate::database::storage::Result<Vec<StableFileIter>> =
+        let iters: crate::database::storage::Result<Vec<StorageIter>> =
             opened_stable_files.iter().rev().map(|f| f.iter()).collect();
 
         Ok(DatabaseIter::new(iters?))
@@ -199,7 +199,7 @@ impl Database {
             if self.stable_files.contains_key(&file_id) {
                 core::panic!("file id: {} already loaded in database", file_id);
             }
-            if let Ok(f) = RowStorage::open(&self.database_dir, file_id) {
+            if let Ok(f) = Storage::open(&self.database_dir, file_id) {
                 if f.is_empty() {
                     info!(
                         target: "Database",
@@ -310,7 +310,7 @@ impl Database {
 
     fn check_file_overflow<V: Deref<Target = [u8]>>(
         &self,
-        writing_file_ref: &MutexGuard<RowStorage>,
+        writing_file_ref: &MutexGuard<Storage>,
         row: &RowToWrite<V>,
     ) -> bool {
         row.size + writing_file_ref.file_size() as u64 > self.options.max_file_size
@@ -318,7 +318,7 @@ impl Database {
 
     fn do_flush_writing_file(
         &self,
-        writing_file_ref: &mut MutexGuard<RowStorage>,
+        writing_file_ref: &mut MutexGuard<Storage>,
     ) -> BitcaskResult<()> {
         if writing_file_ref.file_size() <= 0 {
             debug!(
@@ -328,7 +328,7 @@ impl Database {
             return Ok(());
         }
         let next_file_id = self.file_id_generator.generate_next_file_id();
-        let next_writing_file = RowStorage::new(&self.database_dir, next_file_id)?;
+        let next_writing_file = Storage::new(&self.database_dir, next_file_id)?;
         let old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
 
         let stable_storage = old_file.transit_to_readonly()?;
@@ -341,10 +341,7 @@ impl Database {
         Ok(())
     }
 
-    fn get_file_to_read(
-        &self,
-        file_id: FileId,
-    ) -> BitcaskResult<RefMut<FileId, Mutex<RowStorage>>> {
+    fn get_file_to_read(&self, file_id: FileId) -> BitcaskResult<RefMut<FileId, Mutex<Storage>>> {
         self.stable_files
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
@@ -362,12 +359,12 @@ impl Drop for Database {
 }
 
 pub struct DatabaseIter {
-    current_iter: Cell<Option<StableFileIter>>,
-    remain_iters: Vec<StableFileIter>,
+    current_iter: Cell<Option<StorageIter>>,
+    remain_iters: Vec<StorageIter>,
 }
 
 impl DatabaseIter {
-    fn new(mut iters: Vec<StableFileIter>) -> Self {
+    fn new(mut iters: Vec<StorageIter>) -> Self {
         if iters.is_empty() {
             DatabaseIter {
                 remain_iters: iters,
@@ -414,7 +411,7 @@ fn recovered_iter(
         Ok(Box::new(HintFile::open_iterator(database_dir, file_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", file_id);
-        let stable_file = RowStorage::open(database_dir, file_id)?;
+        let stable_file = Storage::open(database_dir, file_id)?;
         let i = stable_file.iter().map(|iter| {
             iter.map(|row| {
                 row.map(|r| RecoveredRow {

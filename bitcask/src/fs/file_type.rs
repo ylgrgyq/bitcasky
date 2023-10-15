@@ -18,8 +18,8 @@ pub enum FileType {
 }
 
 impl FileType {
-    pub fn get_path(&self, base_dir: &Path, file_id: Option<FileId>) -> PathBuf {
-        base_dir.join(match self {
+    pub fn get_path<P: AsRef<Path>>(&self, base_dir: P, file_id: Option<FileId>) -> PathBuf {
+        base_dir.as_ref().join(match self {
             Self::LockFile => format!("bitcask.{}", LOCK_FILE_EXTENSION),
             Self::MergeMeta => format!("merge.{}", MERGE_META_FILE_EXTENSION),
             Self::DataFile => format!("{}.{}", file_id.unwrap(), DATA_FILE_EXTENSION),

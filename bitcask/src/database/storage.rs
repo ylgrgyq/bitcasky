@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{
     file_id::FileId,
-    fs::{self, create_file, open_file, FileType},
+    fs::{self, create_file, FileType},
 };
 
 use super::{
@@ -45,7 +45,7 @@ pub type Result<T> = std::result::Result<T, StorageError>;
 pub trait StorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
 
-    fn transit_to_readonly(self) -> Result<RowStorage>;
+    fn transit_to_readonly(self) -> Result<Storage>;
 
     fn flush(&mut self) -> Result<()>;
 }
@@ -54,73 +54,90 @@ pub trait StorageReader {
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
-
-    fn file_size(&self) -> usize;
 }
 
 #[derive(Debug)]
-pub enum RowStorage {
+pub enum StorageImpl {
     FileStorage(FileStorage),
 }
 
-impl RowStorage {
-    pub fn new(database_dir: &Path, file_id: FileId) -> Result<Self> {
-        let data_file = create_file(database_dir, FileType::DataFile, Some(file_id))?;
+#[derive(Debug)]
+pub struct Storage {
+    database_dir: PathBuf,
+    file_id: FileId,
+    storage_impl: StorageImpl,
+    file_size: u64,
+}
+
+impl Storage {
+    pub fn new<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
+        let data_file = create_file(database_dir.as_ref(), FileType::DataFile, Some(file_id))?;
         debug!(
             "Create row storage under path: {:?} with file id: {}",
-            database_dir, file_id
+            database_dir.as_ref(),
+            file_id
         );
-        Ok(RowStorage::FileStorage(FileStorage::new(
-            database_dir,
+        Ok(Storage {
+            storage_impl: StorageImpl::FileStorage(FileStorage::new(
+                database_dir.as_ref(),
+                file_id,
+                data_file,
+            )?),
             file_id,
-            data_file,
-        )?))
+            database_dir: database_dir.as_ref().to_path_buf(),
+            file_size: 0,
+        })
     }
 
-    pub fn open(database_dir: &Path, file_id: FileId) -> Result<Self> {
-        let data_file = fs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
-        Ok(RowStorage::FileStorage(FileStorage::new(
-            database_dir,
+    pub fn open<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
+        let data_file = fs::open_file(database_dir.as_ref(), FileType::DataFile, Some(file_id))?;
+        let meta = data_file.file.metadata()?;
+
+        Ok(Storage {
+            storage_impl: StorageImpl::FileStorage(FileStorage::new(
+                database_dir.as_ref(),
+                file_id,
+                data_file.file,
+            )?),
             file_id,
-            data_file.file,
-        )?))
+            database_dir: database_dir.as_ref().to_path_buf(),
+            file_size: meta.len(),
+        })
     }
 
     pub fn file_id(&self) -> FileId {
-        match self {
-            RowStorage::FileStorage(s) => s.get_file_id(),
-        }
+        self.file_id
     }
 
     pub fn file_size(&self) -> usize {
-        match self {
-            RowStorage::FileStorage(s) => s.file_size(),
-        }
+        self.file_size as usize
     }
 
     pub fn is_empty(&self) -> bool {
         self.file_size() == 0
     }
 
-    pub fn iter(&self) -> Result<StableFileIter> {
-        match self {
-            RowStorage::FileStorage(s) => s.iter(),
-        }
+    pub fn iter(&self) -> Result<StorageIter> {
+        Ok(StorageIter {
+            storage: Storage::open(&self.database_dir, self.file_id)?,
+        })
     }
 }
 
-impl StorageWriter for RowStorage {
+impl StorageWriter for Storage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
-        match self {
-            RowStorage::FileStorage(s) => s
+        let r = match &mut self.storage_impl {
+            StorageImpl::FileStorage(s) => s
                 .write_row(row)
                 .map_err(|e| StorageError::WriteRowFailed(s.file_id, e.to_string())),
-        }
+        }?;
+        self.file_size += r.row_size;
+        Ok(r)
     }
 
-    fn transit_to_readonly(self) -> Result<RowStorage> {
-        match self {
-            RowStorage::FileStorage(s) => {
+    fn transit_to_readonly(self) -> Result<Storage> {
+        match self.storage_impl {
+            StorageImpl::FileStorage(s) => {
                 let file_id = s.file_id;
                 s.transit_to_readonly()
                     .map_err(|e| StorageError::TransitToReadOnlyFailed(file_id, e.to_string()))
@@ -129,32 +146,47 @@ impl StorageWriter for RowStorage {
     }
 
     fn flush(&mut self) -> Result<()> {
-        match self {
-            RowStorage::FileStorage(s) => s
+        match &mut self.storage_impl {
+            StorageImpl::FileStorage(s) => s
                 .flush()
                 .map_err(|e| StorageError::FlushStorageFailed(s.file_id, e.to_string())),
         }
     }
 }
 
-impl StorageReader for RowStorage {
+impl StorageReader for Storage {
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
-        match self {
-            RowStorage::FileStorage(s) => s
+        match &mut self.storage_impl {
+            StorageImpl::FileStorage(s) => s
                 .read_value(row_offset, row_size)
                 .map_err(|e| StorageError::ReadRowFailed(s.file_id, e.to_string())),
         }
     }
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
-        match self {
-            RowStorage::FileStorage(s) => s.read_next_row(),
+        match &mut self.storage_impl {
+            StorageImpl::FileStorage(s) => s.read_next_row(),
         }
     }
+}
 
-    fn file_size(&self) -> usize {
-        match self {
-            RowStorage::FileStorage(s) => s.file_size(),
+#[derive(Debug)]
+pub struct StorageIter {
+    storage: Storage,
+}
+
+impl Iterator for StorageIter {
+    type Item = Result<RowToRead>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ret = self.storage.read_next_row();
+        match ret {
+            Ok(o) => o.map(Ok),
+            Err(e) => {
+                error!(target: "Storage", "Data file with file id {} was corrupted. Error: {}", 
+                self.storage.file_id(), &e);
+                None
+            }
         }
     }
 }
@@ -163,37 +195,19 @@ impl StorageReader for RowStorage {
 pub struct FileStorage {
     database_dir: PathBuf,
     data_file: File,
-    file_size: u64,
     pub file_id: FileId,
+    capacity: u64,
 }
 
 impl FileStorage {
-    pub fn new(database_dir: &Path, file_id: FileId, data_file: File) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(database_dir: P, file_id: FileId, data_file: File) -> Result<Self> {
         let meta = data_file.metadata()?;
 
         Ok(FileStorage {
-            database_dir: database_dir.to_path_buf(),
+            database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             file_id,
-            file_size: meta.len(),
-        })
-    }
-}
-
-impl FileStorage {
-    fn get_file_id(&self) -> FileId {
-        self.file_id
-    }
-
-    fn file_size(&self) -> usize {
-        self.file_size as usize
-    }
-
-    fn iter(&self) -> Result<StableFileIter> {
-        let file = fs::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
-        let stable_file = FileStorage::new(&self.database_dir, self.file_id, file.file)?;
-        Ok(StableFileIter {
-            stable_file: RowStorage::FileStorage(stable_file),
+            capacity: meta.len(),
         })
     }
 }
@@ -204,8 +218,6 @@ impl StorageWriter for FileStorage {
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&data_to_write)?;
 
-        self.file_size += row.size;
-
         Ok(RowLocation {
             file_id: self.file_id,
             row_offset: value_offset,
@@ -213,16 +225,22 @@ impl StorageWriter for FileStorage {
         })
     }
 
-    fn transit_to_readonly(mut self) -> Result<RowStorage> {
+    fn transit_to_readonly(mut self) -> Result<Storage> {
         self.data_file.flush()?;
         let mut perms = self.data_file.metadata()?.permissions();
         perms.set_readonly(true);
         self.data_file.set_permissions(perms)?;
-        Ok(RowStorage::FileStorage(FileStorage::new(
-            &self.database_dir,
-            self.file_id,
-            self.data_file,
-        )?))
+        let file_size = self.data_file.metadata()?.len();
+        Ok(Storage {
+            storage_impl: StorageImpl::FileStorage(FileStorage::new(
+                &self.database_dir,
+                self.file_id,
+                self.data_file,
+            )?),
+            file_id: self.file_id,
+            database_dir: self.database_dir,
+            file_size,
+        })
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -231,10 +249,6 @@ impl StorageWriter for FileStorage {
 }
 
 impl StorageReader for FileStorage {
-    fn file_size(&self) -> usize {
-        self.file_size as usize
-    }
-
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
         let mut buf = vec![0; row_size as usize];
@@ -276,7 +290,7 @@ impl StorageReader for FileStorage {
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         let value_offset = self.data_file.stream_position()?;
-        if value_offset >= self.file_size {
+        if value_offset >= self.capacity {
             return Ok(None);
         }
 
@@ -326,26 +340,5 @@ impl StorageReader for FileStorage {
             },
             timestamp: tstmp,
         }))
-    }
-}
-
-#[derive(Debug)]
-pub struct StableFileIter {
-    stable_file: RowStorage,
-}
-
-impl Iterator for StableFileIter {
-    type Item = Result<RowToRead>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let ret = self.stable_file.read_next_row();
-        match ret {
-            Ok(o) => o.map(Ok),
-            Err(e) => {
-                error!(target: "Database", "Data file with file id {} was corrupted. Error: {}", 
-                self.stable_file.file_id(), &e);
-                None
-            }
-        }
     }
 }

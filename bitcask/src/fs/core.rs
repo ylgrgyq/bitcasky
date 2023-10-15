@@ -39,8 +39,8 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
     true
 }
 
-pub fn create_file(
-    base_dir: &Path,
+pub fn create_file<P: AsRef<Path>>(
+    base_dir: P,
     file_type: FileType,
     file_id: Option<FileId>,
 ) -> std::io::Result<File> {
@@ -52,8 +52,8 @@ pub fn create_file(
         .open(path)
 }
 
-pub fn open_file(
-    base_dir: &Path,
+pub fn open_file<P: AsRef<Path>>(
+    base_dir: P,
     file_type: FileType,
     file_id: Option<FileId>,
 ) -> std::io::Result<IdentifiedFile> {
