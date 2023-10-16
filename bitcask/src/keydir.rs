@@ -33,7 +33,6 @@ impl KeyDir {
                 file_id: item.file_id,
                 row_offset: item.row_offset,
                 row_size: item.row_size,
-                timestamp: item.timestamp,
             };
             kd.put(item.key, row_pos);
         }

@@ -1,19 +1,19 @@
 use std::{
     fs::{self, File},
+    io::Result,
     path::Path,
 };
 
-use crate::{
-    error::{BitcaskError, BitcaskResult},
-    fs::FileType,
-};
+use log::debug;
+
+use crate::{file_id::FileId, fs::FileType};
 
 const TESTING_DIRECTORY: &str = "Testing";
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
     pub file: File,
-    pub file_id: Option<u32>,
+    pub file_id: Option<FileId>,
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
@@ -39,24 +39,24 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
     true
 }
 
-pub fn create_file(
-    base_dir: &Path,
+pub fn create_file<P: AsRef<Path>>(
+    base_dir: P,
     file_type: FileType,
-    file_id: Option<u32>,
-) -> BitcaskResult<File> {
+    file_id: Option<FileId>,
+) -> std::io::Result<File> {
     let path = file_type.get_path(base_dir, file_id);
-    Ok(File::options()
+    File::options()
         .write(true)
         .create(true)
         .read(true)
-        .open(path)?)
+        .open(path)
 }
 
-pub fn open_file(
-    base_dir: &Path,
+pub fn open_file<P: AsRef<Path>>(
+    base_dir: P,
     file_type: FileType,
-    file_id: Option<u32>,
-) -> BitcaskResult<IdentifiedFile> {
+    file_id: Option<FileId>,
+) -> std::io::Result<IdentifiedFile> {
     let path = file_type.get_path(base_dir, file_id);
     let file = File::options().read(true).open(path)?;
     Ok(IdentifiedFile {
@@ -66,41 +66,28 @@ pub fn open_file(
     })
 }
 
-fn open_file_by_path(file_type: FileType, file_path: &Path) -> BitcaskResult<IdentifiedFile> {
-    if file_type.check_file_belongs_to_type(file_path) {
-        let file_id = file_type.parse_file_id_from_file_name(file_path);
-        let file = File::options().read(true).open(file_path)?;
-        return Ok(IdentifiedFile {
-            file_type,
-            file,
-            file_id,
-        });
-    }
-    let file_name = file_path
-        .file_name()
-        .map(|s| s.to_str().unwrap_or(""))
-        .unwrap_or("");
-    Err(BitcaskError::InvalidFileName(file_name.into()))
-}
-
-pub fn delete_file(
-    base_dir: &Path,
-    file_type: FileType,
-    file_id: Option<u32>,
-) -> BitcaskResult<()> {
+pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>) -> Result<()> {
     let path = file_type.get_path(base_dir, file_id);
     if path.exists() {
         fs::remove_file(path)?;
+        if let Some(id) = file_id {
+            debug!(
+                "Delete {} type file with id: {} under path: {:?}",
+                file_type, id, base_dir
+            )
+        } else {
+            debug!("Delete {} type file under path: {:?}", file_type, base_dir)
+        }
     }
     Ok(())
 }
 
-pub fn commit_file(
+pub fn move_file(
     file_type: FileType,
-    file_id: Option<u32>,
+    file_id: Option<FileId>,
     from_dir: &Path,
     to_dir: &Path,
-) -> Result<(), std::io::Error> {
+) -> Result<()> {
     let from_p = file_type.get_path(from_dir, file_id);
     if from_p.exists() {
         let to_p = file_type.get_path(to_dir, file_id);
@@ -112,16 +99,17 @@ pub fn commit_file(
 pub fn change_file_id(
     base_dir: &Path,
     file_type: FileType,
-    from_file_id: u32,
-    to_file_id: u32,
-) -> BitcaskResult<()> {
+    from_file_id: FileId,
+    to_file_id: FileId,
+) -> Result<()> {
+    debug!("Change file id from {} to {}", from_file_id, to_file_id);
     let from_p = file_type.get_path(base_dir, Some(from_file_id));
     let to_p = file_type.get_path(base_dir, Some(to_file_id));
     fs::rename(from_p, to_p)?;
     Ok(())
 }
 
-pub fn create_dir(base_dir: &Path) -> BitcaskResult<()> {
+pub fn create_dir(base_dir: &Path) -> Result<()> {
     if !base_dir.exists() {
         std::fs::create_dir(base_dir)?;
     }
@@ -129,25 +117,12 @@ pub fn create_dir(base_dir: &Path) -> BitcaskResult<()> {
     Ok(())
 }
 
-pub fn delete_dir(base_dir: &Path) -> BitcaskResult<()> {
+pub fn delete_dir(base_dir: &Path) -> Result<()> {
     fs::remove_dir_all(base_dir)?;
     Ok(())
 }
 
-pub fn is_empty_dir(dir: &Path) -> BitcaskResult<bool> {
-    let paths = fs::read_dir(dir)?;
-
-    for path in paths {
-        let file_path = path?;
-        if file_path.path() == dir {
-            continue;
-        }
-        return Ok(false);
-    }
-    Ok(true)
-}
-
-pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
+pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> {
     let mut actual_file_ids = vec![];
     for path in fs::read_dir(dir_path).unwrap() {
         let file_dir_entry = path.unwrap();
@@ -166,10 +141,25 @@ pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<u32> {
     actual_file_ids
 }
 
+// used by some tests
+#[allow(dead_code)]
+pub fn is_empty_dir(dir: &Path) -> Result<bool> {
+    let paths = fs::read_dir(dir)?;
+
+    for path in paths {
+        let file_path = path?;
+        if file_path.path() == dir {
+            continue;
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
-        io::{Read, Write},
+        io::{ErrorKind, Read, Result, Write},
         vec,
     };
 
@@ -177,6 +167,26 @@ mod tests {
     use bitcask_tests::common::get_temporary_directory_path;
     use bytes::{Buf, Bytes, BytesMut};
     use test_log::test;
+
+    fn open_file_by_path(file_type: FileType, file_path: &Path) -> Result<IdentifiedFile> {
+        if file_type.check_file_belongs_to_type(file_path) {
+            let file_id = file_type.parse_file_id_from_file_name(file_path);
+            let file = File::options().read(true).open(file_path)?;
+            return Ok(IdentifiedFile {
+                file_type,
+                file,
+                file_id,
+            });
+        }
+        let file_name = file_path
+            .file_name()
+            .map(|s| s.to_str().unwrap_or(""))
+            .unwrap_or("");
+        Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("invalid file name: {}", file_name),
+        ))
+    }
 
     #[test]
     fn test_create_file() {
@@ -244,7 +254,7 @@ mod tests {
         let file_id = Some(123);
         create_file(&from_dir, FileType::DataFile, file_id).unwrap();
         assert!(FileType::DataFile.get_path(&from_dir, file_id).exists());
-        commit_file(FileType::DataFile, file_id, &from_dir, &to_dir).unwrap();
+        move_file(FileType::DataFile, file_id, &from_dir, &to_dir).unwrap();
         assert!(!FileType::DataFile.get_path(&from_dir, file_id).exists());
         assert!(FileType::DataFile.get_path(&to_dir, file_id).exists());
     }
@@ -252,12 +262,12 @@ mod tests {
     #[test]
     fn test_change_file_id() {
         let dir = get_temporary_directory_path();
-        let file_id = Some(123);
+        let file_id = 123;
         let new_file_id = 456;
-        create_file(&dir, FileType::DataFile, file_id).unwrap();
-        assert!(FileType::DataFile.get_path(&dir, file_id).exists());
-        change_file_id(&dir, FileType::DataFile, file_id.unwrap(), new_file_id).unwrap();
-        assert!(!FileType::DataFile.get_path(&dir, file_id).exists());
+        create_file(&dir, FileType::DataFile, Some(file_id)).unwrap();
+        assert!(FileType::DataFile.get_path(&dir, Some(file_id)).exists());
+        change_file_id(&dir, FileType::DataFile, file_id, new_file_id).unwrap();
+        assert!(!FileType::DataFile.get_path(&dir, Some(file_id)).exists());
         assert!(FileType::DataFile
             .get_path(&dir, Some(new_file_id))
             .exists());

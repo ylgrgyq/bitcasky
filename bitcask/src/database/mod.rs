@@ -2,11 +2,10 @@ mod core;
 pub use self::core::*;
 
 mod common;
-pub use self::common::RowLocation;
+pub use self::common::{deleted_value, RowLocation, TimedValue};
 
 mod constants;
 mod hint;
 
-mod stable_file;
-pub use self::stable_file::*;
-mod writing_file;
+mod data_storage;
+pub use self::data_storage::DataStorageError;

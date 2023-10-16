@@ -14,13 +14,12 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 10 * 1024,
     max_key_size: 64,
     max_value_size: 1024,
-    tolerate_data_file_corrption: true,
 };
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
     for op in ops.operations() {
         match op.operator() {
-            TestingOperator::PUT => bc.put(op.key(), &op.value()).unwrap(),
+            TestingOperator::PUT => bc.put(op.key(), op.value()).unwrap(),
             TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
             TestingOperator::MERGE => bc.merge().unwrap(),
         }

@@ -1,26 +1,30 @@
 use std::{
     cell::Cell,
     mem,
+    ops::Deref,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
 };
 
 use dashmap::{mapref::one::RefMut, DashMap};
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::{
-    database::hint::{self, HintFileWriter},
+    database::hint::{self, HintWriter},
     error::{BitcaskError, BitcaskResult},
-    file_id::FileIdGenerator,
+    file_id::{FileId, FileIdGenerator},
     fs::{self as SelfFs, FileType},
     utils,
 };
 use log::{debug, error, info};
 
-use super::{common::RecoveredRow, writing_file::WritingFile};
+use super::{
+    common::{RecoveredRow, TimedValue, Value},
+    data_storage::{DataStorage, DataStorageReader, DataStorageWriter, StorageIter},
+};
 use super::{
     common::{RowLocation, RowToRead, RowToWrite},
     hint::HintFile,
-    stable_file::{StableFile, StableFileIter},
 };
 /**
  * Statistics of a Database.
@@ -43,24 +47,23 @@ pub struct DatabaseStats {
 
 #[derive(Debug)]
 pub struct FileIds {
-    pub stable_file_ids: Vec<u32>,
-    pub writing_file_id: u32,
+    pub stable_file_ids: Vec<FileId>,
+    pub writing_file_id: FileId,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub max_file_size: u64,
-    pub tolerate_data_file_corruption: bool,
 }
 
 #[derive(Debug)]
 pub struct Database {
     pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
-    writing_file: Mutex<WritingFile>,
-    stable_files: DashMap<u32, Mutex<StableFile>>,
+    writing_file: Mutex<DataStorage>,
+    stable_files: DashMap<FileId, Mutex<DataStorage>>,
     options: DataBaseOptions,
-    hint_file_writer: HintFileWriter,
+    hint_file_writer: HintWriter,
     is_error: Mutex<Option<String>>,
 }
 
@@ -80,11 +83,10 @@ impl Database {
         if let Some(id) = data_file_ids.iter().max() {
             file_id_generator.update_file_id(*id);
         }
-        let writing_file = Mutex::new(WritingFile::new(
-            &database_dir,
-            file_id_generator.generate_next_file_id(),
-        )?);
-        let hint_file_writer = HintFileWriter::start(&database_dir);
+        let writing_file_id = file_id_generator.generate_next_file_id();
+        let writing_file = Mutex::new(DataStorage::new(&database_dir, writing_file_id)?);
+        debug!(target: "Database", "create writing file with id: {}", writing_file_id);
+        let hint_file_writer = HintWriter::start(&database_dir);
 
         let db = Database {
             writing_file,
@@ -104,114 +106,105 @@ impl Database {
         &self.database_dir
     }
 
-    pub fn get_max_file_id(&self) -> u32 {
-        let writing_file_ref = self.writing_file.lock().unwrap();
+    pub fn get_max_file_id(&self) -> FileId {
+        let writing_file_ref = self.writing_file.lock();
         writing_file_ref.file_id()
     }
 
-    pub fn write(&self, key: &Vec<u8>, value: &[u8]) -> BitcaskResult<RowLocation> {
+    pub fn write<V: Deref<Target = [u8]>>(
+        &self,
+        key: &Vec<u8>,
+        value: TimedValue<V>,
+    ) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new(key, value);
         self.do_write(row)
     }
 
-    pub fn write_with_timestamp(
-        &self,
-        key: &Vec<u8>,
-        value: &[u8],
-        timestamp: u64,
-    ) -> BitcaskResult<RowLocation> {
-        let row = RowToWrite::new_with_timestamp(key, value, timestamp);
-        self.do_write(row)
-    }
-
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock();
+        debug!("Flush writing file with id: {}", writing_file_ref.file_id());
         // flush file only when we actually wrote something
-        if writing_file_ref.file_size() > 0 {
-            self.do_flush_writing_file(&mut writing_file_ref)?;
-        }
+        self.do_flush_writing_file(&mut writing_file_ref)?;
+
         Ok(())
     }
 
     pub fn recovery_iter(&self) -> BitcaskResult<DatabaseRecoverIter> {
-        let mut file_ids: Vec<u32>;
+        let mut file_ids: Vec<FileId>;
         {
-            let writing_file = self.writing_file.lock().unwrap();
+            let writing_file = self.writing_file.lock();
             let writing_file_id = writing_file.file_id();
 
             file_ids = self
                 .stable_files
                 .iter()
-                .map(|f| f.lock().unwrap().file_id)
-                .collect::<Vec<u32>>();
+                .map(|f| f.lock().file_id())
+                .collect::<Vec<FileId>>();
             file_ids.push(writing_file_id);
             file_ids.sort();
             file_ids.reverse();
         }
-        DatabaseRecoverIter::new(self.database_dir.clone(), file_ids, self.options)
+        DatabaseRecoverIter::new(self.database_dir.clone(), file_ids)
     }
 
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
-        let mut file_ids: Vec<u32>;
+        let mut file_ids: Vec<FileId>;
         {
-            let writing_file = self.writing_file.lock().unwrap();
+            let writing_file = self.writing_file.lock();
             let writing_file_id = writing_file.file_id();
 
             file_ids = self
                 .stable_files
                 .iter()
-                .map(|f| f.lock().unwrap().file_id)
-                .collect::<Vec<u32>>();
+                .map(|f| f.lock().file_id())
+                .collect::<Vec<FileId>>();
             file_ids.push(writing_file_id);
         }
 
-        let files: BitcaskResult<Vec<StableFile>> = file_ids
+        let files: BitcaskResult<Vec<DataStorage>> = file_ids
             .iter()
-            .map(|id| SelfFs::open_file(&self.database_dir, FileType::DataFile, Some(*id)))
-            .map(|f| {
-                f.and_then(|f| match f.file_type {
-                    FileType::DataFile => StableFile::new(
-                        &self.database_dir,
-                        f.file_id.unwrap(),
-                        f.file,
-                        self.options.tolerate_data_file_corruption,
-                    ),
-                    _ => unreachable!(),
-                })
-            })
+            .map(|f| DataStorage::open(&self.database_dir, *f).map_err(BitcaskError::StorageError))
             .collect();
+
         let mut opened_stable_files = files?;
-        opened_stable_files.sort_by_key(|e| e.file_id);
-        let iters: BitcaskResult<Vec<StableFileIter>> =
+        opened_stable_files.sort_by_key(|e| e.file_id());
+        let iters: crate::database::data_storage::Result<Vec<StorageIter>> =
             opened_stable_files.iter().rev().map(|f| f.iter()).collect();
+
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<Vec<u8>> {
+    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue<Value>> {
         {
-            let mut writing_file_ref = self.writing_file.lock().unwrap();
+            let mut writing_file_ref = self.writing_file.lock();
             if row_position.file_id == writing_file_ref.file_id() {
-                return writing_file_ref.read_value(row_position.row_offset, row_position.row_size);
+                return Ok(
+                    writing_file_ref.read_value(row_position.row_offset, row_position.row_size)?
+                );
             }
         }
 
         let l = self.get_file_to_read(row_position.file_id)?;
-        let mut f = l.lock().unwrap();
-        f.read_value(row_position.row_offset, row_position.row_size)
+        let mut f = l.lock();
+        let ret = f.read_value(row_position.row_offset, row_position.row_size)?;
+        Ok(ret)
     }
 
-    pub fn reload_data_files(&self, data_file_ids: Vec<u32>) -> BitcaskResult<()> {
+    pub fn reload_data_files(&self, data_file_ids: Vec<FileId>) -> BitcaskResult<()> {
         self.stable_files.clear();
 
         for file_id in data_file_ids {
             if self.stable_files.contains_key(&file_id) {
                 core::panic!("file id: {} already loaded in database", file_id);
             }
-            if let Some(f) = StableFile::open(
-                &self.database_dir,
-                file_id,
-                self.options.tolerate_data_file_corruption,
-            )? {
+            if let Ok(f) = DataStorage::open(&self.database_dir, file_id) {
+                if f.is_empty() {
+                    info!(
+                        target: "Database",
+                        "skip load empty data file with id: {}", &file_id
+                    );
+                    continue;
+                }
                 self.stable_files.insert(file_id, Mutex::new(f));
             }
         }
@@ -219,12 +212,12 @@ impl Database {
     }
 
     pub fn get_file_ids(&self) -> FileIds {
-        let writing_file_ref = self.writing_file.lock().unwrap();
+        let writing_file_ref = self.writing_file.lock();
         let writing_file_id = writing_file_ref.file_id();
-        let stable_file_ids: Vec<u32> = self
+        let stable_file_ids: Vec<FileId> = self
             .stable_files
             .iter()
-            .map(|f| f.value().lock().unwrap().file_id)
+            .map(|f| f.value().lock().file_id())
             .collect();
         FileIds {
             stable_file_ids,
@@ -235,14 +228,14 @@ impl Database {
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
         let writing_file_size: u64;
         {
-            writing_file_size = self.writing_file.lock().unwrap().file_size() as u64;
+            writing_file_size = self.writing_file.lock().file_size() as u64;
         }
         let mut total_data_size_in_bytes: u64 = self
             .stable_files
             .iter()
             .map(|f| {
-                let file = f.value().lock().unwrap();
-                file.file_size
+                let file = f.value().lock();
+                file.file_size() as u64
             })
             .collect::<Vec<u64>>()
             .iter()
@@ -258,14 +251,24 @@ impl Database {
     }
 
     pub fn close(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_file.lock().unwrap();
+        let mut writing_file_ref = self.writing_file.lock();
         writing_file_ref.flush()?;
         Ok(())
     }
 
     pub fn drop(&self) -> BitcaskResult<()> {
-        self.flush_writing_file()?;
-        for file_id in self.stable_files.iter().map(|v| v.lock().unwrap().file_id) {
+        debug!("Drop database called");
+
+        {
+            let mut writing_file_ref = self.writing_file.lock();
+            debug!(
+                "Flush writing file with id: {} on drop database",
+                writing_file_ref.file_id()
+            );
+            // flush file only when we actually wrote something
+            self.do_flush_writing_file(&mut writing_file_ref)?;
+        }
+        for file_id in self.stable_files.iter().map(|v| v.lock().file_id()) {
             SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         }
         self.stable_files.clear();
@@ -273,61 +276,73 @@ impl Database {
     }
 
     pub fn sync(&self) -> BitcaskResult<()> {
-        let mut f = self.writing_file.lock().unwrap();
-        f.flush()
+        let mut f = self.writing_file.lock();
+        f.flush()?;
+        Ok(())
     }
 
     pub fn mark_db_error(&self, error_string: String) {
-        let mut err = self.is_error.lock().expect("lock db is error mutex failed");
+        let mut err = self.is_error.lock();
         *err = Some(error_string)
     }
 
     pub fn check_db_error(&self) -> Result<(), BitcaskError> {
-        let err = self.is_error.lock().expect("lock db is error mutex failed");
+        let err = self.is_error.lock();
         if err.is_some() {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
         Ok(())
     }
 
-    fn do_write(&self, row: RowToWrite) -> BitcaskResult<RowLocation> {
-        let mut writing_file_ref = self.writing_file.lock().unwrap();
+    fn do_write<V: Deref<Target = [u8]>>(&self, row: RowToWrite<V>) -> BitcaskResult<RowLocation> {
+        let mut writing_file_ref = self.writing_file.lock();
         if self.check_file_overflow(&writing_file_ref, &row) {
+            debug!(
+                "Flush writing file with id: {} on overflow",
+                writing_file_ref.file_id()
+            );
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
-        writing_file_ref.write_row(row)
+        Ok(writing_file_ref.write_row(row)?)
     }
 
-    fn check_file_overflow(
+    fn check_file_overflow<V: Deref<Target = [u8]>>(
         &self,
-        writing_file_ref: &MutexGuard<WritingFile>,
-        row: &RowToWrite,
+        writing_file_ref: &MutexGuard<DataStorage>,
+        row: &RowToWrite<V>,
     ) -> bool {
         row.size + writing_file_ref.file_size() as u64 > self.options.max_file_size
     }
 
     fn do_flush_writing_file(
         &self,
-        writing_file_ref: &mut MutexGuard<WritingFile>,
+        writing_file_ref: &mut MutexGuard<DataStorage>,
     ) -> BitcaskResult<()> {
+        if writing_file_ref.file_size() == 0 {
+            debug!(
+                "Skip flush empty wirting file with id: {}",
+                writing_file_ref.file_id()
+            );
+            return Ok(());
+        }
         let next_file_id = self.file_id_generator.generate_next_file_id();
-        let next_writing_file = WritingFile::new(&self.database_dir, next_file_id)?;
-        let mut old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
-        old_file.flush()?;
-        let (file_id, file) = old_file.transit_to_readonly()?;
-        let stable_file = StableFile::new(
-            &self.database_dir,
-            file_id,
-            file,
-            self.options.tolerate_data_file_corruption,
-        )?;
-        self.stable_files.insert(file_id, Mutex::new(stable_file));
+        let next_writing_file = DataStorage::new(&self.database_dir, next_file_id)?;
+        let old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
+
+        let stable_storage = old_file.transit_to_readonly()?;
+
+        let file_id = stable_storage.file_id();
+        self.stable_files
+            .insert(file_id, Mutex::new(stable_storage));
         self.hint_file_writer.async_write_hint_file(file_id);
-        debug!(target: "Database", "writing file id changed from {} to {}", file_id, next_file_id);
+        debug!(target: "Database", "writing file with id: {} flushed, new writing file with id: {} created", file_id, next_file_id);
         Ok(())
     }
 
-    fn get_file_to_read(&self, file_id: u32) -> BitcaskResult<RefMut<u32, Mutex<StableFile>>> {
+    fn get_file_to_read(
+        &self,
+        file_id: FileId,
+    ) -> BitcaskResult<RefMut<FileId, Mutex<DataStorage>>> {
         self.stable_files
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
@@ -345,12 +360,12 @@ impl Drop for Database {
 }
 
 pub struct DatabaseIter {
-    current_iter: Cell<Option<StableFileIter>>,
-    remain_iters: Vec<StableFileIter>,
+    current_iter: Cell<Option<StorageIter>>,
+    remain_iters: Vec<StorageIter>,
 }
 
 impl DatabaseIter {
-    fn new(mut iters: Vec<StableFileIter>) -> Self {
+    fn new(mut iters: Vec<StorageIter>) -> Self {
         if iters.is_empty() {
             DatabaseIter {
                 remain_iters: iters,
@@ -377,7 +392,7 @@ impl Iterator for DatabaseIter {
                     None => {
                         self.current_iter.replace(self.remain_iters.pop());
                     }
-                    other => return other,
+                    other => return other.map(|r| r.map_err(BitcaskError::StorageError)),
                 },
             }
         }
@@ -387,8 +402,7 @@ impl Iterator for DatabaseIter {
 
 fn recovered_iter(
     database_dir: &Path,
-    file_id: u32,
-    tolerate_data_file_corruption: bool,
+    file_id: FileId,
 ) -> BitcaskResult<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>> {
     if FileType::HintFile
         .get_path(database_dir, Some(file_id))
@@ -398,23 +412,18 @@ fn recovered_iter(
         Ok(Box::new(HintFile::open_iterator(database_dir, file_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", file_id);
-        let data_file = SelfFs::open_file(database_dir, FileType::DataFile, Some(file_id))?;
-        let stable_file = StableFile::new(
-            database_dir,
-            file_id,
-            data_file.file,
-            tolerate_data_file_corruption,
-        )?;
+        let stable_file = DataStorage::open(database_dir, file_id)?;
         let i = stable_file.iter().map(|iter| {
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
                     file_id: r.row_position.file_id,
-                    timestamp: r.row_position.timestamp,
+                    timestamp: r.timestamp,
                     row_offset: r.row_position.row_offset,
                     row_size: r.row_position.row_size,
                     key: r.key,
                     is_tombstone: utils::is_tombstone(&r.value),
                 })
+                .map_err(BitcaskError::StorageError)
             })
         })?;
         Ok(Box::new(i))
@@ -423,35 +432,25 @@ fn recovered_iter(
 
 pub struct DatabaseRecoverIter {
     current_iter: Cell<Option<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>>>,
-    data_file_ids: Vec<u32>,
+    data_file_ids: Vec<FileId>,
     database_dir: PathBuf,
-    tolerate_data_file_corruption: bool,
 }
 
 impl DatabaseRecoverIter {
-    fn new(
-        database_dir: PathBuf,
-        mut iters: Vec<u32>,
-        options: DataBaseOptions,
-    ) -> BitcaskResult<Self> {
+    fn new(database_dir: PathBuf, mut iters: Vec<FileId>) -> BitcaskResult<Self> {
         if let Some(file_id) = iters.pop() {
-            let iter: Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>> = recovered_iter(
-                &database_dir,
-                file_id,
-                options.tolerate_data_file_corruption,
-            )?;
+            let iter: Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>> =
+                recovered_iter(&database_dir, file_id)?;
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_file_ids: iters,
                 current_iter: Cell::new(Some(iter)),
-                tolerate_data_file_corruption: options.tolerate_data_file_corruption,
             })
         } else {
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_file_ids: iters,
                 current_iter: Cell::new(None),
-                tolerate_data_file_corruption: options.tolerate_data_file_corruption,
             })
         }
     }
@@ -467,11 +466,7 @@ impl Iterator for DatabaseRecoverIter {
                 Some(iter) => match iter.next() {
                     None => {
                         if let Some(file_id) = self.data_file_ids.pop() {
-                            match recovered_iter(
-                                &self.database_dir,
-                                file_id,
-                                self.tolerate_data_file_corruption,
-                            ) {
+                            match recovered_iter(&self.database_dir, file_id) {
                                 Ok(iter) => {
                                     self.current_iter.replace(Some(iter));
                                 }
@@ -493,13 +488,12 @@ impl Iterator for DatabaseRecoverIter {
 pub mod database_tests_utils {
     use bitcask_tests::common::TestingKV;
 
-    use crate::database::RowLocation;
+    use crate::database::{common::TimedValue, RowLocation};
 
     use super::{DataBaseOptions, Database};
 
     pub const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         max_file_size: 1024,
-        tolerate_data_file_corruption: true,
     };
 
     pub struct TestingRow {
@@ -521,7 +515,7 @@ pub mod database_tests_utils {
 
     pub fn assert_row_value(db: &Database, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
-        assert_eq!(*expect.kv.value(), actual);
+        assert_eq!(*expect.kv.value(), *actual.value);
     }
 
     pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
@@ -539,8 +533,17 @@ pub mod database_tests_utils {
     pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
         kvs.into_iter()
             .map(|kv| {
-                let pos = db.write(&kv.key(), &kv.value()).unwrap();
-                TestingRow::new(kv, pos)
+                let pos = db
+                    .write(&kv.key(), TimedValue::immortal_value(kv.value()))
+                    .unwrap();
+                TestingRow::new(
+                    kv,
+                    RowLocation {
+                        file_id: pos.file_id,
+                        row_offset: pos.row_offset,
+                        row_size: pos.row_size,
+                    },
+                )
             })
             .collect::<Vec<TestingRow>>()
     }
@@ -636,10 +639,7 @@ mod tests {
         let db = Database::open(
             &dir,
             file_id_generator,
-            DataBaseOptions {
-                max_file_size: 100,
-                tolerate_data_file_corruption: true,
-            },
+            DataBaseOptions { max_file_size: 100 },
         )
         .unwrap();
         let kvs = vec![

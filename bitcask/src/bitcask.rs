@@ -1,17 +1,19 @@
 use std::fs::File;
+use std::ops::Deref;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use log::{debug, error};
+use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::database::{DataBaseOptions, Database};
+use crate::database::{deleted_value, DataBaseOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
 use crate::fs::{self};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
-use crate::utils::{is_tombstone, TOMBSTONE_VALUE};
+use crate::utils::is_tombstone;
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
@@ -22,10 +24,6 @@ pub struct BitcaskOptions {
     pub max_key_size: usize,
     // maximum value size
     pub max_value_size: usize,
-    // On data file corruption, when this option is true,
-    // we recover data from it as many as we can and don't throw any error.
-    // Otherwise, we throw error and stop recover data from the corrupted file
-    pub tolerate_data_file_corrption: bool,
 }
 
 impl BitcaskOptions {
@@ -54,7 +52,6 @@ impl BitcaskOptions {
     fn get_database_options(&self) -> DataBaseOptions {
         DataBaseOptions {
             max_file_size: self.max_file_size,
-            tolerate_data_file_corruption: self.tolerate_data_file_corrption,
         }
     }
 }
@@ -66,7 +63,6 @@ impl Default for BitcaskOptions {
             max_file_size: 128 * 1024 * 1024,
             max_key_size: 64,
             max_value_size: 100 * 1024,
-            tolerate_data_file_corrption: true,
         }
     }
 }
@@ -132,7 +128,7 @@ impl Bitcask {
     }
 
     /// Stores the key and value in the database.
-    pub fn put(&self, key: Vec<u8>, value: &[u8]) -> BitcaskResult<()> {
+    pub fn put<V: Deref<Target = [u8]>>(&self, key: Vec<u8>, value: V) -> BitcaskResult<()> {
         if key.len() > self.options.max_key_size {
             return Err(BitcaskError::InvalidParameter(
                 "key".into(),
@@ -148,16 +144,19 @@ impl Bitcask {
 
         self.database.check_db_error()?;
 
-        let kd = self.keydir.write().unwrap();
-        let ret = self.database.write(&key, value).map_err(|e| {
-            error!(target: "BitcaskPut", "put data failed with error: {}", &e);
+        let kd = self.keydir.write();
+        let ret = self
+            .database
+            .write(&key, TimedValue::immortal_value(value))
+            .map_err(|e| {
+                error!(target: "BitcaskPut", "put data failed with error: {}", &e);
 
-            self.database.mark_db_error(e.to_string());
-            e
-        })?;
+                self.database.mark_db_error(e.to_string());
+                e
+            })?;
 
-        debug!(target: "Bitcask", "put data success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-            key, value, ret.file_id, ret.row_offset, ret.row_size, ret.timestamp);
+        debug!(target: "Bitcask", "put data success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}", 
+            key, ret.file_id, ret.row_offset, ret.row_size);
         kd.put(key, ret);
         Ok(())
     }
@@ -166,7 +165,7 @@ impl Bitcask {
     pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
         self.database.check_db_error()?;
 
-        let row_pos = { self.keydir.read().unwrap().get(key).map(|r| *r.value()) };
+        let row_pos = { self.keydir.read().get(key).map(|r| *r.value()) };
 
         match row_pos {
             Some(e) => {
@@ -174,7 +173,7 @@ impl Bitcask {
                 if is_tombstone(&v) {
                     return Ok(None);
                 }
-                Ok(Some(v))
+                Ok(Some(v.value.to_vec()))
             }
             None => Ok(None),
         }
@@ -184,13 +183,7 @@ impl Bitcask {
     pub fn has(&self, key: &Vec<u8>) -> BitcaskResult<bool> {
         self.database.check_db_error()?;
 
-        Ok(self
-            .keydir
-            .read()
-            .unwrap()
-            .get(key)
-            .map(|r| *r.value())
-            .is_some())
+        Ok(self.keydir.read().get(key).map(|r| *r.value()).is_some())
     }
 
     /// Iterates all the keys in database and apply each of them to the function f
@@ -199,7 +192,7 @@ impl Bitcask {
         F: FnMut(&Vec<u8>),
     {
         self.database.check_db_error()?;
-        let kd = self.keydir.read().unwrap();
+        let kd = self.keydir.read();
         for k in kd.iter() {
             f(k.key());
         }
@@ -213,7 +206,7 @@ impl Bitcask {
     {
         self.database.check_db_error()?;
         let mut acc = init;
-        for kd in self.keydir.read().unwrap().iter() {
+        for kd in self.keydir.read().iter() {
             acc = f(kd.key(), acc)?;
         }
         Ok(acc)
@@ -225,7 +218,7 @@ impl Bitcask {
         F: FnMut(&Vec<u8>, &Vec<u8>),
     {
         self.database.check_db_error()?;
-        let _kd = self.keydir.read().unwrap();
+        let _kd = self.keydir.read();
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
                 f(&row.key, &row.value);
@@ -243,7 +236,7 @@ impl Bitcask {
         F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
     {
         self.database.check_db_error()?;
-        let _kd = self.keydir.read().unwrap();
+        let _kd = self.keydir.read();
         let mut acc = init;
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
@@ -258,10 +251,10 @@ impl Bitcask {
     /// Deletes the named key.
     pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
         self.database.check_db_error()?;
-        let kd = self.keydir.write().unwrap();
+        let kd = self.keydir.write();
 
         if kd.contains_key(key) {
-            self.database.write(key, TOMBSTONE_VALUE.as_bytes())?;
+            self.database.write(key, deleted_value())?;
             kd.delete(key);
         }
 
@@ -270,7 +263,7 @@ impl Bitcask {
 
     /// Drop this entire database
     pub fn drop(&self) -> BitcaskResult<()> {
-        let kd = self.keydir.write().unwrap();
+        let kd = self.keydir.write();
 
         if let Err(e) = self.database.drop() {
             self.database
@@ -298,7 +291,7 @@ impl Bitcask {
     /// Returns statistics about the database, like the number of data files,
     /// keys and overall size on disk of the data
     pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
-        let kd = self.keydir.read().unwrap();
+        let kd = self.keydir.read();
         let key_size = kd.len();
         let db_stats = self.database.stats()?;
         Ok(BitcaskStats {

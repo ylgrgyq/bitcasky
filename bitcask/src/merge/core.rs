@@ -1,17 +1,18 @@
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
 };
 
 use bytes::{Buf, Bytes};
 
 use log::{debug, error, info, warn};
+use parking_lot::{Mutex, RwLock};
 
 use crate::{
-    database::{DataBaseOptions, Database},
+    database::{DataBaseOptions, Database, TimedValue},
     error::{BitcaskError, BitcaskResult},
-    file_id::FileIdGenerator,
+    file_id::{FileId, FileIdGenerator},
     fs::{self, FileType},
     keydir::KeyDir,
     utils::is_tombstone,
@@ -47,7 +48,7 @@ impl MergeManager {
     pub fn merge(&self, database: &Database, keydir: &RwLock<KeyDir>) -> BitcaskResult<()> {
         let lock_ret = self.merge_lock.try_lock();
 
-        if lock_ret.is_err() {
+        if lock_ret.is_none() {
             return Err(BitcaskError::MergeInProgress());
         }
 
@@ -56,14 +57,12 @@ impl MergeManager {
         debug!(target: "Bitcask", "start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_file_id);
 
         let merge_dir_path = create_merge_file_dir(database.get_database_dir())?;
-        let (file_ids, new_kd) =
+        let (file_ids, merged_key_dir) =
             self.write_merged_files(database, &merge_dir_path, &kd, known_max_file_id)?;
-
-        info!(target: "Bitcask", "database merged to files with ids: {:?}", &file_ids);
 
         {
             // stop read/write
-            let kd = keydir.write().unwrap();
+            let kd = keydir.write();
             database.flush_writing_file()?;
             self.commit_merge(&file_ids, known_max_file_id)
                 .and_then(|file_ids| database.reload_data_files(file_ids))
@@ -73,7 +72,7 @@ impl MergeManager {
                     e
                 })?;
 
-            for (k, v) in new_kd.into_iter() {
+            for (k, v) in merged_key_dir.into_iter() {
                 kd.checked_put(k, v)
             }
         }
@@ -92,6 +91,7 @@ impl MergeManager {
     }
 
     pub fn recover_merge(&self) -> BitcaskResult<()> {
+        debug!(target: "Bitcask", "start recover merge");
         let recover_ret = self.do_recover_merge();
         if let Err(err) = recover_ret {
             let merge_dir = merge_file_dir(&self.database_dir);
@@ -152,9 +152,9 @@ impl MergeManager {
         &self,
         database: &Database,
         keydir: &RwLock<KeyDir>,
-    ) -> BitcaskResult<(KeyDir, u32)> {
+    ) -> BitcaskResult<(KeyDir, FileId)> {
         // stop writing and switch the writing file to stable files
-        let _kd = keydir.write().unwrap();
+        let _kd = keydir.write();
         database.flush_writing_file()?;
         let known_max_file_id = database.get_max_file_id();
         Ok((_kd.clone(), known_max_file_id))
@@ -165,36 +165,40 @@ impl MergeManager {
         database: &Database,
         merge_file_dir: &Path,
         key_dir_to_write: &KeyDir,
-        known_max_file_id: u32,
-    ) -> BitcaskResult<(Vec<u32>, KeyDir)> {
+        known_max_file_id: FileId,
+    ) -> BitcaskResult<(Vec<FileId>, KeyDir)> {
         write_merge_meta(merge_file_dir, MergeMeta { known_max_file_id })?;
 
-        let new_kd = KeyDir::new_empty_key_dir();
+        let merged_key_dir = KeyDir::new_empty_key_dir();
         let merge_db =
             Database::open(merge_file_dir, self.file_id_generator.clone(), self.options)?;
 
+        let mut write_key_count = 0;
         for r in key_dir_to_write.iter() {
             let k = r.key();
             let v = database.read_value(r.value())?;
-            if !is_tombstone(&v) {
-                let pos = merge_db.write_with_timestamp(k, &v, r.value().timestamp)?;
-                new_kd.checked_put(k.clone(), pos);
-                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, value: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-                    k, v, pos.file_id, pos.row_offset, pos.row_size, pos.timestamp);
+            if !is_tombstone(&v.value) {
+                let pos = merge_db.write(k, TimedValue::has_time_value(v.value, v.timestamp))?;
+                merged_key_dir.checked_put(k.clone(), pos);
+                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
+                    k, pos.file_id, pos.row_offset, pos.row_size, v.timestamp);
+                write_key_count += 1;
             }
         }
+
         merge_db.flush_writing_file()?;
         let file_ids = merge_db.get_file_ids();
+        info!(target: "Bitcask", "{} keys in database merged to files with ids: {:?}", write_key_count, &file_ids.stable_file_ids);
         // we do not write anything in writing file
         // so we can only use stable files
-        Ok((file_ids.stable_file_ids, new_kd))
+        Ok((file_ids.stable_file_ids, merged_key_dir))
     }
 
     fn commit_merge(
         &self,
-        merged_file_ids: &Vec<u32>,
-        known_max_file_id: u32,
-    ) -> BitcaskResult<Vec<u32>> {
+        merged_file_ids: &Vec<FileId>,
+        known_max_file_id: FileId,
+    ) -> BitcaskResult<Vec<FileId>> {
         let mut data_file_ids = self.shift_data_files(known_max_file_id)?;
 
         commit_merge_files(&self.database_dir, merged_file_ids)?;
@@ -204,11 +208,11 @@ impl MergeManager {
         Ok(data_file_ids)
     }
 
-    fn shift_data_files(&self, known_max_file_id: u32) -> BitcaskResult<Vec<u32>> {
+    fn shift_data_files(&self, known_max_file_id: FileId) -> BitcaskResult<Vec<FileId>> {
         let mut data_file_ids = fs::get_file_ids_in_dir(&self.database_dir, FileType::DataFile)
             .into_iter()
             .filter(|id| *id >= known_max_file_id)
-            .collect::<Vec<u32>>();
+            .collect::<Vec<FileId>>();
         // must change name in descending order to keep data file's order even when any change name operation failed
         data_file_ids.sort_by(|a, b| b.cmp(a));
 
@@ -278,16 +282,16 @@ fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
     Ok(merge_dir_path)
 }
 
-fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()> {
+fn commit_merge_files(base_dir: &Path, file_ids: &Vec<FileId>) -> BitcaskResult<()> {
     let merge_dir_path = merge_file_dir(base_dir);
     for file_id in file_ids {
-        fs::commit_file(
+        fs::move_file(
             FileType::DataFile,
             Some(*file_id),
             &merge_dir_path,
             base_dir,
         )?;
-        fs::commit_file(
+        fs::move_file(
             FileType::HintFile,
             Some(*file_id),
             &merge_dir_path,
@@ -297,7 +301,7 @@ fn commit_merge_files(base_dir: &Path, file_ids: &Vec<u32>) -> BitcaskResult<()>
     Ok(())
 }
 
-fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult<()> {
+fn purge_outdated_data_files(base_dir: &Path, max_file_id: FileId) -> BitcaskResult<()> {
     fs::get_file_ids_in_dir(base_dir, FileType::DataFile)
         .iter()
         .filter(|id| **id < max_file_id)
@@ -310,7 +314,7 @@ fn purge_outdated_data_files(base_dir: &Path, max_file_id: u32) -> BitcaskResult
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 struct MergeMeta {
-    pub known_max_file_id: u32,
+    pub known_max_file_id: FileId,
 }
 
 fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
@@ -601,9 +605,11 @@ mod tests {
                 file_id_generator.clone(),
                 DEFAULT_OPTIONS,
             );
+
             let files = merge_manager
                 .commit_merge(&db.get_file_ids().stable_file_ids, old_db.get_max_file_id())
                 .unwrap();
+
             old_db.reload_data_files(files).unwrap();
         }
 

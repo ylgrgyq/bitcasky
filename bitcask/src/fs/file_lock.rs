@@ -7,7 +7,7 @@ use crate::error::BitcaskResult;
 
 use super::FileType;
 
-use fs2::FileExt;
+use fs4::FileExt;
 use log::error;
 
 pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {

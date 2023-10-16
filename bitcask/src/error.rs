@@ -28,6 +28,8 @@ pub enum BitcaskError {
     InvalidMergeDataFile(u32, u32),
     #[error("Unknown server error: {0}")]
     UnknownServerError(String),
+    #[error(transparent)]
+    StorageError(#[from] crate::database::DataStorageError),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;

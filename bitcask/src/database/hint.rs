@@ -9,10 +9,12 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 
 use crate::{
+    database::data_storage::DataStorage,
     error::{BitcaskError, BitcaskResult},
+    file_id::FileId,
     fs::{self, FileType},
     utils,
 };
@@ -23,7 +25,6 @@ use super::{
     constants::{
         DATA_FILE_KEY_OFFSET, KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE,
     },
-    StableFile,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -45,12 +46,12 @@ const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct HintFile {
-    file_id: u32,
+    file_id: FileId,
     file: File,
 }
 
 impl HintFile {
-    pub fn create(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+    pub fn create(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
         let file = fs::create_file(database_dir, FileType::HintFile, Some(file_id))?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -59,7 +60,7 @@ impl HintFile {
         Ok(HintFile { file_id, file })
     }
 
-    pub fn open_iterator(database_dir: &Path, file_id: u32) -> BitcaskResult<HintFileIterator> {
+    pub fn open_iterator(database_dir: &Path, file_id: FileId) -> BitcaskResult<HintFileIterator> {
         let file = Self::open(database_dir, file_id)?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -118,7 +119,7 @@ impl HintFile {
         bs.freeze()
     }
 
-    fn open(database_dir: &Path, file_id: u32) -> BitcaskResult<Self> {
+    fn open(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
         let file = fs::open_file(database_dir, FileType::HintFile, Some(file_id))?;
         Ok(HintFile {
             file_id,
@@ -161,13 +162,13 @@ impl Iterator for HintFileIterator {
 }
 
 #[derive(Debug)]
-pub struct HintFileWriter {
-    sender: ManuallyDrop<Sender<u32>>,
+pub struct HintWriter {
+    sender: ManuallyDrop<Sender<FileId>>,
     worker_join_handle: Option<JoinHandle<()>>,
 }
 
-impl HintFileWriter {
-    pub fn start(database_dir: &Path) -> HintFileWriter {
+impl HintWriter {
+    pub fn start(database_dir: &Path) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
@@ -185,13 +186,13 @@ impl HintFileWriter {
             }
         }));
 
-        HintFileWriter {
+        HintWriter {
             sender: ManuallyDrop::new(sender),
             worker_join_handle,
         }
     }
 
-    pub fn async_write_hint_file(&self, data_file_id: u32) {
+    pub fn async_write_hint_file(&self, data_file_id: FileId) {
         if let Err(e) = self.sender.send(data_file_id) {
             error!(
                 target: DEFAULT_LOG_TARGET,
@@ -204,12 +205,17 @@ impl HintFileWriter {
         self.sender.len()
     }
 
-    fn write_hint_file(database_dir: &Path, data_file_id: u32) -> BitcaskResult<()> {
-        let stable_file_opt = StableFile::open(database_dir, data_file_id, false)?;
-        if stable_file_opt.is_none() {
+    fn write_hint_file(database_dir: &Path, data_file_id: FileId) -> BitcaskResult<()> {
+        let stable_file_opt = DataStorage::open(database_dir, data_file_id)?;
+        if stable_file_opt.is_empty() {
+            info!(
+                target: DEFAULT_LOG_TARGET,
+                "skip write hint for empty data file with id: {}", &data_file_id
+            );
             return Ok(());
         }
-        let data_itr = stable_file_opt.unwrap().iter()?;
+
+        let data_itr = stable_file_opt.iter()?;
 
         let mut m = HashMap::new();
         for row in data_itr {
@@ -221,7 +227,7 @@ impl HintFileWriter {
                         m.insert(
                             r.key.clone(),
                             HintRow {
-                                timestamp: r.row_position.timestamp,
+                                timestamp: r.timestamp,
                                 key_size: r.key.len() as u64,
                                 value_size: r.value.len() as u64,
                                 row_offset: r.row_position.row_offset,
@@ -230,7 +236,7 @@ impl HintFileWriter {
                         );
                     }
                 }
-                Err(e) => return Err(e),
+                Err(e) => return Err(BitcaskError::StorageError(e)),
             }
         }
 
@@ -239,7 +245,7 @@ impl HintFileWriter {
         m.values()
             .map(|r| hint_file.write_hint_row(r))
             .collect::<BitcaskResult<Vec<_>>>()?;
-        fs::commit_file(
+        fs::move_file(
             FileType::HintFile,
             Some(data_file_id),
             &hint_file_tmp_dir,
@@ -249,7 +255,7 @@ impl HintFileWriter {
     }
 }
 
-impl Drop for HintFileWriter {
+impl Drop for HintWriter {
     fn drop(&mut self) {
         unsafe { ManuallyDrop::drop(&mut self.sender) }
         if let Some(join_handle) = self.worker_join_handle.take() {
@@ -294,7 +300,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{common::RowToWrite, writing_file::WritingFile};
+    use crate::database::{common::RowToWrite, data_storage::DataStorageWriter};
 
     use super::*;
     use test_log::test;
@@ -326,14 +332,16 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = WritingFile::new(&dir, file_id).unwrap();
+        let mut writing_file = DataStorage::new(&dir, file_id).unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
-        let pos = writing_file.write_row(RowToWrite::new(&key, &val)).unwrap();
+        let pos = writing_file
+            .write_row(RowToWrite::new(&key, val.to_vec()))
+            .unwrap();
         writing_file.transit_to_readonly().unwrap();
 
         {
-            let writer = HintFileWriter::start(&dir);
+            let writer = HintWriter::start(&dir);
             writer.async_write_hint_file(file_id);
         }
 
@@ -344,6 +352,5 @@ mod tests {
         assert_eq!(key.len() as u64, hint_row.key_size);
         assert_eq!(val.len() as u64, hint_row.value_size);
         assert_eq!(pos.row_offset, hint_row.row_offset);
-        assert_eq!(pos.timestamp, hint_row.timestamp);
     }
 }
