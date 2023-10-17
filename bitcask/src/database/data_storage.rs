@@ -67,6 +67,7 @@ pub struct DataStorage {
     file_id: FileId,
     storage_impl: DataStorageImpl,
     file_size: u64,
+    readonly: bool,
 }
 
 impl DataStorage {
@@ -84,6 +85,7 @@ impl DataStorage {
             file_id,
             database_dir: path,
             file_size: 0,
+            readonly: false,
         })
     }
 
@@ -106,6 +108,7 @@ impl DataStorage {
             file_id,
             database_dir: path,
             file_size,
+            readonly: meta.permissions().readonly(),
         })
     }
 
@@ -119,6 +122,10 @@ impl DataStorage {
 
     pub fn is_empty(&self) -> bool {
         self.file_size() == 0
+    }
+
+    pub fn is_readonly(&self) -> Result<bool> {
+        Ok(self.readonly)
     }
 
     pub fn iter(&self) -> Result<StorageIter> {
@@ -248,6 +255,7 @@ impl DataStorageWriter for FileDataStorage {
             file_id: self.file_id,
             database_dir: self.database_dir,
             file_size,
+            readonly: true,
         })
     }
 

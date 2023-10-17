@@ -7,6 +7,7 @@ use bitcask::{
 use bitcask_tests::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
+use log::debug;
 use test_log::test;
 use walkdir::WalkDir;
 

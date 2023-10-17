@@ -86,20 +86,24 @@ impl Database {
 
         let hint_file_writer = HintWriter::start(&database_dir);
 
+        let opened_file_id_size = data_file_ids.len();
         let mut storages = open_data_files(&database_dir, data_file_ids)?;
-        let writing_storage = Mutex::new(storages.pop().unwrap_or({
+        let writing_storage = if storages.last().map_or(Ok(true), |s| s.is_readonly())? {
             let writing_file_id = file_id_generator.generate_next_file_id();
             let writing_storage = DataStorage::new(&database_dir, writing_file_id)?;
             debug!(target: "Database", "create writing file with id: {}", writing_file_id);
             writing_storage
-        }));
+        } else {
+            storages.pop().unwrap()
+        };
+
         let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
             m.insert(s.file_id(), Mutex::new(s));
             m
         });
 
         let db = Database {
-            writing_storage,
+            writing_storage: Mutex::new(writing_storage),
             file_id_generator,
             database_dir,
             stable_storages,
@@ -107,7 +111,7 @@ impl Database {
             hint_file_writer,
             is_error: Mutex::new(None),
         };
-        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, db.get_file_ids().stable_file_ids.len());
+        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, opened_file_id_size);
         Ok(db)
     }
 
@@ -648,8 +652,8 @@ mod tests {
         }
 
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
-        assert_eq!(3, file_id_generator.get_file_id());
-        assert_eq!(1, db.stable_storages.len());
+        assert_eq!(1, file_id_generator.get_file_id());
+        assert_eq!(0, db.stable_storages.len());
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
