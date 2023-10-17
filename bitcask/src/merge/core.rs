@@ -434,7 +434,7 @@ mod tests {
         merge_manager.recover_merge().unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(2, file_id_generator.get_file_id());
-        assert_eq!(1, db.get_file_ids().stable_file_ids.len());
+        assert_eq!(0, db.get_file_ids().stable_file_ids.len());
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
@@ -477,7 +477,7 @@ mod tests {
         merge_manager.recover_merge().unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(4, file_id_generator.get_file_id());
-        assert_eq!(1, db.get_file_ids().stable_file_ids.len());
+        assert_eq!(0, db.get_file_ids().stable_file_ids.len());
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
         assert!(!merge_file_dir.exists());
@@ -529,7 +529,7 @@ mod tests {
         merge_manager.recover_merge().unwrap();
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(4, file_id_generator.get_file_id());
-        assert_eq!(1, db.get_file_ids().stable_file_ids.len());
+        assert_eq!(0, db.get_file_ids().stable_file_ids.len());
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
         assert!(!merge_file_dir.exists());

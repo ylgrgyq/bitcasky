@@ -60,8 +60,8 @@ pub struct DataBaseOptions {
 pub struct Database {
     pub database_dir: PathBuf,
     file_id_generator: Arc<FileIdGenerator>,
-    writing_file: Mutex<DataStorage>,
-    stable_files: DashMap<FileId, Mutex<DataStorage>>,
+    writing_storage: Mutex<DataStorage>,
+    stable_storages: DashMap<FileId, Mutex<DataStorage>>,
     options: DataBaseOptions,
     hint_file_writer: HintWriter,
     is_error: Mutex<Option<String>>,
@@ -83,21 +83,30 @@ impl Database {
         if let Some(id) = data_file_ids.iter().max() {
             file_id_generator.update_file_id(*id);
         }
-        let writing_file_id = file_id_generator.generate_next_file_id();
-        let writing_file = Mutex::new(DataStorage::new(&database_dir, writing_file_id)?);
-        debug!(target: "Database", "create writing file with id: {}", writing_file_id);
+
         let hint_file_writer = HintWriter::start(&database_dir);
 
+        let mut storages = open_data_files(&database_dir, data_file_ids)?;
+        let writing_storage = Mutex::new(storages.pop().unwrap_or({
+            let writing_file_id = file_id_generator.generate_next_file_id();
+            let writing_storage = DataStorage::new(&database_dir, writing_file_id)?;
+            debug!(target: "Database", "create writing file with id: {}", writing_file_id);
+            writing_storage
+        }));
+        let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
+            m.insert(s.file_id(), Mutex::new(s));
+            m
+        });
+
         let db = Database {
-            writing_file,
+            writing_storage,
             file_id_generator,
             database_dir,
-            stable_files: DashMap::new(),
+            stable_storages,
             options,
             hint_file_writer,
             is_error: Mutex::new(None),
         };
-        db.reload_data_files(data_file_ids)?;
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, db.get_file_ids().stable_file_ids.len());
         Ok(db)
     }
@@ -107,7 +116,7 @@ impl Database {
     }
 
     pub fn get_max_file_id(&self) -> FileId {
-        let writing_file_ref = self.writing_file.lock();
+        let writing_file_ref = self.writing_storage.lock();
         writing_file_ref.file_id()
     }
 
@@ -121,7 +130,7 @@ impl Database {
     }
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_file.lock();
+        let mut writing_file_ref = self.writing_storage.lock();
         debug!("Flush writing file with id: {}", writing_file_ref.file_id());
         // flush file only when we actually wrote something
         self.do_flush_writing_file(&mut writing_file_ref)?;
@@ -132,11 +141,11 @@ impl Database {
     pub fn recovery_iter(&self) -> BitcaskResult<DatabaseRecoverIter> {
         let mut file_ids: Vec<FileId>;
         {
-            let writing_file = self.writing_file.lock();
+            let writing_file = self.writing_storage.lock();
             let writing_file_id = writing_file.file_id();
 
             file_ids = self
-                .stable_files
+                .stable_storages
                 .iter()
                 .map(|f| f.lock().file_id())
                 .collect::<Vec<FileId>>();
@@ -150,11 +159,11 @@ impl Database {
     pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
         let mut file_ids: Vec<FileId>;
         {
-            let writing_file = self.writing_file.lock();
+            let writing_file = self.writing_storage.lock();
             let writing_file_id = writing_file.file_id();
 
             file_ids = self
-                .stable_files
+                .stable_storages
                 .iter()
                 .map(|f| f.lock().file_id())
                 .collect::<Vec<FileId>>();
@@ -176,7 +185,7 @@ impl Database {
 
     pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue<Value>> {
         {
-            let mut writing_file_ref = self.writing_file.lock();
+            let mut writing_file_ref = self.writing_storage.lock();
             if row_position.file_id == writing_file_ref.file_id() {
                 return Ok(
                     writing_file_ref.read_value(row_position.row_offset, row_position.row_size)?
@@ -191,10 +200,10 @@ impl Database {
     }
 
     pub fn reload_data_files(&self, data_file_ids: Vec<FileId>) -> BitcaskResult<()> {
-        self.stable_files.clear();
+        self.stable_storages.clear();
 
         for file_id in data_file_ids {
-            if self.stable_files.contains_key(&file_id) {
+            if self.stable_storages.contains_key(&file_id) {
                 core::panic!("file id: {} already loaded in database", file_id);
             }
             if let Ok(f) = DataStorage::open(&self.database_dir, file_id) {
@@ -205,17 +214,17 @@ impl Database {
                     );
                     continue;
                 }
-                self.stable_files.insert(file_id, Mutex::new(f));
+                self.stable_storages.insert(file_id, Mutex::new(f));
             }
         }
         Ok(())
     }
 
     pub fn get_file_ids(&self) -> FileIds {
-        let writing_file_ref = self.writing_file.lock();
+        let writing_file_ref = self.writing_storage.lock();
         let writing_file_id = writing_file_ref.file_id();
         let stable_file_ids: Vec<FileId> = self
-            .stable_files
+            .stable_storages
             .iter()
             .map(|f| f.value().lock().file_id())
             .collect();
@@ -228,10 +237,10 @@ impl Database {
     pub fn stats(&self) -> BitcaskResult<DatabaseStats> {
         let writing_file_size: u64;
         {
-            writing_file_size = self.writing_file.lock().file_size() as u64;
+            writing_file_size = self.writing_storage.lock().file_size() as u64;
         }
         let mut total_data_size_in_bytes: u64 = self
-            .stable_files
+            .stable_storages
             .iter()
             .map(|f| {
                 let file = f.value().lock();
@@ -244,14 +253,14 @@ impl Database {
         total_data_size_in_bytes += writing_file_size;
 
         Ok(DatabaseStats {
-            number_of_data_files: self.stable_files.len() + 1,
+            number_of_data_files: self.stable_storages.len() + 1,
             total_data_size_in_bytes,
             number_of_pending_hint_files: self.hint_file_writer.len(),
         })
     }
 
     pub fn close(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_file.lock();
+        let mut writing_file_ref = self.writing_storage.lock();
         writing_file_ref.flush()?;
         Ok(())
     }
@@ -260,7 +269,7 @@ impl Database {
         debug!("Drop database called");
 
         {
-            let mut writing_file_ref = self.writing_file.lock();
+            let mut writing_file_ref = self.writing_storage.lock();
             debug!(
                 "Flush writing file with id: {} on drop database",
                 writing_file_ref.file_id()
@@ -268,15 +277,15 @@ impl Database {
             // flush file only when we actually wrote something
             self.do_flush_writing_file(&mut writing_file_ref)?;
         }
-        for file_id in self.stable_files.iter().map(|v| v.lock().file_id()) {
+        for file_id in self.stable_storages.iter().map(|v| v.lock().file_id()) {
             SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(file_id))?;
         }
-        self.stable_files.clear();
+        self.stable_storages.clear();
         Ok(())
     }
 
     pub fn sync(&self) -> BitcaskResult<()> {
-        let mut f = self.writing_file.lock();
+        let mut f = self.writing_storage.lock();
         f.flush()?;
         Ok(())
     }
@@ -295,7 +304,7 @@ impl Database {
     }
 
     fn do_write<V: Deref<Target = [u8]>>(&self, row: RowToWrite<V>) -> BitcaskResult<RowLocation> {
-        let mut writing_file_ref = self.writing_file.lock();
+        let mut writing_file_ref = self.writing_storage.lock();
         if self.check_file_overflow(&writing_file_ref, &row) {
             debug!(
                 "Flush writing file with id: {} on overflow",
@@ -332,7 +341,7 @@ impl Database {
         let stable_storage = old_file.transit_to_readonly()?;
 
         let file_id = stable_storage.file_id();
-        self.stable_files
+        self.stable_storages
             .insert(file_id, Mutex::new(stable_storage));
         self.hint_file_writer.async_write_hint_file(file_id);
         debug!(target: "Database", "writing file with id: {} flushed, new writing file with id: {} created", file_id, next_file_id);
@@ -343,7 +352,7 @@ impl Database {
         &self,
         file_id: FileId,
     ) -> BitcaskResult<RefMut<FileId, Mutex<DataStorage>>> {
-        self.stable_files
+        self.stable_storages
             .get_mut(&file_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(file_id))
     }
@@ -484,6 +493,19 @@ impl Iterator for DatabaseRecoverIter {
     }
 }
 
+fn open_data_files<P: AsRef<Path>>(
+    database_dir: P,
+    data_file_ids: Vec<u32>,
+) -> BitcaskResult<Vec<DataStorage>> {
+    let mut file_ids = data_file_ids.clone();
+    file_ids.sort();
+
+    Ok(file_ids
+        .iter()
+        .map(|id| DataStorage::open(&database_dir, *id))
+        .collect::<crate::database::data_storage::Result<Vec<DataStorage>>>()?)
+}
+
 #[cfg(test)]
 pub mod database_tests_utils {
     use bitcask_tests::common::TestingKV;
@@ -598,7 +620,7 @@ mod tests {
         db.flush_writing_file().unwrap();
 
         assert_eq!(3, file_id_generator.get_file_id());
-        assert_eq!(2, db.stable_files.len());
+        assert_eq!(2, db.stable_storages.len());
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
@@ -627,7 +649,7 @@ mod tests {
 
         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(3, file_id_generator.get_file_id());
-        assert_eq!(2, db.stable_files.len());
+        assert_eq!(1, db.stable_storages.len());
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
@@ -648,10 +670,10 @@ mod tests {
             TestingKV::new("k3", "value3_value3_value3"),
             TestingKV::new("k1", "value4_value4_value4"),
         ];
-        assert_eq!(0, db.stable_files.len());
+        assert_eq!(0, db.stable_storages.len());
         let rows = write_kvs_to_db(&db, kvs);
         assert_rows_value(&db, &rows);
-        assert_eq!(1, db.stable_files.len());
+        assert_eq!(1, db.stable_storages.len());
         assert_database_rows(&db, &rows);
     }
 }

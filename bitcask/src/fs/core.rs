@@ -58,7 +58,11 @@ pub fn open_file<P: AsRef<Path>>(
     file_id: Option<FileId>,
 ) -> std::io::Result<IdentifiedFile> {
     let path = file_type.get_path(base_dir, file_id);
-    let file = File::options().read(true).open(path)?;
+    let file = if std::fs::metadata(&path)?.permissions().readonly() {
+        File::options().read(true).open(path)?
+    } else {
+        File::options().read(true).write(true).open(path)?
+    };
     Ok(IdentifiedFile {
         file_type,
         file,
