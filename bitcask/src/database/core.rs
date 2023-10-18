@@ -86,16 +86,8 @@ impl Database {
 
         let hint_file_writer = HintWriter::start(&database_dir);
 
-        let opened_file_id_size = data_file_ids.len();
-        let mut storages = open_data_files(&database_dir, data_file_ids)?;
-        let writing_storage = if storages.last().map_or(Ok(true), |s| s.is_readonly())? {
-            let writing_file_id = file_id_generator.generate_next_file_id();
-            let writing_storage = DataStorage::new(&database_dir, writing_file_id)?;
-            debug!(target: "Database", "create writing file with id: {}", writing_file_id);
-            writing_storage
-        } else {
-            storages.pop().unwrap()
-        };
+        let (writing_storage, storages) =
+            prepare_load_storages(&database_dir, &data_file_ids, &file_id_generator)?;
 
         let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
             m.insert(s.file_id(), Mutex::new(s));
@@ -111,7 +103,7 @@ impl Database {
             hint_file_writer,
             is_error: Mutex::new(None),
         };
-        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, opened_file_id_size);
+        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_file_ids.len());
         Ok(db)
     }
 
@@ -497,9 +489,9 @@ impl Iterator for DatabaseRecoverIter {
     }
 }
 
-fn open_data_files<P: AsRef<Path>>(
+fn open_storages<P: AsRef<Path>>(
     database_dir: P,
-    data_file_ids: Vec<u32>,
+    data_file_ids: &Vec<u32>,
 ) -> BitcaskResult<Vec<DataStorage>> {
     let mut file_ids = data_file_ids.clone();
     file_ids.sort();
@@ -508,6 +500,26 @@ fn open_data_files<P: AsRef<Path>>(
         .iter()
         .map(|id| DataStorage::open(&database_dir, *id))
         .collect::<crate::database::data_storage::Result<Vec<DataStorage>>>()?)
+}
+
+fn prepare_load_storages<P: AsRef<Path>>(
+    database_dir: P,
+    data_file_ids: &Vec<u32>,
+    file_id_generator: &FileIdGenerator,
+) -> BitcaskResult<(DataStorage, Vec<DataStorage>)> {
+    let mut storages = open_storages(&database_dir, data_file_ids)?;
+    let writing_storage = if storages.last().map_or(Ok(true), |s| s.is_readonly())? {
+        let writing_file_id = file_id_generator.generate_next_file_id();
+        let storage = DataStorage::new(&database_dir, writing_file_id)?;
+        debug!(target: "Database", "create writing file with id: {}", writing_file_id);
+        storage
+    } else {
+        let storage = storages.pop().unwrap();
+        debug!(target: "Database", "reuse writing file with id: {}", storage.file_id());
+        storage
+    };
+
+    Ok((writing_storage, storages))
 }
 
 #[cfg(test)]
