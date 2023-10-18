@@ -196,22 +196,26 @@ impl Database {
     }
 
     pub fn reload_data_files(&self, data_file_ids: Vec<FileId>) -> BitcaskResult<()> {
+        let (writing, stables) =
+            prepare_load_storages(&self.database_dir, &data_file_ids, &self.file_id_generator)?;
+
+        {
+            let mut writing_file_ref = self.writing_storage.lock();
+            debug!(
+                "reload writing file with id: {}",
+                writing_file_ref.file_id()
+            );
+            let _ = mem::replace(&mut *writing_file_ref, writing);
+        }
+
         self.stable_storages.clear();
 
-        for file_id in data_file_ids {
-            if self.stable_storages.contains_key(&file_id) {
-                core::panic!("file id: {} already loaded in database", file_id);
+        for s in stables {
+            if self.stable_storages.contains_key(&s.file_id()) {
+                core::panic!("file id: {} already loaded in database", s.file_id());
             }
-            if let Ok(f) = DataStorage::open(&self.database_dir, file_id) {
-                if f.is_empty() {
-                    info!(
-                        target: "Database",
-                        "skip load empty data file with id: {}", &file_id
-                    );
-                    continue;
-                }
-                self.stable_storages.insert(file_id, Mutex::new(f));
-            }
+            debug!("reload stable file with id: {}", s.file_id());
+            self.stable_storages.insert(s.file_id(), Mutex::new(s));
         }
         Ok(())
     }
