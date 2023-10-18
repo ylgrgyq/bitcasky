@@ -495,9 +495,9 @@ impl Iterator for DatabaseRecoverIter {
 
 fn open_storages<P: AsRef<Path>>(
     database_dir: P,
-    data_file_ids: &Vec<u32>,
+    data_file_ids: &[u32],
 ) -> BitcaskResult<Vec<DataStorage>> {
-    let mut file_ids = data_file_ids.clone();
+    let mut file_ids = data_file_ids.to_owned();
     file_ids.sort();
 
     Ok(file_ids
@@ -508,7 +508,7 @@ fn open_storages<P: AsRef<Path>>(
 
 fn prepare_load_storages<P: AsRef<Path>>(
     database_dir: P,
-    data_file_ids: &Vec<u32>,
+    data_file_ids: &[u32],
     file_id_generator: &FileIdGenerator,
 ) -> BitcaskResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_file_ids)?;

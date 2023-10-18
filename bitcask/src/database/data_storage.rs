@@ -1,6 +1,6 @@
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
