@@ -1,6 +1,6 @@
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
-use log::{debug, error};
+use log::{debug, error, info};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -241,9 +241,12 @@ impl DataStorageWriter for FileDataStorage {
 
     fn transit_to_readonly(mut self) -> Result<DataStorage> {
         self.data_file.flush()?;
-        let mut perms = self.data_file.metadata()?.permissions();
+
+        let path = FileType::DataFile.get_path(&self.database_dir, Some(self.file_id));
+        let mut perms = std::fs::metadata(&path)?.permissions();
         perms.set_readonly(true);
-        self.data_file.set_permissions(perms)?;
+        std::fs::set_permissions(path, perms)?;
+
         let file_size = self.data_file.metadata()?.len();
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
