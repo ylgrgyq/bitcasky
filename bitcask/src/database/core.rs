@@ -609,7 +609,7 @@ mod tests {
         let file_id_generator = Arc::new(FileIdGenerator::new());
         let db = Database::open(&dir, file_id_generator, DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
-            TestingKV::new("k1", "value1奥森"),
+            TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
             TestingKV::new("k3", "value3"),
             TestingKV::new("k1", "value4"),

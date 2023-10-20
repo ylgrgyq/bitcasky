@@ -51,6 +51,8 @@ pub trait DataStorageWriter {
 }
 
 pub trait DataStorageReader {
+    fn file_size(&self) -> usize;
+
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
@@ -66,7 +68,6 @@ pub struct DataStorage {
     database_dir: PathBuf,
     file_id: FileId,
     storage_impl: DataStorageImpl,
-    file_size: u64,
     readonly: bool,
 }
 
@@ -84,20 +85,23 @@ impl DataStorage {
             )?),
             file_id,
             database_dir: path,
-            file_size: 0,
             readonly: false,
         })
     }
 
     pub fn open<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
-        let data_file = fs::open_file(&path, FileType::DataFile, Some(file_id))?;
+        let mut data_file = fs::open_file(&path, FileType::DataFile, Some(file_id))?;
         debug!(
             "Open storage under path: {:?} with file id: {}",
             &path, file_id
         );
         let meta = data_file.file.metadata()?;
         let file_size = meta.len();
+        if !meta.permissions().readonly() {
+            data_file.file.seek(SeekFrom::End(0))?;
+        }
+
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 &path,
@@ -107,17 +111,32 @@ impl DataStorage {
             )?),
             file_id,
             database_dir: path,
-            file_size,
+            readonly: meta.permissions().readonly(),
+        })
+    }
+
+    fn open_by_file<P: AsRef<Path>>(
+        database_dir: P,
+        file_id: FileId,
+        data_file: File,
+    ) -> Result<Self> {
+        let path = database_dir.as_ref().to_path_buf();
+
+        let meta = data_file.metadata()?;
+        let file_size = meta.len();
+
+        Ok(DataStorage {
+            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
+                &path, file_id, data_file, file_size,
+            )?),
+            file_id,
+            database_dir: path,
             readonly: meta.permissions().readonly(),
         })
     }
 
     pub fn file_id(&self) -> FileId {
         self.file_id
-    }
-
-    pub fn file_size(&self) -> usize {
-        self.file_size as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -129,8 +148,14 @@ impl DataStorage {
     }
 
     pub fn iter(&self) -> Result<StorageIter> {
+        let data_file = fs::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
+        debug!(
+            "Open storage under path: {:?} with file id: {}",
+            &self.database_dir, self.file_id
+        );
+
         Ok(StorageIter {
-            storage: DataStorage::open(&self.database_dir, self.file_id)?,
+            storage: DataStorage::open_by_file(&self.database_dir, self.file_id, data_file.file)?,
         })
     }
 }
@@ -142,7 +167,6 @@ impl DataStorageWriter for DataStorage {
                 .write_row(row)
                 .map_err(|e| DataStorageError::WriteRowFailed(s.file_id, e.to_string())),
         }?;
-        self.file_size += r.row_size;
         Ok(r)
     }
 
@@ -166,6 +190,12 @@ impl DataStorageWriter for DataStorage {
 }
 
 impl DataStorageReader for DataStorage {
+    fn file_size(&self) -> usize {
+        match &self.storage_impl {
+            DataStorageImpl::FileStorage(s) => s.file_size(),
+        }
+    }
+
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
@@ -228,9 +258,10 @@ impl FileDataStorage {
 
 impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
-        let value_offset = self.data_file.seek(SeekFrom::End(0))?;
+        let value_offset = self.capacity;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&data_to_write)?;
+        self.capacity += data_to_write.len() as u64;
 
         Ok(RowLocation {
             file_id: self.file_id,
@@ -257,7 +288,6 @@ impl DataStorageWriter for FileDataStorage {
             )?),
             file_id: self.file_id,
             database_dir: self.database_dir,
-            file_size,
             readonly: true,
         })
     }
@@ -268,6 +298,10 @@ impl DataStorageWriter for FileDataStorage {
 }
 
 impl DataStorageReader for FileDataStorage {
+    fn file_size(&self) -> usize {
+        self.capacity as usize
+    }
+
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
         let mut buf = vec![0; row_size as usize];
