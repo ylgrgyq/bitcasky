@@ -2,7 +2,7 @@ use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
 use log::{debug, error};
 use std::{
-    fs::File,
+    fs::{File, Metadata},
     io::{Read, Seek, SeekFrom, Write},
     ops::Deref,
     path::{Path, PathBuf},
@@ -79,14 +79,8 @@ impl DataStorage {
             "Create storage under path: {:?} with file id: {}",
             &path, file_id
         );
-        Ok(DataStorage {
-            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
-                &path, file_id, data_file, 0,
-            )?),
-            file_id,
-            database_dir: path,
-            readonly: false,
-        })
+        let meta = data_file.metadata()?;
+        DataStorage::open_by_file(&path, file_id, data_file, meta)
     }
 
     pub fn open<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
@@ -97,42 +91,11 @@ impl DataStorage {
             &path, file_id
         );
         let meta = data_file.file.metadata()?;
-        let file_size = meta.len();
         if !meta.permissions().readonly() {
             data_file.file.seek(SeekFrom::End(0))?;
         }
 
-        Ok(DataStorage {
-            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
-                &path,
-                file_id,
-                data_file.file,
-                file_size,
-            )?),
-            file_id,
-            database_dir: path,
-            readonly: meta.permissions().readonly(),
-        })
-    }
-
-    fn open_by_file<P: AsRef<Path>>(
-        database_dir: P,
-        file_id: FileId,
-        data_file: File,
-    ) -> Result<Self> {
-        let path = database_dir.as_ref().to_path_buf();
-
-        let meta = data_file.metadata()?;
-        let file_size = meta.len();
-
-        Ok(DataStorage {
-            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
-                &path, file_id, data_file, file_size,
-            )?),
-            file_id,
-            database_dir: path,
-            readonly: meta.permissions().readonly(),
-        })
+        DataStorage::open_by_file(&path, file_id, data_file.file, meta)
     }
 
     pub fn file_id(&self) -> FileId {
@@ -150,12 +113,38 @@ impl DataStorage {
     pub fn iter(&self) -> Result<StorageIter> {
         let data_file = fs::open_file(&self.database_dir, FileType::DataFile, Some(self.file_id))?;
         debug!(
-            "Open storage under path: {:?} with file id: {}",
+            "Create iterator under path: {:?} with file id: {}",
             &self.database_dir, self.file_id
         );
-
+        let meta = data_file.file.metadata()?;
         Ok(StorageIter {
-            storage: DataStorage::open_by_file(&self.database_dir, self.file_id, data_file.file)?,
+            storage: DataStorage::open_by_file(
+                &self.database_dir,
+                self.file_id,
+                data_file.file,
+                meta,
+            )?,
+        })
+    }
+
+    fn open_by_file(
+        database_dir: &PathBuf,
+        file_id: FileId,
+        data_file: File,
+        meta: Metadata,
+    ) -> Result<Self> {
+        let file_size = meta.len();
+
+        Ok(DataStorage {
+            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
+                database_dir,
+                file_id,
+                data_file,
+                file_size,
+            )?),
+            file_id,
+            database_dir: database_dir.clone(),
+            readonly: meta.permissions().readonly(),
         })
     }
 }
