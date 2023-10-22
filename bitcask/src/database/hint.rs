@@ -25,6 +25,7 @@ use super::{
     constants::{
         DATA_FILE_KEY_OFFSET, KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE,
     },
+    data_storage::DataStorageOptions,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -168,13 +169,13 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path) -> HintWriter {
+    pub fn start(database_dir: &Path, storage_options: DataStorageOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(file_id) = receiver.recv() {
-                if let Err(e) = Self::write_hint_file(&moved_dir, file_id) {
+                if let Err(e) = Self::write_hint_file(&moved_dir, file_id, storage_options) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -205,8 +206,12 @@ impl HintWriter {
         self.sender.len()
     }
 
-    fn write_hint_file(database_dir: &Path, data_file_id: FileId) -> BitcaskResult<()> {
-        let stable_file_opt = DataStorage::open(database_dir, data_file_id)?;
+    fn write_hint_file(
+        database_dir: &Path,
+        data_file_id: FileId,
+        storage_options: DataStorageOptions,
+    ) -> BitcaskResult<()> {
+        let stable_file_opt = DataStorage::open(database_dir, data_file_id, storage_options)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
@@ -332,16 +337,28 @@ mod tests {
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
         let file_id = 1;
-        let mut writing_file = DataStorage::new(&dir, file_id).unwrap();
+        let mut writing_file = DataStorage::new(
+            &dir,
+            file_id,
+            DataStorageOptions {
+                max_file_size: 1024,
+            },
+        )
+        .unwrap();
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file
-            .write_row(RowToWrite::new(&key, val.to_vec()))
+            .write_row(&RowToWrite::new(&key, val.to_vec()))
             .unwrap();
         writing_file.transit_to_readonly().unwrap();
 
         {
-            let writer = HintWriter::start(&dir);
+            let writer = HintWriter::start(
+                &dir,
+                DataStorageOptions {
+                    max_file_size: 1024,
+                },
+            );
             writer.async_write_hint_file(file_id);
         }
 
