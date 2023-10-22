@@ -410,3 +410,177 @@ impl DataStorageReader for FileDataStorage {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use crate::database::database_tests_utils::{TestingRow, DEFAULT_OPTIONS};
+
+    use super::*;
+
+    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
+    use test_log::test;
+
+    fn get_file_storage() -> FileDataStorage {
+        let dir = get_temporary_directory_path();
+        let file_id = 1;
+        let f = create_file(&dir, FileType::DataFile, Some(file_id)).unwrap();
+        let meta = f.metadata().unwrap();
+        let options = DataStorageOptions {
+            max_file_size: 1024,
+        };
+        FileDataStorage::new(&dir, 1, f, meta.len(), options).unwrap()
+    }
+
+    fn get_row_to_write(kvs: &Vec<TestingKV>) -> Vec<RowToWrite<'_, Vec<u8>>> {
+        kvs.iter()
+            .map(|kv| RowToWrite::new(kv.key_ref(), kv.value()))
+            .collect::<Vec<RowToWrite<'_, Vec<u8>>>>()
+    }
+
+    pub fn assert_rows_value<S: DataStorageReader>(db: &mut S, expect: &Vec<TestingRow>) {
+        for row in expect {
+            assert_row_value(db, row);
+        }
+    }
+
+    pub fn assert_row_value<S: DataStorageReader>(db: &mut S, expect: &TestingRow) {
+        let actual = db
+            .read_value(expect.pos.row_offset, expect.pos.row_size)
+            .unwrap();
+        assert_eq!(*expect.kv.value(), *actual.value);
+    }
+
+    pub fn assert_database_rows<S: DataStorageReader>(db: &S, expect_rows: &Vec<TestingRow>) {
+        let mut i = 0;
+        // StorageIter { storage: db };
+        // for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
+        //     let expect_row = expect_rows.get(i).unwrap();
+        //     assert_eq!(expect_row.kv.key(), actual_row.key);
+        //     assert_eq!(expect_row.kv.value(), actual_row.value);
+        //     assert_eq!(expect_row.pos, actual_row.row_position);
+        //     i += 1;
+        // }
+        // assert_eq!(expect_rows.len(), i);
+    }
+
+    pub fn write_kvs_to_storage<S: DataStorageWriter>(
+        db: &mut S,
+        kvs: &Vec<TestingKV>,
+    ) -> Vec<TestingRow> {
+        kvs.into_iter()
+            .map(|kv| {
+                let pos = db
+                    .write_row(&RowToWrite::new(kv.key_ref(), kv.value()))
+                    .unwrap();
+                TestingRow::new(
+                    kv.clone(),
+                    RowLocation {
+                        file_id: pos.file_id,
+                        row_offset: pos.row_offset,
+                        row_size: pos.row_size,
+                    },
+                )
+            })
+            .collect::<Vec<TestingRow>>()
+    }
+
+    #[test]
+    fn test_read_write_storage() {
+        let a = "k1";
+        let b = "k2";
+        let c: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&a.into(), b.into());
+
+        let mut storage = get_file_storage();
+        let kvs = vec![
+            TestingKV::new("k1", "value1"),
+            TestingKV::new("k2", "value2"),
+            TestingKV::new("k3", "value3"),
+            TestingKV::new("k1", "value4"),
+        ];
+
+        let rows = write_kvs_to_storage(&mut storage, &kvs);
+        assert_rows_value(&mut storage, &rows);
+        // assert_database_rows(&db, &rows);
+    }
+
+    // #[test]
+    // fn test_read_write_with_stable_files() {
+    //     let dir = get_temporary_directory_path();
+    //     let mut rows: Vec<TestingRow> = vec![];
+    //     let file_id_generator = Arc::new(FileIdGenerator::new());
+    //     let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+    //     let kvs = vec![
+    //         TestingKV::new("k1", "value1"),
+    //         TestingKV::new("k2", "value2"),
+    //     ];
+    //     rows.append(&mut write_kvs_to_db(&db, kvs));
+    //     db.flush_writing_file().unwrap();
+
+    //     let kvs = vec![
+    //         TestingKV::new("k3", "hello world"),
+    //         TestingKV::new("k1", "value4"),
+    //     ];
+    //     rows.append(&mut write_kvs_to_db(&db, kvs));
+    //     db.flush_writing_file().unwrap();
+
+    //     assert_eq!(3, file_id_generator.get_file_id());
+    //     assert_eq!(2, db.stable_storages.len());
+    //     assert_rows_value(&db, &rows);
+    //     assert_database_rows(&db, &rows);
+    // }
+
+    // #[test]
+    // fn test_recovery() {
+    //     let dir = get_temporary_directory_path();
+    //     let mut rows: Vec<TestingRow> = vec![];
+    //     let file_id_generator = Arc::new(FileIdGenerator::new());
+    //     {
+    //         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+    //         let kvs = vec![
+    //             TestingKV::new("k1", "value1"),
+    //             TestingKV::new("k2", "value2"),
+    //         ];
+    //         rows.append(&mut write_kvs_to_db(&db, kvs));
+    //     }
+    //     {
+    //         let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+    //         let kvs = vec![
+    //             TestingKV::new("k3", "hello world"),
+    //             TestingKV::new("k1", "value4"),
+    //         ];
+    //         rows.append(&mut write_kvs_to_db(&db, kvs));
+    //     }
+
+    //     let db = Database::open(&dir, file_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+    //     assert_eq!(1, file_id_generator.get_file_id());
+    //     assert_eq!(0, db.stable_storages.len());
+    //     assert_rows_value(&db, &rows);
+    //     assert_database_rows(&db, &rows);
+    // }
+
+    // #[test]
+    // fn test_wrap_file() {
+    //     let file_id_generator = Arc::new(FileIdGenerator::new());
+    //     let dir = get_temporary_directory_path();
+    //     let db = Database::open(
+    //         &dir,
+    //         file_id_generator,
+    //         DataBaseOptions {
+    //             storage_options: DataStorageOptions { max_file_size: 100 },
+    //         },
+    //     )
+    //     .unwrap();
+    //     let kvs = vec![
+    //         TestingKV::new("k1", "value1_value1_value1"),
+    //         TestingKV::new("k2", "value2_value2_value2"),
+    //         TestingKV::new("k3", "value3_value3_value3"),
+    //         TestingKV::new("k1", "value4_value4_value4"),
+    //     ];
+    //     assert_eq!(0, db.stable_storages.len());
+    //     let rows = write_kvs_to_db(&db, kvs);
+    //     assert_rows_value(&db, &rows);
+    //     assert_eq!(1, db.stable_storages.len());
+    //     assert_database_rows(&db, &rows);
+    // }
+}

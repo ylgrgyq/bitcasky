@@ -128,7 +128,7 @@ impl Database {
         key: &Vec<u8>,
         value: TimedValue<V>,
     ) -> BitcaskResult<RowLocation> {
-        let row = RowToWrite::new(key, value);
+        let row: RowToWrite<'_, TimedValue<V>> = RowToWrite::new(key, value);
         let mut writing_file_ref = self.writing_storage.lock();
 
         match writing_file_ref.write_row(&row) {
@@ -566,12 +566,12 @@ pub mod database_tests_utils {
     };
 
     pub struct TestingRow {
-        kv: TestingKV,
-        pos: RowLocation,
+        pub kv: TestingKV,
+        pub pos: RowLocation,
     }
 
     impl TestingRow {
-        fn new(kv: TestingKV, pos: RowLocation) -> Self {
+        pub fn new(kv: TestingKV, pos: RowLocation) -> Self {
             TestingRow { kv, pos }
         }
     }
