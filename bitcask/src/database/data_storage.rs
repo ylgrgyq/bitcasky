@@ -34,7 +34,7 @@ pub enum DataStorageError {
     FlushStorageFailed(FileId, String),
     #[error("Transit writing data file with id: {0} to readonly failed. error: {1}")]
     TransitToReadOnlyFailed(FileId, String),
-    #[error("Storage overflow")]
+    #[error("Writing storage overflow, need replace with a new one")]
     StorageOverflow(),
     #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
