@@ -30,7 +30,7 @@ impl KeyDir {
                 continue;
             }
 
-            kd.put(item.key, item.row_position);
+            kd.put(item.key, item.row_location);
         }
         Ok(kd)
     }

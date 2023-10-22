@@ -205,19 +205,19 @@ impl Database {
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_position: &RowLocation) -> BitcaskResult<TimedValue<Value>> {
+    pub fn read_value(&self, row_location: &RowLocation) -> BitcaskResult<TimedValue<Value>> {
         {
             let mut writing_file_ref = self.writing_storage.lock();
-            if row_position.storage_id == writing_file_ref.storage_id() {
+            if row_location.storage_id == writing_file_ref.storage_id() {
                 return Ok(
-                    writing_file_ref.read_value(row_position.row_offset, row_position.row_size)?
+                    writing_file_ref.read_value(row_location.row_offset, row_location.row_size)?
                 );
             }
         }
 
-        let l = self.get_file_to_read(row_position.storage_id)?;
+        let l = self.get_file_to_read(row_location.storage_id)?;
         let mut f = l.lock();
-        let ret = f.read_value(row_position.row_offset, row_position.row_size)?;
+        let ret = f.read_value(row_location.row_offset, row_location.row_size)?;
         Ok(ret)
     }
 
@@ -440,7 +440,7 @@ fn recovered_iter(
         let i = stable_file.iter().map(|iter| {
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
-                    row_position: r.row_position,
+                    row_location: r.row_location,
                     timestamp: r.timestamp,
                     key: r.key,
                     is_tombstone: utils::is_tombstone(&r.value),
@@ -590,7 +590,7 @@ pub mod database_tests_utils {
             let expect_row = expect_rows.get(i).unwrap();
             assert_eq!(expect_row.kv.key(), actual_row.key);
             assert_eq!(expect_row.kv.value(), actual_row.value);
-            assert_eq!(expect_row.pos, actual_row.row_position);
+            assert_eq!(expect_row.pos, actual_row.row_location);
             i += 1;
         }
         assert_eq!(expect_rows.len(), i);

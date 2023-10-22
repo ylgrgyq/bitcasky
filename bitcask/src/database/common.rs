@@ -141,12 +141,12 @@ impl<V: Deref<Target = [u8]>> TimedValue<V> {
 pub struct RowToRead {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
-    pub row_position: RowLocation,
+    pub row_location: RowLocation,
     pub timestamp: u64,
 }
 
 pub struct RecoveredRow {
-    pub row_position: RowLocation,
+    pub row_location: RowLocation,
     pub timestamp: u64,
     pub key: Vec<u8>,
     pub is_tombstone: bool,

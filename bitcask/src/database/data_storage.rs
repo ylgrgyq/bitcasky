@@ -408,7 +408,7 @@ impl DataStorageReader for FileDataStorage {
         Ok(Some(RowToRead {
             key: kv_bs.slice(0..key_size).into(),
             value: kv_bs.slice(key_size..).into(),
-            row_position: RowLocation {
+            row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset: value_offset,
                 row_size: (DATA_FILE_KEY_OFFSET + key_size + value_size) as u64,

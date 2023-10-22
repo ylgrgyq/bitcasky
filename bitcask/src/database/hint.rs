@@ -154,7 +154,7 @@ impl Iterator for HintFileIterator {
                 _ => Some(Err(BitcaskError::IoError(e))),
             },
             r => Some(r.map(|h| RecoveredRow {
-                row_position: super::RowLocation {
+                row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
                     row_offset: h.row_offset,
                     row_size: DATA_FILE_KEY_OFFSET as u64 + h.key_size + h.value_size,
@@ -240,7 +240,7 @@ impl HintWriter {
                                 timestamp: r.timestamp,
                                 key_size: r.key.len() as u64,
                                 value_size: r.value.len() as u64,
-                                row_offset: r.row_position.row_offset,
+                                row_offset: r.row_location.row_offset,
                                 key: r.key,
                             },
                         );
