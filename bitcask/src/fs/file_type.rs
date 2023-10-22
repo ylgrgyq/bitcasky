@@ -1,7 +1,7 @@
 use core::panic;
 use std::path::{Path, PathBuf};
 
-use crate::file_id::FileId;
+use crate::storage_id::StorageId;
 
 const LOCK_FILE_EXTENSION: &str = "lock";
 const MERGE_META_FILE_EXTENSION: &str = "meta";
@@ -18,7 +18,7 @@ pub enum FileType {
 }
 
 impl FileType {
-    pub fn get_path<P: AsRef<Path>>(&self, base_dir: P, file_id: Option<FileId>) -> PathBuf {
+    pub fn get_path<P: AsRef<Path>>(&self, base_dir: P, file_id: Option<StorageId>) -> PathBuf {
         base_dir.as_ref().join(match self {
             Self::LockFile => format!("bitcask.{}", LOCK_FILE_EXTENSION),
             Self::MergeMeta => format!("merge.{}", MERGE_META_FILE_EXTENSION),
@@ -42,7 +42,7 @@ impl FileType {
         *self == ft
     }
 
-    pub fn parse_file_id_from_file_name(&self, file_path: &Path) -> Option<FileId> {
+    pub fn parse_file_id_from_file_name(&self, file_path: &Path) -> Option<StorageId> {
         let binding = file_path.file_name().unwrap().to_string_lossy();
         let (file_id_str, _) = binding.split_at(binding.len() - self.extension().len() - 1);
         match self {
@@ -52,7 +52,7 @@ impl FileType {
             Self::HintFile => Some(file_id_str),
             Self::Unknown => panic!("get path for unknown data type"),
         }
-        .map(|file_id_str| file_id_str.parse::<FileId>())
+        .map(|file_id_str| file_id_str.parse::<StorageId>())
         .transpose()
         .unwrap_or(None)
     }

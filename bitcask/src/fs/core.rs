@@ -6,14 +6,14 @@ use std::{
 
 use log::debug;
 
-use crate::{file_id::FileId, fs::FileType};
+use crate::{fs::FileType, storage_id::StorageId};
 
 const TESTING_DIRECTORY: &str = "Testing";
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
     pub file: File,
-    pub file_id: Option<FileId>,
+    pub file_id: Option<StorageId>,
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
@@ -42,7 +42,7 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
 pub fn create_file<P: AsRef<Path>>(
     base_dir: P,
     file_type: FileType,
-    file_id: Option<FileId>,
+    file_id: Option<StorageId>,
 ) -> std::io::Result<File> {
     let path = file_type.get_path(base_dir, file_id);
     File::options()
@@ -55,7 +55,7 @@ pub fn create_file<P: AsRef<Path>>(
 pub fn open_file<P: AsRef<Path>>(
     base_dir: P,
     file_type: FileType,
-    file_id: Option<FileId>,
+    file_id: Option<StorageId>,
 ) -> std::io::Result<IdentifiedFile> {
     let path = file_type.get_path(base_dir, file_id);
     let file = if std::fs::metadata(&path)?.permissions().readonly() {
@@ -70,7 +70,7 @@ pub fn open_file<P: AsRef<Path>>(
     })
 }
 
-pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>) -> Result<()> {
+pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<StorageId>) -> Result<()> {
     let path = file_type.get_path(base_dir, file_id);
     if path.exists() {
         fs::remove_file(path)?;
@@ -88,7 +88,7 @@ pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>
 
 pub fn move_file(
     file_type: FileType,
-    file_id: Option<FileId>,
+    file_id: Option<StorageId>,
     from_dir: &Path,
     to_dir: &Path,
 ) -> Result<()> {
@@ -103,8 +103,8 @@ pub fn move_file(
 pub fn change_file_id(
     base_dir: &Path,
     file_type: FileType,
-    from_file_id: FileId,
-    to_file_id: FileId,
+    from_file_id: StorageId,
+    to_file_id: StorageId,
 ) -> Result<()> {
     debug!("Change file id from {} to {}", from_file_id, to_file_id);
     let from_p = file_type.get_path(base_dir, Some(from_file_id));
@@ -126,7 +126,7 @@ pub fn delete_dir(base_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> {
+pub fn get_storage_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<StorageId> {
     let mut actual_file_ids = vec![];
     for path in fs::read_dir(dir_path).unwrap() {
         let file_dir_entry = path.unwrap();
@@ -311,7 +311,7 @@ mod tests {
         create_file(&dir, FileType::HintFile, Some(100)).unwrap();
         create_file(&dir, FileType::DataFile, Some(102)).unwrap();
         create_file(&dir, FileType::DataFile, Some(101)).unwrap();
-        let file_ids = get_file_ids_in_dir(&dir, FileType::DataFile);
+        let file_ids = get_storage_ids_in_dir(&dir, FileType::DataFile);
         assert_eq!(vec![101, 102, 103], file_ids);
     }
 }

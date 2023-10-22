@@ -6,7 +6,7 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use crate::{error::BitcaskResult, file_id::FileId, utils::TOMBSTONE_VALUE};
+use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE};
 
 use super::constants::DATA_FILE_KEY_OFFSET;
 
@@ -77,7 +77,7 @@ pub trait BitcaskDataFile {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowLocation {
-    pub file_id: FileId,
+    pub storage_id: StorageId,
     pub row_offset: u64,
     pub row_size: u64,
 }
@@ -137,7 +137,7 @@ pub struct RowToRead {
 }
 
 pub struct RecoveredRow {
-    pub file_id: FileId,
+    pub storage_id: StorageId,
     pub timestamp: u64,
     pub row_offset: u64,
     pub row_size: u64,

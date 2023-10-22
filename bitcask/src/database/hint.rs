@@ -14,8 +14,8 @@ use log::{debug, error, info, warn};
 use crate::{
     database::data_storage::DataStorage,
     error::{BitcaskError, BitcaskResult},
-    file_id::FileId,
     fs::{self, FileType},
+    storage_id::StorageId,
     utils,
 };
 use crossbeam_channel::{unbounded, Sender};
@@ -47,12 +47,12 @@ const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct HintFile {
-    file_id: FileId,
+    file_id: StorageId,
     file: File,
 }
 
 impl HintFile {
-    pub fn create(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
+    pub fn create(database_dir: &Path, file_id: StorageId) -> BitcaskResult<Self> {
         let file = fs::create_file(database_dir, FileType::HintFile, Some(file_id))?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -61,7 +61,10 @@ impl HintFile {
         Ok(HintFile { file_id, file })
     }
 
-    pub fn open_iterator(database_dir: &Path, file_id: FileId) -> BitcaskResult<HintFileIterator> {
+    pub fn open_iterator(
+        database_dir: &Path,
+        file_id: StorageId,
+    ) -> BitcaskResult<HintFileIterator> {
         let file = Self::open(database_dir, file_id)?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -120,7 +123,7 @@ impl HintFile {
         bs.freeze()
     }
 
-    fn open(database_dir: &Path, file_id: FileId) -> BitcaskResult<Self> {
+    fn open(database_dir: &Path, file_id: StorageId) -> BitcaskResult<Self> {
         let file = fs::open_file(database_dir, FileType::HintFile, Some(file_id))?;
         Ok(HintFile {
             file_id,
@@ -151,7 +154,7 @@ impl Iterator for HintFileIterator {
                 _ => Some(Err(BitcaskError::IoError(e))),
             },
             r => Some(r.map(|h| RecoveredRow {
-                file_id: self.file.file_id,
+                storage_id: self.file.file_id,
                 timestamp: h.timestamp,
                 row_offset: h.row_offset,
                 row_size: DATA_FILE_KEY_OFFSET as u64 + h.key_size + h.value_size,
@@ -164,7 +167,7 @@ impl Iterator for HintFileIterator {
 
 #[derive(Debug)]
 pub struct HintWriter {
-    sender: ManuallyDrop<Sender<FileId>>,
+    sender: ManuallyDrop<Sender<StorageId>>,
     worker_join_handle: Option<JoinHandle<()>>,
 }
 
@@ -193,7 +196,7 @@ impl HintWriter {
         }
     }
 
-    pub fn async_write_hint_file(&self, data_file_id: FileId) {
+    pub fn async_write_hint_file(&self, data_file_id: StorageId) {
         if let Err(e) = self.sender.send(data_file_id) {
             error!(
                 target: DEFAULT_LOG_TARGET,
@@ -208,7 +211,7 @@ impl HintWriter {
 
     fn write_hint_file(
         database_dir: &Path,
-        data_file_id: FileId,
+        data_file_id: StorageId,
         storage_options: DataStorageOptions,
     ) -> BitcaskResult<()> {
         let stable_file_opt = DataStorage::open(database_dir, data_file_id, storage_options)?;

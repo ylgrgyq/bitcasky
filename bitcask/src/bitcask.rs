@@ -9,10 +9,10 @@ use uuid::Uuid;
 
 use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
-use crate::file_id::FileIdGenerator;
 use crate::fs::{self};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
+use crate::storage_id::StorageIdGenerator;
 use crate::utils::is_tombstone;
 
 /// Bitcask optional options. Used on opening Bitcask instance.
@@ -105,17 +105,20 @@ impl Bitcask {
         validate_database_directory(directory)?;
 
         let id = Uuid::new_v4();
-        let file_id_generator = Arc::new(FileIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::new());
         let merge_manager = MergeManager::new(
             id.to_string(),
             directory,
-            file_id_generator.clone(),
+            storage_id_generator.clone(),
             options.get_database_options(),
         );
         merge_manager.recover_merge()?;
 
-        let database =
-            Database::open(directory, file_id_generator, options.get_database_options())?;
+        let database = Database::open(
+            directory,
+            storage_id_generator,
+            options.get_database_options(),
+        )?;
         let keydir = RwLock::new(KeyDir::new(&database)?);
 
         debug!(target: "Bitcask", "Bitcask created. instanceId: {}", id);
@@ -157,8 +160,8 @@ impl Bitcask {
                 e
             })?;
 
-        debug!(target: "Bitcask", "put data success. key: {:?}, file_id: {}, row_offset: {}, row_size: {}", 
-            key, ret.file_id, ret.row_offset, ret.row_size);
+        debug!(target: "Bitcask", "put data success. key: {:?}, storage_id: {}, row_offset: {}, row_size: {}", 
+            key, ret.storage_id, ret.row_offset, ret.row_size);
         kd.put(key, ret);
         Ok(())
     }

@@ -30,7 +30,7 @@ impl KeyDir {
                 continue;
             }
             let row_pos = RowLocation {
-                file_id: item.file_id,
+                storage_id: item.storage_id,
                 row_offset: item.row_offset,
                 row_size: item.row_size,
             };
@@ -48,7 +48,7 @@ impl KeyDir {
         if let Some(pos) = r {
             let old_pos: RowLocation = *(pos);
             // key was written again during merge
-            if value.file_id < old_pos.file_id {
+            if value.storage_id < old_pos.storage_id {
                 return;
             }
         }
