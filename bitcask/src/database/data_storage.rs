@@ -45,7 +45,7 @@ pub enum DataStorageError {
 pub type Result<T> = std::result::Result<T, DataStorageError>;
 
 pub trait DataStorageWriter {
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation>;
+    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation>;
 
     fn transit_to_readonly(self) -> Result<DataStorage>;
 
@@ -139,12 +139,12 @@ impl DataStorage {
                 self.file_id,
                 data_file.file,
                 meta,
-                self.options.clone(),
+                self.options,
             )?,
         })
     }
 
-    pub fn check_file_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
+    pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         row.size + self.file_size() as u64 > self.options.max_file_size
     }
 
@@ -174,7 +174,10 @@ impl DataStorage {
 }
 
 impl DataStorageWriter for DataStorage {
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
+    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
+        if self.check_storage_overflow(row) {
+            return Err(DataStorageError::StorageOverflow());
+        }
         let r = match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
                 .write_row(row)
@@ -273,7 +276,7 @@ impl FileDataStorage {
 }
 
 impl DataStorageWriter for FileDataStorage {
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: RowToWrite<V>) -> Result<RowLocation> {
+    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let value_offset = self.capacity;
         let data_to_write = row.to_bytes();
         self.data_file.write_all(&data_to_write)?;

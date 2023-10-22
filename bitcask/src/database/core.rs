@@ -23,6 +23,7 @@ use super::{
     data_storage::{
         DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, StorageIter,
     },
+    DataStorageError,
 };
 use super::{
     common::{RowLocation, RowToRead, RowToWrite},
@@ -130,15 +131,17 @@ impl Database {
         let row = RowToWrite::new(key, value);
         let mut writing_file_ref = self.writing_storage.lock();
 
-        if writing_file_ref.check_file_overflow(&row) {
-            debug!(
-                "Flush writing file with id: {} on overflow",
-                writing_file_ref.file_id()
-            );
-            self.do_flush_writing_file(&mut writing_file_ref)?;
+        match writing_file_ref.write_row(&row) {
+            Err(DataStorageError::StorageOverflow()) => {
+                debug!(
+                    "Flush writing storage with id: {} on overflow",
+                    writing_file_ref.file_id()
+                );
+                self.do_flush_writing_file(&mut writing_file_ref)?;
+                Ok(writing_file_ref.write_row(&row)?)
+            }
+            r => Ok(r?),
         }
-
-        Ok(writing_file_ref.write_row(row)?)
     }
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {

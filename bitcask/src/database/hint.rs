@@ -348,7 +348,7 @@ mod tests {
         let key = vec![1, 2, 3];
         let val: [u8; 3] = [5, 6, 7];
         let pos = writing_file
-            .write_row(RowToWrite::new(&key, val.to_vec()))
+            .write_row(&RowToWrite::new(&key, val.to_vec()))
             .unwrap();
         writing_file.transit_to_readonly().unwrap();
 
