@@ -47,28 +47,28 @@ const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct HintFile {
-    file_id: StorageId,
+    storage_id: StorageId,
     file: File,
 }
 
 impl HintFile {
-    pub fn create(database_dir: &Path, file_id: StorageId) -> BitcaskResult<Self> {
-        let file = fs::create_file(database_dir, FileType::HintFile, Some(file_id))?;
+    pub fn create(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
+        let file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
         debug!(
             target: DEFAULT_LOG_TARGET,
-            "create hint file with id: {}", file_id
+            "create hint file with id: {}", storage_id
         );
-        Ok(HintFile { file_id, file })
+        Ok(HintFile { storage_id, file })
     }
 
     pub fn open_iterator(
         database_dir: &Path,
-        file_id: StorageId,
+        storage_id: StorageId,
     ) -> BitcaskResult<HintFileIterator> {
-        let file = Self::open(database_dir, file_id)?;
+        let file = Self::open(database_dir, storage_id)?;
         debug!(
             target: DEFAULT_LOG_TARGET,
-            "open hint file iterator with id: {}", file_id
+            "open hint file iterator with id: {}", storage_id
         );
         Ok(HintFileIterator { file })
     }
@@ -123,10 +123,10 @@ impl HintFile {
         bs.freeze()
     }
 
-    fn open(database_dir: &Path, file_id: StorageId) -> BitcaskResult<Self> {
-        let file = fs::open_file(database_dir, FileType::HintFile, Some(file_id))?;
+    fn open(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
+        let file = fs::open_file(database_dir, FileType::HintFile, Some(storage_id))?;
         Ok(HintFile {
-            file_id,
+            storage_id,
             file: file.file,
         })
     }
@@ -154,7 +154,7 @@ impl Iterator for HintFileIterator {
                 _ => Some(Err(BitcaskError::IoError(e))),
             },
             r => Some(r.map(|h| RecoveredRow {
-                storage_id: self.file.file_id,
+                storage_id: self.file.storage_id,
                 timestamp: h.timestamp,
                 row_offset: h.row_offset,
                 row_size: DATA_FILE_KEY_OFFSET as u64 + h.key_size + h.value_size,
@@ -177,12 +177,12 @@ impl HintWriter {
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
-            while let Ok(file_id) = receiver.recv() {
-                if let Err(e) = Self::write_hint_file(&moved_dir, file_id, storage_options) {
+            while let Ok(storage_id) = receiver.recv() {
+                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, storage_options) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
-                        file_id,
+                        storage_id,
                         moved_dir.display(),
                         e
                     );
@@ -196,11 +196,11 @@ impl HintWriter {
         }
     }
 
-    pub fn async_write_hint_file(&self, data_file_id: StorageId) {
-        if let Err(e) = self.sender.send(data_file_id) {
+    pub fn async_write_hint_file(&self, data_storage_id: StorageId) {
+        if let Err(e) = self.sender.send(data_storage_id) {
             error!(
                 target: DEFAULT_LOG_TARGET,
-                "send file id: {} to hint file writer failed with error {}", data_file_id, e
+                "send file id: {} to hint file writer failed with error {}", data_storage_id, e
             );
         }
     }
@@ -211,14 +211,14 @@ impl HintWriter {
 
     fn write_hint_file(
         database_dir: &Path,
-        data_file_id: StorageId,
+        data_storage_id: StorageId,
         storage_options: DataStorageOptions,
     ) -> BitcaskResult<()> {
-        let stable_file_opt = DataStorage::open(database_dir, data_file_id, storage_options)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
-                "skip write hint for empty data file with id: {}", &data_file_id
+                "skip write hint for empty data file with id: {}", &data_storage_id
             );
             return Ok(());
         }
@@ -249,13 +249,13 @@ impl HintWriter {
         }
 
         let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
-        let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_file_id)?;
+        let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_storage_id)?;
         m.values()
             .map(|r| hint_file.write_hint_row(r))
             .collect::<BitcaskResult<Vec<_>>>()?;
         fs::move_file(
             FileType::HintFile,
-            Some(data_file_id),
+            Some(data_storage_id),
             &hint_file_tmp_dir,
             database_dir,
         )?;
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn test_read_write_hint_file() {
         let dir = get_temporary_directory_path();
-        let file_id = 1;
+        let storage_id = 1;
         let key = vec![1, 2, 3];
         let expect_row = HintRow {
             timestamp: 12345,
@@ -328,10 +328,10 @@ mod tests {
             key,
         };
         {
-            let mut hint_file = HintFile::create(&dir, file_id).unwrap();
+            let mut hint_file = HintFile::create(&dir, storage_id).unwrap();
             hint_file.write_hint_row(&expect_row).unwrap();
         }
-        let mut hint_file = HintFile::open(&dir, file_id).unwrap();
+        let mut hint_file = HintFile::open(&dir, storage_id).unwrap();
         let actual_row = hint_file.read_hint_row().unwrap();
         assert_eq!(expect_row, actual_row);
     }
@@ -339,10 +339,10 @@ mod tests {
     #[test]
     fn test_read_write_stable_data_file() {
         let dir = get_temporary_directory_path();
-        let file_id = 1;
+        let storage_id = 1;
         let mut writing_file = DataStorage::new(
             &dir,
-            file_id,
+            storage_id,
             DataStorageOptions {
                 max_file_size: 1024,
             },
@@ -362,10 +362,10 @@ mod tests {
                     max_file_size: 1024,
                 },
             );
-            writer.async_write_hint_file(file_id);
+            writer.async_write_hint_file(storage_id);
         }
 
-        let mut hint_file = HintFile::open(&dir, file_id).unwrap();
+        let mut hint_file = HintFile::open(&dir, storage_id).unwrap();
         let hint_row = hint_file.read_hint_row().unwrap();
 
         assert_eq!(key, hint_row.key);
