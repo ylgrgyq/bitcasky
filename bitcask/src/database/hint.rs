@@ -22,9 +22,7 @@ use crossbeam_channel::{unbounded, Sender};
 
 use super::{
     common::RecoveredRow,
-    constants::{
-        DATA_FILE_KEY_OFFSET, KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE, VALUE_SIZE_SIZE,
-    },
+    constants::{KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE},
     data_storage::DataStorageOptions,
 };
 
@@ -32,17 +30,17 @@ use super::{
 pub struct HintRow {
     pub timestamp: u64,
     pub key_size: u64,
-    pub value_size: u64,
+    pub row_size: u64,
     pub row_offset: u64,
     pub key: Vec<u8>,
 }
 
+const ROW_SIZE_SIZE: usize = 8;
 const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
-const HINT_FILE_VALUE_SIZE_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
-const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE;
+const HINT_FILE_ROW_SIZE_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
+const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_ROW_SIZE_OFFSET + ROW_SIZE_SIZE;
 const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
-const HINT_FILE_HEADER_SIZE: usize =
-    TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE + ROW_OFFSET_SIZE;
+const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_SIZE_SIZE + ROW_OFFSET_SIZE;
 const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
@@ -76,8 +74,8 @@ impl HintFile {
     pub fn write_hint_row(&mut self, hint: &HintRow) -> BitcaskResult<()> {
         let data_to_write = self.to_bytes(hint);
         self.file.write_all(&data_to_write)?;
-        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, key_size: {}, value_size: {}, row_offset: {}, timestamp: {}", 
-            hint.key, hint.key_size, hint.value_size, hint.row_offset, hint.timestamp);
+        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, row_size: {}, key_size: {}, row_offset: {}, timestamp: {}", 
+            hint.key, hint.row_size, hint.key_size, hint.row_offset, hint.timestamp);
         Ok(())
     }
 
@@ -88,10 +86,10 @@ impl HintFile {
         let header_bs = Bytes::from(header_buf);
         let timestamp = header_bs.slice(0..TSTAMP_SIZE).get_u64();
         let key_size = header_bs
-            .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_VALUE_SIZE_OFFSET)
+            .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_SIZE_OFFSET)
             .get_u64();
-        let value_size = header_bs
-            .slice(HINT_FILE_VALUE_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
+        let row_size = header_bs
+            .slice(HINT_FILE_ROW_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
             .get_u64();
         let row_offset = header_bs
             .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
@@ -101,13 +99,13 @@ impl HintFile {
         self.file.read_exact(&mut k_buf)?;
         let key: Vec<u8> = Bytes::from(k_buf).into();
 
-        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, key_size: {}, value_size: {}, row_offset: {}, timestamp: {}", 
-            key, key_size, value_size, row_offset, timestamp);
+        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, row_size: {}, key_size: {}, row_offset: {}, timestamp: {}", 
+            key, row_size, key_size, row_offset, timestamp);
 
         Ok(HintRow {
             timestamp,
             key_size,
-            value_size,
+            row_size,
             row_offset,
             key,
         })
@@ -117,7 +115,7 @@ impl HintFile {
         let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + row.key.len());
         bs.extend_from_slice(&row.timestamp.to_be_bytes());
         bs.extend_from_slice(&row.key_size.to_be_bytes());
-        bs.extend_from_slice(&row.value_size.to_be_bytes());
+        bs.extend_from_slice(&row.row_size.to_be_bytes());
         bs.extend_from_slice(&row.row_offset.to_be_bytes());
         bs.extend_from_slice(&row.key);
         bs.freeze()
@@ -157,7 +155,7 @@ impl Iterator for HintFileIterator {
                 row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
                     row_offset: h.row_offset,
-                    row_size: DATA_FILE_KEY_OFFSET as u64 + h.key_size + h.value_size,
+                    row_size: h.row_size,
                 },
                 timestamp: h.timestamp,
                 key: h.key,
@@ -239,7 +237,7 @@ impl HintWriter {
                             HintRow {
                                 timestamp: r.timestamp,
                                 key_size: r.key.len() as u64,
-                                value_size: r.value.len() as u64,
+                                row_size: r.row_location.row_size,
                                 row_offset: r.row_location.row_offset,
                                 key: r.key,
                             },
@@ -325,7 +323,7 @@ mod tests {
         let expect_row = HintRow {
             timestamp: 12345,
             key_size: key.len() as u64,
-            value_size: 456,
+            row_size: 456,
             row_offset: 789,
             key,
         };
@@ -372,7 +370,6 @@ mod tests {
 
         assert_eq!(key, hint_row.key);
         assert_eq!(key.len() as u64, hint_row.key_size);
-        assert_eq!(val.len() as u64, hint_row.value_size);
         assert_eq!(pos.row_offset, hint_row.row_offset);
     }
 }
