@@ -11,26 +11,19 @@ use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE}
 use super::constants::DATA_FILE_KEY_OFFSET;
 
 pub trait Decoder<T> {
-    fn decode_header(bytes: Bytes) -> RowHeader;
+    fn decode_header(bytes: Bytes) -> RowMeta;
 }
 
 #[derive(Debug)]
-pub struct RowHeader {
-    pub crc: u32,
+pub struct RowMeta {
     pub timestamp: u64,
     pub key_size: u64,
     pub value_size: u64,
 }
 
-impl RowHeader {
-    pub fn validate(key: &[u8], value: &[u8]) -> bool {
-        todo!()
-    }
-}
-
 #[derive(Debug)]
 pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
-    header: RowHeader,
+    meta: RowMeta,
     pub key: &'a Vec<u8>,
     pub value: V,
     pub size: u64,
@@ -48,16 +41,8 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
         let key_size = key.len() as u64;
         let value_size = value.len() as u64;
-        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-        let mut ck = crc32.digest();
-        ck.update(&timestamp.to_be_bytes());
-        ck.update(&key_size.to_be_bytes());
-        ck.update(&value_size.to_be_bytes());
-        ck.update(key);
-        ck.update(&value);
         RowToWrite {
-            header: RowHeader {
-                crc: ck.finalize(),
+            meta: RowMeta {
                 timestamp,
                 key_size,
                 value_size,
@@ -69,11 +54,20 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     }
 
     pub fn to_bytes(&self) -> Bytes {
+        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
+        let mut ck = crc32.digest();
+        ck.update(&self.meta.timestamp.to_be_bytes());
+        ck.update(&self.meta.key_size.to_be_bytes());
+        ck.update(&self.meta.value_size.to_be_bytes());
+        ck.update(self.key);
+        ck.update(&self.value);
+        let crc = ck.finalize();
+
         let mut bs = BytesMut::with_capacity(self.size as usize);
-        bs.extend_from_slice(&self.header.crc.to_be_bytes());
-        bs.extend_from_slice(&self.header.timestamp.to_be_bytes());
-        bs.extend_from_slice(&self.header.key_size.to_be_bytes());
-        bs.extend_from_slice(&self.header.value_size.to_be_bytes());
+        bs.extend_from_slice(&crc.to_be_bytes());
+        bs.extend_from_slice(&self.meta.timestamp.to_be_bytes());
+        bs.extend_from_slice(&self.meta.key_size.to_be_bytes());
+        bs.extend_from_slice(&self.meta.value_size.to_be_bytes());
         bs.extend_from_slice(self.key);
         bs.extend_from_slice(&self.value);
         bs.freeze()
