@@ -128,7 +128,17 @@ impl Database {
         value: TimedValue<V>,
     ) -> BitcaskResult<RowLocation> {
         let row = RowToWrite::new(key, value);
-        self.do_write(row)
+        let mut writing_file_ref = self.writing_storage.lock();
+
+        if writing_file_ref.check_file_overflow(&row) {
+            debug!(
+                "Flush writing file with id: {} on overflow",
+                writing_file_ref.file_id()
+            );
+            self.do_flush_writing_file(&mut writing_file_ref)?;
+        }
+
+        Ok(writing_file_ref.write_row(row)?)
     }
 
     pub fn flush_writing_file(&self) -> BitcaskResult<()> {
@@ -318,20 +328,6 @@ impl Database {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
         Ok(())
-    }
-
-    fn do_write<V: Deref<Target = [u8]>>(&self, row: RowToWrite<V>) -> BitcaskResult<RowLocation> {
-        let mut writing_file_ref = self.writing_storage.lock();
-
-        if writing_file_ref.check_file_overflow(&row) {
-            debug!(
-                "Flush writing file with id: {} on overflow",
-                writing_file_ref.file_id()
-            );
-            self.do_flush_writing_file(&mut writing_file_ref)?;
-        }
-
-        Ok(writing_file_ref.write_row(row)?)
     }
 
     fn do_flush_writing_file(

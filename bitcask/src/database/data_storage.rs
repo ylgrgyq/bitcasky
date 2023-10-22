@@ -145,7 +145,6 @@ impl DataStorage {
     }
 
     pub fn check_file_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
-        debug!("zzzz {} {}", row.size, self.options.max_file_size);
         row.size + self.file_size() as u64 > self.options.max_file_size
     }
 
