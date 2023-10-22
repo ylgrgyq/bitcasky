@@ -150,7 +150,8 @@ impl DataStorage {
     }
 
     pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
-        row.size + self.storage_size() as u64 > self.options.max_file_size
+        let row_size = DATA_FILE_KEY_OFFSET + row.key.len() + row.value.len();
+        (row_size + self.storage_size()) as u64 > self.options.max_file_size
     }
 
     fn open_by_file(
@@ -288,13 +289,14 @@ impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let value_offset = self.capacity;
         let data_to_write = row.to_bytes();
+        let row_size = data_to_write.len() as u64;
         self.data_file.write_all(&data_to_write)?;
         self.capacity += data_to_write.len() as u64;
 
         Ok(RowLocation {
             storage_id: self.storage_id,
             row_offset: value_offset,
-            row_size: row.size,
+            row_size,
         })
     }
 

@@ -26,7 +26,6 @@ pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
     meta: RowMeta,
     pub key: &'a Vec<u8>,
     pub value: V,
-    pub size: u64,
 }
 
 impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
@@ -49,7 +48,6 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
             },
             key,
             value,
-            size: DATA_FILE_KEY_OFFSET as u64 + key_size + value_size,
         }
     }
 
@@ -63,7 +61,8 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
         ck.update(&self.value);
         let crc = ck.finalize();
 
-        let mut bs = BytesMut::with_capacity(self.size as usize);
+        let size = DATA_FILE_KEY_OFFSET + self.key.len() + self.value.len();
+        let mut bs = BytesMut::with_capacity(size);
         bs.extend_from_slice(&crc.to_be_bytes());
         bs.extend_from_slice(&self.meta.timestamp.to_be_bytes());
         bs.extend_from_slice(&self.meta.key_size.to_be_bytes());
