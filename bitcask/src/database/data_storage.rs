@@ -377,8 +377,6 @@ impl DataStorageReader for FileDataStorage {
         let header_bs = Bytes::from(header_buf);
         let expected_crc = header_bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
 
-        self.data_file.metadata().unwrap();
-
         let tstmp = header_bs
             .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
             .get_u64();

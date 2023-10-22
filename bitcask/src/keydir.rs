@@ -29,12 +29,8 @@ impl KeyDir {
                 kd.delete(&item.key);
                 continue;
             }
-            let row_pos = RowLocation {
-                storage_id: item.storage_id,
-                row_offset: item.row_offset,
-                row_size: item.row_size,
-            };
-            kd.put(item.key, row_pos);
+
+            kd.put(item.key, item.row_position);
         }
         Ok(kd)
     }

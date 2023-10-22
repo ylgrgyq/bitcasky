@@ -154,10 +154,12 @@ impl Iterator for HintFileIterator {
                 _ => Some(Err(BitcaskError::IoError(e))),
             },
             r => Some(r.map(|h| RecoveredRow {
-                storage_id: self.file.storage_id,
+                row_position: super::RowLocation {
+                    storage_id: self.file.storage_id,
+                    row_offset: h.row_offset,
+                    row_size: DATA_FILE_KEY_OFFSET as u64 + h.key_size + h.value_size,
+                },
                 timestamp: h.timestamp,
-                row_offset: h.row_offset,
-                row_size: DATA_FILE_KEY_OFFSET as u64 + h.key_size + h.value_size,
                 key: h.key,
                 is_tombstone: false,
             })),

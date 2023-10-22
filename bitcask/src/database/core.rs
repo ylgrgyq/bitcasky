@@ -440,10 +440,8 @@ fn recovered_iter(
         let i = stable_file.iter().map(|iter| {
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
-                    storage_id: r.row_position.storage_id,
+                    row_position: r.row_position,
                     timestamp: r.timestamp,
-                    row_offset: r.row_position.row_offset,
-                    row_size: r.row_position.row_size,
                     key: r.key,
                     is_tombstone: utils::is_tombstone(&r.value),
                 })

@@ -10,20 +10,27 @@ use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE}
 
 use super::constants::DATA_FILE_KEY_OFFSET;
 
-pub trait Encoder<T> {
-    fn encode(obj: T) -> Bytes;
-}
-
 pub trait Decoder<T> {
-    fn decode(bytes: Bytes) -> T;
+    fn decode_header(bytes: Bytes) -> RowHeader;
 }
 
 #[derive(Debug)]
-pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
+pub struct RowHeader {
     pub crc: u32,
     pub timestamp: u64,
     pub key_size: u64,
     pub value_size: u64,
+}
+
+impl RowHeader {
+    pub fn validate(key: &[u8], value: &[u8]) -> bool {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
+    header: RowHeader,
     pub key: &'a Vec<u8>,
     pub value: V,
     pub size: u64,
@@ -49,10 +56,12 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
         ck.update(key);
         ck.update(&value);
         RowToWrite {
-            crc: ck.finalize(),
-            timestamp,
-            key_size,
-            value_size,
+            header: RowHeader {
+                crc: ck.finalize(),
+                timestamp,
+                key_size,
+                value_size,
+            },
             key,
             value,
             size: DATA_FILE_KEY_OFFSET as u64 + key_size + value_size,
@@ -61,10 +70,10 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
 
     pub fn to_bytes(&self) -> Bytes {
         let mut bs = BytesMut::with_capacity(self.size as usize);
-        bs.extend_from_slice(&self.crc.to_be_bytes());
-        bs.extend_from_slice(&self.timestamp.to_be_bytes());
-        bs.extend_from_slice(&self.key_size.to_be_bytes());
-        bs.extend_from_slice(&self.value_size.to_be_bytes());
+        bs.extend_from_slice(&self.header.crc.to_be_bytes());
+        bs.extend_from_slice(&self.header.timestamp.to_be_bytes());
+        bs.extend_from_slice(&self.header.key_size.to_be_bytes());
+        bs.extend_from_slice(&self.header.value_size.to_be_bytes());
         bs.extend_from_slice(self.key);
         bs.extend_from_slice(&self.value);
         bs.freeze()
@@ -137,10 +146,8 @@ pub struct RowToRead {
 }
 
 pub struct RecoveredRow {
-    pub storage_id: StorageId,
+    pub row_position: RowLocation,
     pub timestamp: u64,
-    pub row_offset: u64,
-    pub row_size: u64,
     pub key: Vec<u8>,
     pub is_tombstone: bool,
 }
