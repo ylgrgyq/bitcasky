@@ -34,6 +34,8 @@ pub enum DataStorageError {
     FlushStorageFailed(FileId, String),
     #[error("Transit writing data file with id: {0} to readonly failed. error: {1}")]
     TransitToReadOnlyFailed(FileId, String),
+    #[error("Storage overflow")]
+    StorageOverflow(),
     #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]
@@ -63,16 +65,26 @@ enum DataStorageImpl {
     FileStorage(FileDataStorage),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DataStorageOptions {
+    pub max_file_size: u64,
+}
+
 #[derive(Debug)]
 pub struct DataStorage {
     database_dir: PathBuf,
     file_id: FileId,
     storage_impl: DataStorageImpl,
     readonly: bool,
+    options: DataStorageOptions,
 }
 
 impl DataStorage {
-    pub fn new<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
+    pub fn new<P: AsRef<Path>>(
+        database_dir: P,
+        file_id: FileId,
+        options: DataStorageOptions,
+    ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(&path, FileType::DataFile, Some(file_id))?;
         debug!(
@@ -80,10 +92,14 @@ impl DataStorage {
             &path, file_id
         );
         let meta = data_file.metadata()?;
-        DataStorage::open_by_file(&path, file_id, data_file, meta)
+        DataStorage::open_by_file(&path, file_id, data_file, meta, options)
     }
 
-    pub fn open<P: AsRef<Path>>(database_dir: P, file_id: FileId) -> Result<Self> {
+    pub fn open<P: AsRef<Path>>(
+        database_dir: P,
+        file_id: FileId,
+        options: DataStorageOptions,
+    ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = fs::open_file(&path, FileType::DataFile, Some(file_id))?;
         debug!(
@@ -95,7 +111,7 @@ impl DataStorage {
             data_file.file.seek(SeekFrom::End(0))?;
         }
 
-        DataStorage::open_by_file(&path, file_id, data_file.file, meta)
+        DataStorage::open_by_file(&path, file_id, data_file.file, meta, options)
     }
 
     pub fn file_id(&self) -> FileId {
@@ -123,8 +139,14 @@ impl DataStorage {
                 self.file_id,
                 data_file.file,
                 meta,
+                self.options.clone(),
             )?,
         })
+    }
+
+    pub fn check_file_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
+        debug!("zzzz {} {}", row.size, self.options.max_file_size);
+        row.size + self.file_size() as u64 > self.options.max_file_size
     }
 
     fn open_by_file(
@@ -132,6 +154,7 @@ impl DataStorage {
         file_id: FileId,
         data_file: File,
         meta: Metadata,
+        options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();
 
@@ -141,10 +164,12 @@ impl DataStorage {
                 file_id,
                 data_file,
                 file_size,
+                options,
             )?),
             file_id,
             database_dir: database_dir.clone(),
             readonly: meta.permissions().readonly(),
+            options,
         })
     }
 }
@@ -227,6 +252,7 @@ pub struct FileDataStorage {
     data_file: File,
     pub file_id: FileId,
     capacity: u64,
+    options: DataStorageOptions,
 }
 
 impl FileDataStorage {
@@ -235,12 +261,14 @@ impl FileDataStorage {
         file_id: FileId,
         data_file: File,
         capacity: u64,
+        options: DataStorageOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
             database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             file_id,
             capacity,
+            options,
         })
     }
 }
@@ -267,18 +295,14 @@ impl DataStorageWriter for FileDataStorage {
         perms.set_readonly(true);
         std::fs::set_permissions(path, perms)?;
 
-        let file_size = self.data_file.metadata()?.len();
-        Ok(DataStorage {
-            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
-                &self.database_dir,
-                self.file_id,
-                self.data_file,
-                file_size,
-            )?),
-            file_id: self.file_id,
-            database_dir: self.database_dir,
-            readonly: true,
-        })
+        let meta = self.data_file.metadata()?;
+        DataStorage::open_by_file(
+            &self.database_dir,
+            self.file_id,
+            self.data_file,
+            meta,
+            self.options,
+        )
     }
 
     fn flush(&mut self) -> Result<()> {

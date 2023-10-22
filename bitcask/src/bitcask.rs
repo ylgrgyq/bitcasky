@@ -7,7 +7,7 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::database::{deleted_value, DataBaseOptions, Database, TimedValue};
+use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::file_id::FileIdGenerator;
 use crate::fs::{self};
@@ -51,7 +51,9 @@ impl BitcaskOptions {
 
     fn get_database_options(&self) -> DataBaseOptions {
         DataBaseOptions {
-            max_file_size: self.max_file_size,
+            storage_options: DataStorageOptions {
+                max_file_size: self.max_file_size,
+            },
         }
     }
 }
