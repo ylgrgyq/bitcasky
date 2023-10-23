@@ -16,12 +16,9 @@ use crate::{
 
 use super::{
     common::{RowToRead, RowToWrite, Value},
-    constants::{
-        DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
-        DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
-    },
-    format::Formatter,
-    format::{FormatterV1, RowDataChecker},
+    constants::{DATA_FILE_KEY_OFFSET, DATA_FILE_TSTAMP_OFFSET},
+    formatter::Formatter,
+    formatter::{FormatterError, FormatterV1, RowDataChecker},
     RowLocation, TimedValue,
 };
 
@@ -44,6 +41,8 @@ pub enum DataStorageError {
     IoError(#[from] std::io::Error),
     #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]
     CrcCheckFailed(u32, u64, u32, u32),
+    #[error("Got formatter Error: {0}")]
+    FormatterError(#[from] FormatterError),
 }
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
@@ -339,7 +338,8 @@ impl DataStorageReader for FileDataStorage {
 
     fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
-        let mut buf = vec![0; row_size as usize];
+
+        let mut buf = vec![0; self.formatter.header_size()];
         self.data_file.read_exact(&mut buf)?;
 
         let bs = Bytes::from(buf);
@@ -348,6 +348,14 @@ impl DataStorageReader for FileDataStorage {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
         ck.update(&bs.slice(4..));
+
+        let row_meta = self.formatter.decode_row_meta(bs)?;
+
+        let mut buf = vec![0; (row_meta.key_size + row_meta.value_size) as usize];
+        self.data_file.read_exact(&mut buf)?;
+        let bs = Bytes::from(buf);
+        ck.update(&bs);
+
         let actual_crc = ck.finalize();
         if expected_crc != actual_crc {
             return Err(DataStorageError::CrcCheckFailed(
@@ -357,22 +365,13 @@ impl DataStorageReader for FileDataStorage {
                 actual_crc,
             ));
         }
-        let timestamp = bs
-            .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
-            .get_u64();
 
-        let key_size = bs
-            .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-            .get_u64() as usize;
-        let val_size = bs
-            .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-            .get_u64() as usize;
-        let val_offset = DATA_FILE_KEY_OFFSET + key_size;
-        let ret = bs.slice(val_offset..val_offset + val_size);
+        let val_offset = row_meta.key_size as usize;
+        let ret = bs.slice(val_offset..val_offset + row_meta.value_size as usize);
 
         Ok(TimedValue {
             value: Value::VectorBytes(ret.into()),
-            timestamp,
+            timestamp: row_meta.timestamp,
         })
     }
 
@@ -382,29 +381,21 @@ impl DataStorageReader for FileDataStorage {
             return Ok(None);
         }
 
-        let mut header_buf = vec![0; DATA_FILE_KEY_OFFSET];
+        let mut header_buf = vec![0; self.formatter.header_size()];
         self.data_file.read_exact(&mut header_buf)?;
 
         let header_bs = Bytes::from(header_buf);
         let expected_crc = header_bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
-
-        let tstmp = header_bs
-            .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
-            .get_u64();
-        let key_size = header_bs
-            .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-            .get_u64() as usize;
-        let value_size = header_bs
-            .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-            .get_u64() as usize;
-
-        let mut kv_buf = vec![0; key_size + value_size];
-        self.data_file.read_exact(&mut kv_buf)?;
-
-        let kv_bs = Bytes::from(kv_buf);
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
         ck.update(&header_bs[DATA_FILE_TSTAMP_OFFSET..]);
+        let meta = self.formatter.decode_row_meta(header_bs)?;
+
+        let mut kv_buf = vec![0; (meta.key_size + meta.value_size) as usize];
+        self.data_file.read_exact(&mut kv_buf)?;
+
+        let kv_bs = Bytes::from(kv_buf);
+
         ck.update(&kv_bs);
         let actual_crc = ck.finalize();
         if expected_crc != actual_crc {
@@ -417,14 +408,14 @@ impl DataStorageReader for FileDataStorage {
         }
 
         Ok(Some(RowToRead {
-            key: kv_bs.slice(0..key_size).into(),
-            value: kv_bs.slice(key_size..).into(),
+            key: kv_bs.slice(0..meta.key_size as usize).into(),
+            value: kv_bs.slice(meta.key_size as usize..).into(),
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset: value_offset,
-                row_size: (DATA_FILE_KEY_OFFSET + key_size + value_size) as u64,
+                row_size: self.formatter.header_size() as u64 + meta.key_size + meta.value_size,
             },
-            timestamp: tstmp,
+            timestamp: meta.timestamp,
         }))
     }
 }

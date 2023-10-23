@@ -109,18 +109,6 @@ impl Formatter for FormatterV1 {
     }
 
     fn decode_row_meta(&self, bs: Bytes) -> Result<RowMeta> {
-        let expected_crc = bs.slice(0..4).get_u32();
-
-        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-        let mut ck = crc32.digest();
-        ck.update(&bs.slice(4..));
-        let actual_crc = ck.finalize();
-        if expected_crc != actual_crc {
-            return Err(FormatterError::CrcCheckFailed {
-                expected_crc,
-                actual_crc,
-            });
-        }
         let timestamp = bs
             .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
             .get_u64();
