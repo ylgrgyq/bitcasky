@@ -22,17 +22,17 @@ pub enum FormatterError {
 
 pub type Result<T> = std::result::Result<T, FormatterError>;
 
-trait Formatter {
+pub trait Formatter {
     fn header_size(&self) -> usize;
 
     fn row_size<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> usize;
 
-    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, crc: u32, row: RowToWrite<'a, V>) -> Bytes;
+    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, crc: u32, row: &RowToWrite<'a, V>) -> Bytes;
 
     fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta>;
 }
 
-trait RowDataChecker {
+pub trait RowDataChecker {
     fn gen_crc<'a, V: Deref<Target = [u8]>>(
         &self,
         meta: &RowMeta,
@@ -51,7 +51,8 @@ trait RowDataChecker {
     }
 }
 
-struct DefaultCrcChecker {}
+#[derive(Debug)]
+pub struct DefaultCrcChecker {}
 
 impl RowDataChecker for DefaultCrcChecker {
     fn gen_crc<'a, V: Deref<Target = [u8]>>(
@@ -71,8 +72,17 @@ impl RowDataChecker for DefaultCrcChecker {
     }
 }
 
-struct FormatterV1 {
-    checker: DefaultCrcChecker,
+#[derive(Debug)]
+pub struct FormatterV1 {
+    pub checker: DefaultCrcChecker,
+}
+
+impl FormatterV1 {
+    pub fn new() -> FormatterV1 {
+        FormatterV1 {
+            checker: DefaultCrcChecker {},
+        }
+    }
 }
 
 impl Formatter for FormatterV1 {
@@ -84,7 +94,7 @@ impl Formatter for FormatterV1 {
         self.header_size() + row.key.len() + row.value.len()
     }
 
-    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, crc: u32, row: RowToWrite<'a, V>) -> Bytes {
+    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, crc: u32, row: &RowToWrite<'a, V>) -> Bytes {
         let mut bs = BytesMut::with_capacity(self.row_size(&row));
 
         let crc = self.checker.gen_crc(&row.meta, row.key, &row.value);

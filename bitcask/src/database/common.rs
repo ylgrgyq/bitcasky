@@ -3,12 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use bytes::{Bytes, BytesMut};
-use crc::{Crc, CRC_32_CKSUM};
-
 use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE};
-
-use super::constants::DATA_FILE_KEY_OFFSET;
 
 #[derive(Debug)]
 pub struct RowMeta {
@@ -45,27 +40,6 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
             key,
             value,
         }
-    }
-
-    pub fn to_bytes(&self) -> Bytes {
-        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-        let mut ck = crc32.digest();
-        ck.update(&self.meta.timestamp.to_be_bytes());
-        ck.update(&self.meta.key_size.to_be_bytes());
-        ck.update(&self.meta.value_size.to_be_bytes());
-        ck.update(self.key);
-        ck.update(&self.value);
-        let crc = ck.finalize();
-
-        let size = DATA_FILE_KEY_OFFSET + self.key.len() + self.value.len();
-        let mut bs = BytesMut::with_capacity(size);
-        bs.extend_from_slice(&crc.to_be_bytes());
-        bs.extend_from_slice(&self.meta.timestamp.to_be_bytes());
-        bs.extend_from_slice(&self.meta.key_size.to_be_bytes());
-        bs.extend_from_slice(&self.meta.value_size.to_be_bytes());
-        bs.extend_from_slice(self.key);
-        bs.extend_from_slice(&self.value);
-        bs.freeze()
     }
 }
 

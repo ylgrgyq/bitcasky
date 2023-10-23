@@ -20,6 +20,8 @@ use super::{
         DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
         DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
     },
+    format::Formatter,
+    format::{FormatterV1, RowDataChecker},
     RowLocation, TimedValue,
 };
 
@@ -265,6 +267,7 @@ pub struct FileDataStorage {
     pub storage_id: StorageId,
     capacity: u64,
     options: DataStorageOptions,
+    formatter: FormatterV1,
 }
 
 impl FileDataStorage {
@@ -281,14 +284,20 @@ impl FileDataStorage {
             storage_id,
             capacity,
             options,
+            formatter: FormatterV1::new(),
         })
     }
 }
 
 impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
+        let crc = self
+            .formatter
+            .checker
+            .gen_crc(&row.meta, &row.key, &row.value);
+
+        let data_to_write = self.formatter.encode_row(crc, row);
         let value_offset = self.capacity;
-        let data_to_write = row.to_bytes();
         let row_size = data_to_write.len() as u64;
         self.data_file.write_all(&data_to_write)?;
         self.capacity += data_to_write.len() as u64;
