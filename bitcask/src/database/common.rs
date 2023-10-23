@@ -10,10 +10,6 @@ use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE}
 
 use super::constants::DATA_FILE_KEY_OFFSET;
 
-pub trait Decoder<T> {
-    fn decode_header(bytes: Bytes) -> RowMeta;
-}
-
 #[derive(Debug)]
 pub struct RowMeta {
     pub timestamp: u64,
@@ -23,7 +19,7 @@ pub struct RowMeta {
 
 #[derive(Debug)]
 pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
-    meta: RowMeta,
+    pub meta: RowMeta,
     pub key: &'a Vec<u8>,
     pub value: V,
 }
