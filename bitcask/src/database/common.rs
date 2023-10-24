@@ -3,6 +3,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crc::Digest;
+
 use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE};
 
 #[derive(Debug)]
@@ -10,6 +12,11 @@ pub struct RowMeta {
     pub timestamp: u64,
     pub key_size: u64,
     pub value_size: u64,
+}
+
+pub struct RowHeader {
+    pub crc: u32,
+    pub meta: RowMeta,
 }
 
 #[derive(Debug)]

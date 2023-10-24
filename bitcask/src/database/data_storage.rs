@@ -56,8 +56,10 @@ pub trait DataStorageWriter {
 }
 
 pub trait DataStorageReader {
+    /// Total size in bytes of this storage
     fn storage_size(&self) -> usize;
 
+    /// Read value from this storage at row_offset
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>>;
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
@@ -290,12 +292,7 @@ impl FileDataStorage {
 
 impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
-        let crc = self
-            .formatter
-            .checker
-            .gen_crc(&row.meta, &row.key, &row.value);
-
-        let data_to_write = self.formatter.encode_row(crc, row);
+        let data_to_write = self.formatter.encode_row(row);
         let value_offset = self.capacity;
         self.data_file.write_all(&data_to_write)?;
         self.capacity += data_to_write.len() as u64;
@@ -339,37 +336,21 @@ impl DataStorageReader for FileDataStorage {
 
         let mut buf = vec![0; self.formatter.header_size()];
         self.data_file.read_exact(&mut buf)?;
-
         let bs = Bytes::from(buf);
-        let expected_crc = bs.slice(0..4).get_u32();
+        let header = self.formatter.decode_row_header(bs)?;
 
-        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-        let mut ck = crc32.digest();
-        ck.update(&bs.slice(4..));
+        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
+        self.data_file.read_exact(&mut kv_buf)?;
+        let kv_bs = Bytes::from(kv_buf);
 
-        let row_meta = self.formatter.decode_row_meta(bs)?;
+        let k: Vec<u8> = kv_bs.slice(0..header.meta.key_size as usize).into();
+        let v: Vec<u8> = kv_bs.slice(header.meta.key_size as usize..).into();
 
-        let mut buf = vec![0; (row_meta.key_size + row_meta.value_size) as usize];
-        self.data_file.read_exact(&mut buf)?;
-        let bs = Bytes::from(buf);
-        ck.update(&bs);
-
-        let actual_crc = ck.finalize();
-        if expected_crc != actual_crc {
-            return Err(DataStorageError::CrcCheckFailed(
-                self.storage_id,
-                row_offset,
-                expected_crc,
-                actual_crc,
-            ));
-        }
-
-        let val_offset = row_meta.key_size as usize;
-        let ret = bs.slice(val_offset..val_offset + row_meta.value_size as usize);
+        self.formatter.checker.check_crc(&header, &k, &v)?;
 
         Ok(TimedValue {
-            value: Value::VectorBytes(ret.into()),
-            timestamp: row_meta.timestamp,
+            value: Value::VectorBytes(v),
+            timestamp: header.meta.timestamp,
         })
     }
 
@@ -381,38 +362,27 @@ impl DataStorageReader for FileDataStorage {
 
         let mut header_buf = vec![0; self.formatter.header_size()];
         self.data_file.read_exact(&mut header_buf)?;
-
         let header_bs = Bytes::from(header_buf);
-        let expected_crc = header_bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
-        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
-        let mut ck = crc32.digest();
-        ck.update(&header_bs[DATA_FILE_TSTAMP_OFFSET..]);
-        let meta = self.formatter.decode_row_meta(header_bs)?;
 
-        let mut kv_buf = vec![0; (meta.key_size + meta.value_size) as usize];
+        let header = self.formatter.decode_row_header(header_bs)?;
+
+        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
         self.data_file.read_exact(&mut kv_buf)?;
-
         let kv_bs = Bytes::from(kv_buf);
 
-        ck.update(&kv_bs);
-        let actual_crc = ck.finalize();
-        if expected_crc != actual_crc {
-            return Err(DataStorageError::CrcCheckFailed(
-                self.storage_id,
-                value_offset,
-                expected_crc,
-                actual_crc,
-            ));
-        }
+        let k: Vec<u8> = kv_bs.slice(0..header.meta.key_size as usize).into();
+        let v: Vec<u8> = kv_bs.slice(header.meta.key_size as usize..).into();
+
+        self.formatter.checker.check_crc(&header, &k, &v)?;
 
         Ok(Some(RowToRead {
-            key: kv_bs.slice(0..meta.key_size as usize).into(),
-            value: kv_bs.slice(meta.key_size as usize..).into(),
+            key: k,
+            value: v,
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset: value_offset,
             },
-            timestamp: meta.timestamp,
+            timestamp: header.meta.timestamp,
         }))
     }
 }

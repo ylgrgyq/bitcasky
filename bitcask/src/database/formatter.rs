@@ -4,7 +4,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
 use super::{
-    common::{RowMeta, RowToWrite},
+    common::{RowHeader, RowMeta, RowToWrite},
     constants::{
         DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
         DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
@@ -27,9 +27,11 @@ pub trait Formatter {
 
     fn row_size<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> usize;
 
-    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, crc: u32, row: &RowToWrite<'a, V>) -> Bytes;
+    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> Bytes;
 
     fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta>;
+
+    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
 }
 
 pub trait RowDataChecker {
@@ -42,12 +44,18 @@ pub trait RowDataChecker {
 
     fn check_crc<'a, V: Deref<Target = [u8]>>(
         &self,
-        expect_crc: u32,
-        meta: &RowMeta,
+        header: &RowHeader,
         key: &'a Vec<u8>,
         value: &V,
-    ) -> bool {
-        expect_crc == self.gen_crc(meta, key, value)
+    ) -> Result<()> {
+        let actual_crc = self.gen_crc(&header.meta, key, value);
+        if header.crc != self.gen_crc(&header.meta, key, value) {
+            return Err(FormatterError::CrcCheckFailed {
+                expected_crc: header.crc,
+                actual_crc,
+            });
+        }
+        Ok(())
     }
 }
 
@@ -94,7 +102,7 @@ impl Formatter for FormatterV1 {
         self.header_size() + row.key.len() + row.value.len()
     }
 
-    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, crc: u32, row: &RowToWrite<'a, V>) -> Bytes {
+    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> Bytes {
         let mut bs = BytesMut::with_capacity(self.row_size(&row));
 
         let crc = self.checker.gen_crc(&row.meta, row.key, &row.value);
@@ -123,6 +131,28 @@ impl Formatter for FormatterV1 {
             timestamp,
             key_size,
             value_size: val_size,
+        })
+    }
+
+    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader> {
+        let expected_crc = bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
+        let timestamp = bs
+            .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
+            .get_u64();
+
+        let key_size = bs
+            .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
+            .get_u64();
+        let val_size = bs
+            .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
+            .get_u64();
+        Ok(RowHeader {
+            crc: expected_crc,
+            meta: RowMeta {
+                timestamp,
+                key_size,
+                value_size: val_size,
+            },
         })
     }
 }
