@@ -343,13 +343,10 @@ impl DataStorageReader for FileDataStorage {
         self.data_file.read_exact(&mut kv_buf)?;
         let kv_bs = Bytes::from(kv_buf);
 
-        let k: Vec<u8> = kv_bs.slice(0..header.meta.key_size as usize).into();
-        let v: Vec<u8> = kv_bs.slice(header.meta.key_size as usize..).into();
-
-        self.formatter.checker.check_crc(&header, &k, &v)?;
+        self.formatter.checker.check_crc(&header, &kv_bs)?;
 
         Ok(TimedValue {
-            value: Value::VectorBytes(v),
+            value: Value::VectorBytes(kv_bs.slice(header.meta.key_size as usize..).into()),
             timestamp: header.meta.timestamp,
         })
     }
@@ -370,14 +367,11 @@ impl DataStorageReader for FileDataStorage {
         self.data_file.read_exact(&mut kv_buf)?;
         let kv_bs = Bytes::from(kv_buf);
 
-        let k: Vec<u8> = kv_bs.slice(0..header.meta.key_size as usize).into();
-        let v: Vec<u8> = kv_bs.slice(header.meta.key_size as usize..).into();
-
-        self.formatter.checker.check_crc(&header, &k, &v)?;
+        self.formatter.checker.check_crc(&header, &kv_bs)?;
 
         Ok(Some(RowToRead {
-            key: k,
-            value: v,
+            key: kv_bs.slice(0..header.meta.key_size as usize).into(),
+            value: kv_bs.slice(header.meta.key_size as usize..).into(),
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset: value_offset,

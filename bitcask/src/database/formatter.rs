@@ -42,14 +42,11 @@ pub trait RowDataChecker {
         value: &V,
     ) -> u32;
 
-    fn check_crc<'a, V: Deref<Target = [u8]>>(
-        &self,
-        header: &RowHeader,
-        key: &'a Vec<u8>,
-        value: &V,
-    ) -> Result<()> {
-        let actual_crc = self.gen_crc(&header.meta, key, value);
-        if header.crc != self.gen_crc(&header.meta, key, value) {
+    fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &Bytes) -> u32;
+
+    fn check_crc(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
+        let actual_crc = self.gen_crc_by_kv_bytes(&header.meta, kv);
+        if header.crc != actual_crc {
             return Err(FormatterError::CrcCheckFailed {
                 expected_crc: header.crc,
                 actual_crc,
@@ -76,6 +73,16 @@ impl RowDataChecker for DefaultCrcChecker {
         ck.update(&value.len().to_be_bytes());
         ck.update(key);
         ck.update(&value);
+        ck.finalize()
+    }
+
+    fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &Bytes) -> u32 {
+        let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
+        let mut ck = crc32.digest();
+        ck.update(&meta.timestamp.to_be_bytes());
+        ck.update(&meta.key_size.to_be_bytes());
+        ck.update(&meta.value_size.to_be_bytes());
+        ck.update(kv);
         ck.finalize()
     }
 }
