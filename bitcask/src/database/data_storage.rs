@@ -58,7 +58,7 @@ pub trait DataStorageWriter {
 pub trait DataStorageReader {
     fn storage_size(&self) -> usize;
 
-    fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>>;
+    fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>>;
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 }
@@ -223,10 +223,10 @@ impl DataStorageReader for DataStorage {
         }
     }
 
-    fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
-                .read_value(row_offset, row_size)
+                .read_value(row_offset)
                 .map_err(|e| DataStorageError::ReadRowFailed(s.storage_id, e.to_string())),
         }
     }
@@ -297,14 +297,12 @@ impl DataStorageWriter for FileDataStorage {
 
         let data_to_write = self.formatter.encode_row(crc, row);
         let value_offset = self.capacity;
-        let row_size = data_to_write.len() as u64;
         self.data_file.write_all(&data_to_write)?;
         self.capacity += data_to_write.len() as u64;
 
         Ok(RowLocation {
             storage_id: self.storage_id,
             row_offset: value_offset,
-            row_size,
         })
     }
 
@@ -336,7 +334,7 @@ impl DataStorageReader for FileDataStorage {
         self.capacity as usize
     }
 
-    fn read_value(&mut self, row_offset: u64, row_size: u64) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
 
         let mut buf = vec![0; self.formatter.header_size()];
@@ -413,7 +411,6 @@ impl DataStorageReader for FileDataStorage {
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset: value_offset,
-                row_size: self.formatter.header_size() as u64 + meta.key_size + meta.value_size,
             },
             timestamp: meta.timestamp,
         }))
@@ -451,18 +448,8 @@ mod tests {
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
-        assert_eq!(
-            v1,
-            *storage
-                .read_value(row_location1.row_offset, row_location1.row_size)
-                .unwrap()
-        );
-        assert_eq!(
-            v2,
-            *storage
-                .read_value(row_location2.row_offset, row_location2.row_size)
-                .unwrap()
-        );
+        assert_eq!(v1, *storage.read_value(row_location1.row_offset).unwrap());
+        assert_eq!(v2, *storage.read_value(row_location2.row_offset).unwrap());
     }
 
     #[test]

@@ -160,8 +160,8 @@ impl Bitcask {
                 e
             })?;
 
-        debug!(target: "Bitcask", "put data success. key: {:?}, storage_id: {}, row_offset: {}, row_size: {}", 
-            key, ret.storage_id, ret.row_offset, ret.row_size);
+        debug!(target: "Bitcask", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
+            key, ret.storage_id, ret.row_offset);
         kd.put(key, ret);
         Ok(())
     }

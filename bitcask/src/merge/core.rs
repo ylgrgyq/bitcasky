@@ -189,8 +189,8 @@ impl MergeManager {
             if !is_tombstone(&v.value) {
                 let pos = merge_db.write(k, TimedValue::has_time_value(v.value, v.timestamp))?;
                 merged_key_dir.checked_put(k.clone(), pos);
-                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, row_size: {}, timestamp: {}", 
-                    k, pos.storage_id, pos.row_offset, pos.row_size, v.timestamp);
+                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, timestamp: {}", 
+                    k, pos.storage_id, pos.row_offset, v.timestamp);
                 write_key_count += 1;
             }
         }

@@ -209,15 +209,13 @@ impl Database {
         {
             let mut writing_file_ref = self.writing_storage.lock();
             if row_location.storage_id == writing_file_ref.storage_id() {
-                return Ok(
-                    writing_file_ref.read_value(row_location.row_offset, row_location.row_size)?
-                );
+                return Ok(writing_file_ref.read_value(row_location.row_offset)?);
             }
         }
 
         let l = self.get_file_to_read(row_location.storage_id)?;
         let mut f = l.lock();
-        let ret = f.read_value(row_location.row_offset, row_location.row_size)?;
+        let ret = f.read_value(row_location.row_offset)?;
         Ok(ret)
     }
 
@@ -607,7 +605,6 @@ pub mod database_tests_utils {
                     RowLocation {
                         storage_id: pos.storage_id,
                         row_offset: pos.row_offset,
-                        row_size: pos.row_size,
                     },
                 )
             })

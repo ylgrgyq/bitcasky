@@ -51,7 +51,6 @@ pub trait BitcaskDataFile {
 pub struct RowLocation {
     pub storage_id: StorageId,
     pub row_offset: u64,
-    pub row_size: u64,
 }
 
 #[derive(Debug)]
