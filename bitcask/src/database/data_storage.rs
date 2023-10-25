@@ -17,7 +17,7 @@ use super::{
     common::{RowMeta, RowToRead, RowToWrite, Value},
     constants::DATA_FILE_KEY_OFFSET,
     formatter::Formatter,
-    formatter::{FormatterError, FormatterV1, RowDataChecker},
+    formatter::{FormatterError, FormatterV1},
     RowLocation, TimedValue,
 };
 
@@ -65,7 +65,7 @@ pub trait DataStorageReader {
 }
 #[derive(Debug)]
 enum DataStorageImpl {
-    FileStorage(FileDataStorage),
+    FileStorage(FileDataStorage<FormatterV1>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -171,6 +171,7 @@ impl DataStorage {
                 storage_id,
                 data_file,
                 file_size,
+                FormatterV1::new(),
                 options,
             )?),
             storage_id,
@@ -261,21 +262,22 @@ impl Iterator for StorageIter {
 }
 
 #[derive(Debug)]
-pub struct FileDataStorage {
+pub struct FileDataStorage<F: Formatter> {
     database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
     capacity: u64,
     options: DataStorageOptions,
-    formatter: FormatterV1,
+    formatter: F,
 }
 
-impl FileDataStorage {
+impl<F: Formatter> FileDataStorage<F> {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
         data_file: File,
         capacity: u64,
+        formatter: F,
         options: DataStorageOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
@@ -284,7 +286,7 @@ impl FileDataStorage {
             storage_id,
             capacity,
             options,
-            formatter: FormatterV1::new(),
+            formatter,
         })
     }
 
@@ -299,12 +301,12 @@ impl FileDataStorage {
         self.data_file.read_exact(&mut kv_buf)?;
         let kv_bs = Bytes::from(kv_buf);
 
-        self.formatter.checker.check_crc(&header, &kv_bs)?;
+        self.formatter.validate(&header, &kv_bs)?;
         Ok((header.meta, kv_bs))
     }
 }
 
-impl DataStorageWriter for FileDataStorage {
+impl<F: Formatter> DataStorageWriter for FileDataStorage<F> {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let data_to_write = self.formatter.encode_row(row);
         let value_offset = self.capacity;
@@ -340,7 +342,7 @@ impl DataStorageWriter for FileDataStorage {
     }
 }
 
-impl DataStorageReader for FileDataStorage {
+impl<F: Formatter> DataStorageReader for FileDataStorage<F> {
     fn storage_size(&self) -> usize {
         self.capacity as usize
     }

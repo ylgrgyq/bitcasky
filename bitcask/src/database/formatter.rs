@@ -32,6 +32,8 @@ pub trait Formatter {
     fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta>;
 
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
+
+    fn validate(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 }
 
 pub trait RowDataChecker {
@@ -161,5 +163,9 @@ impl Formatter for FormatterV1 {
                 value_size: val_size,
             },
         })
+    }
+
+    fn validate(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
+        self.checker.check_crc(header, kv)
     }
 }

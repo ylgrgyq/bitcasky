@@ -3,8 +3,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crc::Digest;
-
 use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE};
 
 #[derive(Debug)]
