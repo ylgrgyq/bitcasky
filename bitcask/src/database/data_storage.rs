@@ -1,5 +1,4 @@
-use bytes::{Buf, Bytes};
-use crc::{Crc, CRC_32_CKSUM};
+use bytes::Bytes;
 use log::{debug, error};
 use std::{
     fs::{File, Metadata},
@@ -15,8 +14,8 @@ use crate::{
 };
 
 use super::{
-    common::{RowToRead, RowToWrite, Value},
-    constants::{DATA_FILE_KEY_OFFSET, DATA_FILE_TSTAMP_OFFSET},
+    common::{RowMeta, RowToRead, RowToWrite, Value},
+    constants::DATA_FILE_KEY_OFFSET,
     formatter::Formatter,
     formatter::{FormatterError, FormatterV1, RowDataChecker},
     RowLocation, TimedValue,
@@ -288,6 +287,21 @@ impl FileDataStorage {
             formatter: FormatterV1::new(),
         })
     }
+
+    fn do_read_row(&mut self) -> Result<(RowMeta, Bytes)> {
+        let mut header_buf = vec![0; self.formatter.header_size()];
+        self.data_file.read_exact(&mut header_buf)?;
+        let header_bs = Bytes::from(header_buf);
+
+        let header = self.formatter.decode_row_header(header_bs)?;
+
+        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
+        self.data_file.read_exact(&mut kv_buf)?;
+        let kv_bs = Bytes::from(kv_buf);
+
+        self.formatter.checker.check_crc(&header, &kv_bs)?;
+        Ok((header.meta, kv_bs))
+    }
 }
 
 impl DataStorageWriter for FileDataStorage {
@@ -334,20 +348,11 @@ impl DataStorageReader for FileDataStorage {
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
 
-        let mut buf = vec![0; self.formatter.header_size()];
-        self.data_file.read_exact(&mut buf)?;
-        let bs = Bytes::from(buf);
-        let header = self.formatter.decode_row_header(bs)?;
-
-        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
-        self.data_file.read_exact(&mut kv_buf)?;
-        let kv_bs = Bytes::from(kv_buf);
-
-        self.formatter.checker.check_crc(&header, &kv_bs)?;
+        let (meta, kv_bs) = self.do_read_row()?;
 
         Ok(TimedValue {
-            value: Value::VectorBytes(kv_bs.slice(header.meta.key_size as usize..).into()),
-            timestamp: header.meta.timestamp,
+            value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
+            timestamp: meta.timestamp,
         })
     }
 
@@ -357,26 +362,16 @@ impl DataStorageReader for FileDataStorage {
             return Ok(None);
         }
 
-        let mut header_buf = vec![0; self.formatter.header_size()];
-        self.data_file.read_exact(&mut header_buf)?;
-        let header_bs = Bytes::from(header_buf);
-
-        let header = self.formatter.decode_row_header(header_bs)?;
-
-        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
-        self.data_file.read_exact(&mut kv_buf)?;
-        let kv_bs = Bytes::from(kv_buf);
-
-        self.formatter.checker.check_crc(&header, &kv_bs)?;
+        let (meta, kv_bs) = self.do_read_row()?;
 
         Ok(Some(RowToRead {
-            key: kv_bs.slice(0..header.meta.key_size as usize).into(),
-            value: kv_bs.slice(header.meta.key_size as usize..).into(),
+            key: kv_bs.slice(0..meta.key_size as usize).into(),
+            value: kv_bs.slice(meta.key_size as usize..).into(),
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset: value_offset,
             },
-            timestamp: header.meta.timestamp,
+            timestamp: meta.timestamp,
         }))
     }
 }
