@@ -24,6 +24,7 @@ use super::{
     common::RecoveredRow,
     constants::{KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE},
     data_storage::DataStorageOptions,
+    formatter::Formatter,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -163,13 +164,19 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path, storage_options: DataStorageOptions) -> HintWriter {
+    pub fn start<F: Formatter + std::marker::Send + 'static + Clone + Copy>(
+        database_dir: &Path,
+        formatter: F,
+        storage_options: DataStorageOptions,
+    ) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
-                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, storage_options) {
+                if let Err(e) =
+                    Self::write_hint_file(&moved_dir, storage_id, formatter, storage_options)
+                {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -200,12 +207,14 @@ impl HintWriter {
         self.sender.len()
     }
 
-    fn write_hint_file(
+    fn write_hint_file<F: Formatter + Copy>(
         database_dir: &Path,
         data_storage_id: StorageId,
+        formatter: F,
         storage_options: DataStorageOptions,
     ) -> BitcaskResult<()> {
-        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
+        let stable_file_opt =
+            DataStorage::open(database_dir, data_storage_id, formatter, storage_options)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
@@ -298,7 +307,11 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{common::RowToWrite, data_storage::DataStorageWriter};
+    use std::{rc::Rc, sync::Arc};
+
+    use crate::database::{
+        common::RowToWrite, data_storage::DataStorageWriter, formatter::FormatterV1,
+    };
 
     use super::*;
     use test_log::test;
@@ -332,6 +345,7 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
+            FormatterV1::new(),
             DataStorageOptions {
                 max_file_size: 1024,
             },
@@ -347,6 +361,7 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
+                FormatterV1::new(),
                 DataStorageOptions {
                     max_file_size: 1024,
                 },

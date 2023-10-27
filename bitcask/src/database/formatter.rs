@@ -58,7 +58,7 @@ pub trait RowDataChecker {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct DefaultCrcChecker {}
 
 impl RowDataChecker for DefaultCrcChecker {
@@ -89,10 +89,12 @@ impl RowDataChecker for DefaultCrcChecker {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FormatterV1 {
     pub checker: DefaultCrcChecker,
 }
+
+unsafe impl Send for FormatterV1 {}
 
 impl FormatterV1 {
     pub fn new() -> FormatterV1 {
