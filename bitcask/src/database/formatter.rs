@@ -39,27 +39,14 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 }
 
-trait RowDataChecker {
-    fn gen_crc<V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32;
-
-    fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &Bytes) -> u32;
-
-    fn check_crc(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
-        let actual_crc = self.gen_crc_by_kv_bytes(&header.meta, kv);
-        if header.crc != actual_crc {
-            return Err(FormatterError::CrcCheckFailed {
-                expected_crc: header.crc,
-                actual_crc,
-            });
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
-struct DefaultCrcChecker {}
+pub struct FormatterV1 {}
 
-impl RowDataChecker for DefaultCrcChecker {
+impl FormatterV1 {
+    pub fn new() -> FormatterV1 {
+        FormatterV1 {}
+    }
+
     fn gen_crc<'a, V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
@@ -82,19 +69,6 @@ impl RowDataChecker for DefaultCrcChecker {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct FormatterV1 {
-    checker: DefaultCrcChecker,
-}
-
-impl FormatterV1 {
-    pub fn new() -> FormatterV1 {
-        FormatterV1 {
-            checker: DefaultCrcChecker {},
-        }
-    }
-}
-
 impl Formatter for FormatterV1 {
     fn header_size(&self) -> usize {
         DATA_FILE_KEY_OFFSET
@@ -107,7 +81,7 @@ impl Formatter for FormatterV1 {
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
         let mut bs = BytesMut::with_capacity(self.row_size(row));
 
-        let crc = self.checker.gen_crc(&row.meta, row.key, &row.value);
+        let crc = self.gen_crc(&row.meta, row.key, &row.value);
 
         bs.extend_from_slice(&crc.to_be_bytes());
         bs.extend_from_slice(&row.meta.timestamp.to_be_bytes());
@@ -159,6 +133,13 @@ impl Formatter for FormatterV1 {
     }
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
-        self.checker.check_crc(header, kv)
+        let actual_crc = self.gen_crc_by_kv_bytes(&header.meta, kv);
+        if header.crc != actual_crc {
+            return Err(FormatterError::CrcCheckFailed {
+                expected_crc: header.crc,
+                actual_crc,
+            });
+        }
+        Ok(())
     }
 }
