@@ -8,9 +8,7 @@ use parking_lot::RwLock;
 use uuid::Uuid;
 
 use crate::database::formatter::FormatterV1;
-use crate::database::{
-    deleted_value, open_database, DataBaseOptions, DataStorageOptions, Database, TimedValue,
-};
+use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::fs::{self};
 use crate::keydir::KeyDir;
@@ -117,7 +115,7 @@ impl Bitcask {
         );
         merge_manager.recover_merge()?;
 
-        let database = open_database(
+        let database = Database::open(
             directory,
             storage_id_generator,
             FormatterV1::new(),

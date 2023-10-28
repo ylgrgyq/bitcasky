@@ -22,7 +22,7 @@ pub enum FormatterError {
 
 pub type Result<T> = std::result::Result<T, FormatterError>;
 
-pub trait Formatter {
+pub trait Formatter: std::marker::Send + 'static + Copy {
     fn header_size(&self) -> usize;
 
     fn row_size<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> usize;

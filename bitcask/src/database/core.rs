@@ -61,7 +61,7 @@ pub struct DataBaseOptions {
 }
 
 #[derive(Debug)]
-pub struct Database<F: Formatter + Copy> {
+pub struct Database<F: Formatter> {
     pub database_dir: PathBuf,
     storage_id_generator: Arc<StorageIdGenerator>,
     writing_storage: Mutex<DataStorage<F>>,
@@ -72,53 +72,53 @@ pub struct Database<F: Formatter + Copy> {
     is_error: Mutex<Option<String>>,
 }
 
-pub fn open_database<F: Formatter + std::marker::Send + 'static + Copy>(
-    directory: &Path,
-    storage_id_generator: Arc<StorageIdGenerator>,
-    formatter: F,
-    options: DataBaseOptions,
-) -> BitcaskResult<Database<F>> {
-    let database_dir: PathBuf = directory.into();
+impl<F: Formatter> Database<F> {
+    pub fn open(
+        directory: &Path,
+        storage_id_generator: Arc<StorageIdGenerator>,
+        formatter: F,
+        options: DataBaseOptions,
+    ) -> BitcaskResult<Database<F>> {
+        let database_dir: PathBuf = directory.into();
 
-    debug!(target: "Database", "opening database at directory {:?}", directory);
+        debug!(target: "Database", "opening database at directory {:?}", directory);
 
-    hint::clear_temp_hint_file_directory(&database_dir);
+        hint::clear_temp_hint_file_directory(&database_dir);
 
-    let data_storage_ids = SelfFs::get_storage_ids_in_dir(&database_dir, FileType::DataFile);
-    if let Some(id) = data_storage_ids.iter().max() {
-        storage_id_generator.update_id(*id);
+        let data_storage_ids = SelfFs::get_storage_ids_in_dir(&database_dir, FileType::DataFile);
+        if let Some(id) = data_storage_ids.iter().max() {
+            storage_id_generator.update_id(*id);
+        }
+
+        let hint_file_writer = HintWriter::start(&database_dir, formatter, options.storage_options);
+
+        let (writing_storage, storages) = prepare_load_storages(
+            &database_dir,
+            &data_storage_ids,
+            formatter,
+            &storage_id_generator,
+            options.storage_options,
+        )?;
+
+        let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
+            m.insert(s.storage_id(), Mutex::new(s));
+            m
+        });
+
+        let db = Database {
+            writing_storage: Mutex::new(writing_storage),
+            storage_id_generator,
+            database_dir,
+            stable_storages,
+            options,
+            hint_file_writer,
+            formatter,
+            is_error: Mutex::new(None),
+        };
+        info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
+        Ok(db)
     }
 
-    let hint_file_writer = HintWriter::start(&database_dir, formatter, options.storage_options);
-
-    let (writing_storage, storages) = prepare_load_storages(
-        &database_dir,
-        &data_storage_ids,
-        formatter,
-        &storage_id_generator,
-        options.storage_options,
-    )?;
-
-    let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
-        m.insert(s.storage_id(), Mutex::new(s));
-        m
-    });
-
-    let db = Database {
-        writing_storage: Mutex::new(writing_storage),
-        storage_id_generator,
-        database_dir,
-        stable_storages,
-        options,
-        hint_file_writer,
-        formatter,
-        is_error: Mutex::new(None),
-    };
-    info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
-    Ok(db)
-}
-
-impl<F: Formatter + Copy> Database<F> {
     pub fn get_database_dir(&self) -> &Path {
         &self.database_dir
     }
@@ -383,7 +383,7 @@ impl<F: Formatter + Copy> Database<F> {
     }
 }
 
-impl<F: Formatter + Copy> Drop for Database<F> {
+impl<F: Formatter> Drop for Database<F> {
     fn drop(&mut self) {
         let ret = self.close();
         if ret.is_err() {
@@ -393,12 +393,12 @@ impl<F: Formatter + Copy> Drop for Database<F> {
     }
 }
 
-pub struct DatabaseIter<F: Formatter + Copy> {
+pub struct DatabaseIter<F: Formatter> {
     current_iter: Cell<Option<StorageIter<F>>>,
     remain_iters: Vec<StorageIter<F>>,
 }
 
-impl<F: Formatter + Copy> DatabaseIter<F> {
+impl<F: Formatter> DatabaseIter<F> {
     fn new(mut iters: Vec<StorageIter<F>>) -> Self {
         if iters.is_empty() {
             DatabaseIter {
@@ -415,7 +415,7 @@ impl<F: Formatter + Copy> DatabaseIter<F> {
     }
 }
 
-impl<F: Formatter + Copy> Iterator for DatabaseIter<F> {
+impl<F: Formatter> Iterator for DatabaseIter<F> {
     type Item = BitcaskResult<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -434,7 +434,7 @@ impl<F: Formatter + Copy> Iterator for DatabaseIter<F> {
     }
 }
 
-fn recovered_iter<F: Formatter + Copy + 'static>(
+fn recovered_iter<F: Formatter>(
     database_dir: &Path,
     storage_id: StorageId,
     formatter: F,
@@ -464,7 +464,7 @@ fn recovered_iter<F: Formatter + Copy + 'static>(
     }
 }
 
-pub struct DatabaseRecoverIter<F: Formatter + Copy + 'static> {
+pub struct DatabaseRecoverIter<F: Formatter> {
     current_iter: Cell<Option<Box<dyn Iterator<Item = BitcaskResult<RecoveredRow>>>>>,
     data_storage_ids: Vec<StorageId>,
     database_dir: PathBuf,
@@ -472,7 +472,7 @@ pub struct DatabaseRecoverIter<F: Formatter + Copy + 'static> {
     storage_options: DataStorageOptions,
 }
 
-impl<F: Formatter + Copy + 'static> DatabaseRecoverIter<F> {
+impl<F: Formatter> DatabaseRecoverIter<F> {
     fn new(
         database_dir: PathBuf,
         mut iters: Vec<StorageId>,
@@ -501,7 +501,7 @@ impl<F: Formatter + Copy + 'static> DatabaseRecoverIter<F> {
     }
 }
 
-impl<F: Formatter + Copy + 'static> Iterator for DatabaseRecoverIter<F> {
+impl<F: Formatter> Iterator for DatabaseRecoverIter<F> {
     type Item = BitcaskResult<RecoveredRow>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -534,7 +534,7 @@ impl<F: Formatter + Copy + 'static> Iterator for DatabaseRecoverIter<F> {
     }
 }
 
-fn open_storages<P: AsRef<Path>, F: Formatter + Copy>(
+fn open_storages<P: AsRef<Path>, F: Formatter>(
     database_dir: P,
     data_storage_ids: &[u32],
     formatter: F,
@@ -549,7 +549,7 @@ fn open_storages<P: AsRef<Path>, F: Formatter + Copy>(
         .collect::<crate::database::data_storage::Result<Vec<DataStorage<F>>>>()?)
 }
 
-fn prepare_load_storages<P: AsRef<Path>, F: Formatter + Copy>(
+fn prepare_load_storages<P: AsRef<Path>, F: Formatter>(
     database_dir: P,
     data_storage_ids: &[u32],
     formatter: F,
@@ -603,21 +603,18 @@ pub mod database_tests_utils {
         }
     }
 
-    pub fn assert_rows_value<F: Formatter + Copy>(db: &Database<F>, expect: &Vec<TestingRow>) {
+    pub fn assert_rows_value<F: Formatter>(db: &Database<F>, expect: &Vec<TestingRow>) {
         for row in expect {
             assert_row_value(db, row);
         }
     }
 
-    pub fn assert_row_value<F: Formatter + Copy>(db: &Database<F>, expect: &TestingRow) {
+    pub fn assert_row_value<F: Formatter>(db: &Database<F>, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
         assert_eq!(*expect.kv.value(), *actual.value);
     }
 
-    pub fn assert_database_rows<F: Formatter + Copy>(
-        db: &Database<F>,
-        expect_rows: &Vec<TestingRow>,
-    ) {
+    pub fn assert_database_rows<F: Formatter>(db: &Database<F>, expect_rows: &Vec<TestingRow>) {
         let mut i = 0;
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
@@ -629,10 +626,7 @@ pub mod database_tests_utils {
         assert_eq!(expect_rows.len(), i);
     }
 
-    pub fn write_kvs_to_db<F: Formatter + Copy>(
-        db: &Database<F>,
-        kvs: Vec<TestingKV>,
-    ) -> Vec<TestingRow> {
+    pub fn write_kvs_to_db<F: Formatter>(db: &Database<F>, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
         kvs.into_iter()
             .map(|kv| {
                 let pos = db
@@ -669,7 +663,7 @@ mod tests {
     fn test_read_write_writing_file() {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator,
             FormatterV1::new(),
@@ -692,7 +686,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator.clone(),
             FormatterV1::new(),
@@ -725,7 +719,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = open_database(
+            let db = Database::open(
                 &dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -739,7 +733,7 @@ mod tests {
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
         {
-            let db = open_database(
+            let db = Database::open(
                 &dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -753,7 +747,7 @@ mod tests {
             rows.append(&mut write_kvs_to_db(&db, kvs));
         }
 
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator.clone(),
             FormatterV1::new(),
@@ -770,7 +764,7 @@ mod tests {
     fn test_wrap_file() {
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         let dir = get_temporary_directory_path();
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator,
             FormatterV1::new(),

@@ -164,7 +164,7 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start<F: Formatter + std::marker::Send + 'static + Copy>(
+    pub fn start<F: Formatter>(
         database_dir: &Path,
         formatter: F,
         storage_options: DataStorageOptions,
@@ -207,7 +207,7 @@ impl HintWriter {
         self.sender.len()
     }
 
-    fn write_hint_file<F: Formatter + Copy>(
+    fn write_hint_file<F: Formatter>(
         database_dir: &Path,
         data_storage_id: StorageId,
         formatter: F,

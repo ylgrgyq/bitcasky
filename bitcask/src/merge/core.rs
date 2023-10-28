@@ -12,7 +12,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::{
     database::{
         formatter::{Formatter, FormatterV1},
-        open_database, DataBaseOptions, Database, TimedValue,
+        DataBaseOptions, Database, TimedValue,
     },
     error::{BitcaskError, BitcaskResult},
     fs::{self, FileType},
@@ -48,7 +48,7 @@ impl MergeManager {
         }
     }
 
-    pub fn merge<F: Formatter + Copy>(
+    pub fn merge<F: Formatter>(
         &self,
         database: &Database<F>,
         keydir: &RwLock<KeyDir>,
@@ -156,7 +156,7 @@ impl MergeManager {
         Ok(())
     }
 
-    fn flush_writing_file<F: Formatter + Copy>(
+    fn flush_writing_file<F: Formatter>(
         &self,
         database: &Database<F>,
         keydir: &RwLock<KeyDir>,
@@ -168,7 +168,7 @@ impl MergeManager {
         Ok((_kd.clone(), known_max_storage_id))
     }
 
-    fn write_merged_files<F: Formatter + Copy>(
+    fn write_merged_files<F: Formatter>(
         &self,
         database: &Database<F>,
         merge_file_dir: &Path,
@@ -183,7 +183,7 @@ impl MergeManager {
         )?;
 
         let merged_key_dir = KeyDir::new_empty_key_dir();
-        let merge_db = open_database(
+        let merge_db = Database::open(
             merge_file_dir,
             self.storage_id_generator.clone(),
             FormatterV1::new(),
@@ -433,7 +433,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = open_database(
+            let db = Database::open(
                 &dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -458,7 +458,7 @@ mod tests {
             DEFAULT_OPTIONS,
         );
         merge_manager.recover_merge().unwrap();
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator.clone(),
             FormatterV1::new(),
@@ -477,7 +477,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = open_database(
+            let db = Database::open(
                 &dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -493,7 +493,7 @@ mod tests {
         let merge_file_dir = create_merge_file_dir(&dir).unwrap();
         {
             // write something to data file in merge dir
-            let db = open_database(
+            let db = Database::open(
                 &merge_file_dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -518,7 +518,7 @@ mod tests {
             DEFAULT_OPTIONS,
         );
         merge_manager.recover_merge().unwrap();
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator.clone(),
             FormatterV1::new(),
@@ -537,7 +537,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = open_database(
+            let db = Database::open(
                 &dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -565,7 +565,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         {
             // write something to data file in merge dir
-            let db = open_database(
+            let db = Database::open(
                 &merge_file_dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -587,7 +587,7 @@ mod tests {
             DEFAULT_OPTIONS,
         );
         merge_manager.recover_merge().unwrap();
-        let db = open_database(
+        let db = Database::open(
             &dir,
             storage_id_generator.clone(),
             FormatterV1::new(),
@@ -607,7 +607,7 @@ mod tests {
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         let mut rows: Vec<TestingRow> = vec![];
         {
-            let db = open_database(
+            let db = Database::open(
                 &dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -627,7 +627,7 @@ mod tests {
         write_merge_meta(&merge_file_dir, merge_meta).unwrap();
         {
             // write something to data file in merge dir
-            let db = open_database(
+            let db = Database::open(
                 &merge_file_dir,
                 storage_id_generator.clone(),
                 FormatterV1::new(),
@@ -659,7 +659,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
-        let old_db = open_database(
+        let old_db = Database::open(
             &dir,
             storage_id_generator.clone(),
             FormatterV1::new(),
@@ -673,7 +673,7 @@ mod tests {
         rows.append(&mut write_kvs_to_db(&old_db, kvs));
         {
             let merge_path = create_merge_file_dir(&dir).unwrap();
-            let db = open_database(
+            let db = Database::open(
                 &merge_path,
                 storage_id_generator.clone(),
                 FormatterV1::new(),

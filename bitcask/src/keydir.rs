@@ -20,7 +20,7 @@ impl KeyDir {
         KeyDir { index }
     }
 
-    pub fn new<F: Formatter + Copy + 'static>(database: &Database<F>) -> BitcaskResult<KeyDir> {
+    pub fn new<F: Formatter>(database: &Database<F>) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
         let kd = KeyDir { index };
         for ret in database.recovery_iter()? {

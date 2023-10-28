@@ -46,7 +46,7 @@ pub enum DataStorageError {
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
 
-pub trait DataStorageWriter<F: Formatter + Copy> {
+pub trait DataStorageWriter<F: Formatter> {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation>;
 
     fn transit_to_readonly(self) -> Result<DataStorage<F>>;
@@ -74,7 +74,7 @@ pub struct DataStorageOptions {
 }
 
 #[derive(Debug)]
-pub struct DataStorage<F: Formatter + Copy> {
+pub struct DataStorage<F: Formatter> {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl<F>,
@@ -83,7 +83,7 @@ pub struct DataStorage<F: Formatter + Copy> {
     options: DataStorageOptions,
 }
 
-impl<F: Formatter + Copy> DataStorage<F> {
+impl<F: Formatter> DataStorage<F> {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
@@ -188,7 +188,7 @@ impl<F: Formatter + Copy> DataStorage<F> {
     }
 }
 
-impl<F: Formatter + Copy> DataStorageWriter<F> for DataStorage<F> {
+impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         if self.check_storage_overflow(row) {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
@@ -224,7 +224,7 @@ impl<F: Formatter + Copy> DataStorageWriter<F> for DataStorage<F> {
     }
 }
 
-impl<F: Formatter + Copy> DataStorageReader for DataStorage<F> {
+impl<F: Formatter> DataStorageReader for DataStorage<F> {
     fn storage_size(&self) -> usize {
         match &self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.storage_size(),
@@ -247,11 +247,11 @@ impl<F: Formatter + Copy> DataStorageReader for DataStorage<F> {
 }
 
 #[derive(Debug)]
-pub struct StorageIter<F: Formatter + Copy> {
+pub struct StorageIter<F: Formatter> {
     storage: DataStorage<F>,
 }
 
-impl<F: Formatter + Copy> Iterator for StorageIter<F> {
+impl<F: Formatter> Iterator for StorageIter<F> {
     type Item = Result<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -312,7 +312,7 @@ impl<F: Formatter> FileDataStorage<F> {
     }
 }
 
-impl<F: Formatter + Copy> DataStorageWriter<F> for FileDataStorage<F> {
+impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let data_to_write = self.formatter.encode_row(row);
         let value_offset = self.capacity;
