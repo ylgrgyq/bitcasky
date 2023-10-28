@@ -1,6 +1,6 @@
-mod file_storage;
+mod file_data_storage;
 
-pub use self::file_storage::FileDataStorage;
+pub use self::file_data_storage::FileDataStorage;
 
 use log::{debug, error};
 use std::{
