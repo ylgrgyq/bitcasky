@@ -3,7 +3,9 @@ use std::ops::Deref;
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use super::common::{RowHeader, RowMeta, RowToWrite};
+use crate::database::common::{RowHeader, RowMeta, RowToWrite};
+
+use super::{Formatter, FormatterError, Result};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -14,31 +16,6 @@ const DATA_FILE_KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
 const DATA_FILE_VALUE_SIZE_OFFSET: usize = DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const DATA_FILE_KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
-use thiserror::Error;
-
-#[derive(Error, Debug)]
-#[error("{}")]
-pub enum FormatterError {
-    #[error("Crc check failed. expect crc is: {expected_crc}, actual crc is: {actual_crc}")]
-    CrcCheckFailed { expected_crc: u32, actual_crc: u32 },
-}
-
-pub type Result<T> = std::result::Result<T, FormatterError>;
-
-pub trait Formatter: std::marker::Send + 'static + Copy {
-    fn header_size(&self) -> usize;
-
-    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
-
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
-
-    fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta>;
-
-    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
-
-    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct FormatterV1 {}
 
@@ -47,7 +24,7 @@ impl FormatterV1 {
         FormatterV1 {}
     }
 
-    fn gen_crc<'a, V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
+    fn gen_crc<V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
         ck.update(&meta.timestamp.to_be_bytes());
