@@ -15,7 +15,6 @@ use crate::{
 
 use super::{
     common::{RowMeta, RowToRead, RowToWrite, Value},
-    constants::DATA_FILE_KEY_OFFSET,
     formatter::Formatter,
     formatter::FormatterError,
     RowLocation, TimedValue,
@@ -156,7 +155,7 @@ impl<F: Formatter> DataStorage<F> {
     }
 
     pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
-        let row_size = DATA_FILE_KEY_OFFSET + row.key.len() + row.value.len();
+        let row_size = self.formatter.row_size(row);
         (row_size + self.storage_size()) as u64 > self.options.max_file_size
     }
 
@@ -442,7 +441,7 @@ mod tests {
         storage.write_row(&row_to_write).unwrap();
 
         assert_eq!(
-            DATA_FILE_KEY_OFFSET + k1.len() + v1.len(),
+            FormatterV1::new().row_size(&row_to_write),
             storage.storage_size()
         );
     }

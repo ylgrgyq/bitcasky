@@ -20,12 +20,7 @@ use crate::{
 };
 use crossbeam_channel::{unbounded, Sender};
 
-use super::{
-    common::RecoveredRow,
-    constants::{KEY_SIZE_SIZE, ROW_OFFSET_SIZE, TSTAMP_SIZE},
-    data_storage::DataStorageOptions,
-    formatter::Formatter,
-};
+use super::{common::RecoveredRow, data_storage::DataStorageOptions, formatter::Formatter};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct HintRow {
@@ -35,6 +30,9 @@ pub struct HintRow {
     pub key: Vec<u8>,
 }
 
+const TSTAMP_SIZE: usize = 8;
+const KEY_SIZE_SIZE: usize = 8;
+const ROW_OFFSET_SIZE: usize = 8;
 const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
 const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;

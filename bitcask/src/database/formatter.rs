@@ -3,13 +3,16 @@ use std::ops::Deref;
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use super::{
-    common::{RowHeader, RowMeta, RowToWrite},
-    constants::{
-        DATA_FILE_KEY_OFFSET, DATA_FILE_KEY_SIZE_OFFSET, DATA_FILE_TSTAMP_OFFSET,
-        DATA_FILE_VALUE_SIZE_OFFSET, KEY_SIZE_SIZE, VALUE_SIZE_SIZE,
-    },
-};
+use super::common::{RowHeader, RowMeta, RowToWrite};
+
+const CRC_SIZE: usize = 4;
+const TSTAMP_SIZE: usize = 8;
+const KEY_SIZE_SIZE: usize = 8;
+const VALUE_SIZE_SIZE: usize = 8;
+const DATA_FILE_TSTAMP_OFFSET: usize = CRC_SIZE;
+const DATA_FILE_KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
+const DATA_FILE_VALUE_SIZE_OFFSET: usize = DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
+const DATA_FILE_KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
 use thiserror::Error;
 
