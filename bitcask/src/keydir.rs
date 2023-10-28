@@ -5,7 +5,7 @@ use dashmap::{
 };
 
 use crate::{
-    database::{Database, RowLocation},
+    database::{formatter::Formatter, Database, RowLocation},
     error::BitcaskResult,
 };
 
@@ -20,7 +20,7 @@ impl KeyDir {
         KeyDir { index }
     }
 
-    pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
+    pub fn new<F: Formatter>(database: &Database<F>) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
         let kd = KeyDir { index };
         for ret in database.recovery_iter()? {
@@ -29,12 +29,8 @@ impl KeyDir {
                 kd.delete(&item.key);
                 continue;
             }
-            let row_pos = RowLocation {
-                file_id: item.file_id,
-                row_offset: item.row_offset,
-                row_size: item.row_size,
-            };
-            kd.put(item.key, row_pos);
+
+            kd.put(item.key, item.row_location);
         }
         Ok(kd)
     }
@@ -48,7 +44,7 @@ impl KeyDir {
         if let Some(pos) = r {
             let old_pos: RowLocation = *(pos);
             // key was written again during merge
-            if value.file_id < old_pos.file_id {
+            if value.storage_id < old_pos.storage_id {
                 return;
             }
         }

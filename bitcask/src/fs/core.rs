@@ -6,14 +6,14 @@ use std::{
 
 use log::debug;
 
-use crate::{file_id::FileId, fs::FileType};
+use crate::{fs::FileType, storage_id::StorageId};
 
 const TESTING_DIRECTORY: &str = "Testing";
 
 pub struct IdentifiedFile {
     pub file_type: FileType,
     pub file: File,
-    pub file_id: Option<FileId>,
+    pub storage_id: Option<StorageId>,
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
@@ -42,9 +42,9 @@ pub fn check_directory_is_writable(base_dir: &Path) -> bool {
 pub fn create_file<P: AsRef<Path>>(
     base_dir: P,
     file_type: FileType,
-    file_id: Option<FileId>,
+    storage_id: Option<StorageId>,
 ) -> std::io::Result<File> {
-    let path = file_type.get_path(base_dir, file_id);
+    let path = file_type.get_path(base_dir, storage_id);
     File::options()
         .write(true)
         .create(true)
@@ -55,9 +55,9 @@ pub fn create_file<P: AsRef<Path>>(
 pub fn open_file<P: AsRef<Path>>(
     base_dir: P,
     file_type: FileType,
-    file_id: Option<FileId>,
+    storage_id: Option<StorageId>,
 ) -> std::io::Result<IdentifiedFile> {
-    let path = file_type.get_path(base_dir, file_id);
+    let path = file_type.get_path(base_dir, storage_id);
     let file = if std::fs::metadata(&path)?.permissions().readonly() {
         File::options().read(true).open(path)?
     } else {
@@ -66,15 +66,19 @@ pub fn open_file<P: AsRef<Path>>(
     Ok(IdentifiedFile {
         file_type,
         file,
-        file_id,
+        storage_id,
     })
 }
 
-pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>) -> Result<()> {
-    let path = file_type.get_path(base_dir, file_id);
+pub fn delete_file(
+    base_dir: &Path,
+    file_type: FileType,
+    storage_id: Option<StorageId>,
+) -> Result<()> {
+    let path = file_type.get_path(base_dir, storage_id);
     if path.exists() {
         fs::remove_file(path)?;
-        if let Some(id) = file_id {
+        if let Some(id) = storage_id {
             debug!(
                 "Delete {} type file with id: {} under path: {:?}",
                 file_type, id, base_dir
@@ -88,27 +92,30 @@ pub fn delete_file(base_dir: &Path, file_type: FileType, file_id: Option<FileId>
 
 pub fn move_file(
     file_type: FileType,
-    file_id: Option<FileId>,
+    storage_id: Option<StorageId>,
     from_dir: &Path,
     to_dir: &Path,
 ) -> Result<()> {
-    let from_p = file_type.get_path(from_dir, file_id);
+    let from_p = file_type.get_path(from_dir, storage_id);
     if from_p.exists() {
-        let to_p = file_type.get_path(to_dir, file_id);
+        let to_p = file_type.get_path(to_dir, storage_id);
         return fs::rename(from_p, to_p);
     }
     Ok(())
 }
 
-pub fn change_file_id(
+pub fn change_storage_id(
     base_dir: &Path,
     file_type: FileType,
-    from_file_id: FileId,
-    to_file_id: FileId,
+    from_storage_id: StorageId,
+    to_storage_id: StorageId,
 ) -> Result<()> {
-    debug!("Change file id from {} to {}", from_file_id, to_file_id);
-    let from_p = file_type.get_path(base_dir, Some(from_file_id));
-    let to_p = file_type.get_path(base_dir, Some(to_file_id));
+    debug!(
+        "Change file id from {} to {}",
+        from_storage_id, to_storage_id
+    );
+    let from_p = file_type.get_path(base_dir, Some(from_storage_id));
+    let to_p = file_type.get_path(base_dir, Some(to_storage_id));
     fs::rename(from_p, to_p)?;
     Ok(())
 }
@@ -126,8 +133,8 @@ pub fn delete_dir(base_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> {
-    let mut actual_file_ids = vec![];
+pub fn get_storage_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<StorageId> {
+    let mut actual_storage_ids = vec![];
     for path in fs::read_dir(dir_path).unwrap() {
         let file_dir_entry = path.unwrap();
         let file_path = file_dir_entry.path();
@@ -138,11 +145,13 @@ pub fn get_file_ids_in_dir(dir_path: &Path, file_type: FileType) -> Vec<FileId> 
             continue;
         }
 
-        let id = file_type.parse_file_id_from_file_name(&file_path).unwrap();
-        actual_file_ids.push(id);
+        let id = file_type
+            .parse_storage_id_from_file_name(&file_path)
+            .unwrap();
+        actual_storage_ids.push(id);
     }
-    actual_file_ids.sort();
-    actual_file_ids
+    actual_storage_ids.sort();
+    actual_storage_ids
 }
 
 // used by some tests
@@ -174,12 +183,12 @@ mod tests {
 
     fn open_file_by_path(file_type: FileType, file_path: &Path) -> Result<IdentifiedFile> {
         if file_type.check_file_belongs_to_type(file_path) {
-            let file_id = file_type.parse_file_id_from_file_name(file_path);
+            let storage_id = file_type.parse_storage_id_from_file_name(file_path);
             let file = File::options().read(true).open(file_path)?;
             return Ok(IdentifiedFile {
                 file_type,
                 file,
-                file_id,
+                storage_id,
             });
         }
         let file_name = file_path
@@ -195,30 +204,30 @@ mod tests {
     #[test]
     fn test_create_file() {
         let dir = get_temporary_directory_path();
-        let file_id = Some(123);
-        let file_path = FileType::DataFile.get_path(&dir, file_id);
+        let storage_id = Some(123);
+        let file_path = FileType::DataFile.get_path(&dir, storage_id);
         assert!(!file_path.exists());
-        create_file(&dir, FileType::DataFile, file_id).unwrap();
+        create_file(&dir, FileType::DataFile, storage_id).unwrap();
         assert!(file_path.exists());
     }
 
     #[test]
     fn test_delete_file() {
         let dir = get_temporary_directory_path();
-        let file_id = Some(123);
-        let file_path = FileType::DataFile.get_path(&dir, file_id);
+        let storage_id = Some(123);
+        let file_path = FileType::DataFile.get_path(&dir, storage_id);
         assert!(!file_path.exists());
-        create_file(&dir, FileType::DataFile, file_id).unwrap();
+        create_file(&dir, FileType::DataFile, storage_id).unwrap();
         assert!(file_path.exists());
-        delete_file(&dir, FileType::DataFile, file_id).unwrap();
+        delete_file(&dir, FileType::DataFile, storage_id).unwrap();
         assert!(!file_path.exists());
     }
 
     #[test]
     fn test_open_file() {
         let dir = get_temporary_directory_path();
-        let file_id = Some(123);
-        let mut file = create_file(&dir, FileType::DataFile, file_id).unwrap();
+        let storage_id = Some(123);
+        let mut file = create_file(&dir, FileType::DataFile, storage_id).unwrap();
         let mut bs = BytesMut::with_capacity(8);
         let expect_val: u64 = 12345;
         bs.extend_from_slice(&expect_val.to_be_bytes());
@@ -226,8 +235,8 @@ mod tests {
         file.write_all(&bs).unwrap();
 
         {
-            let mut f = open_file(&dir, FileType::DataFile, file_id).unwrap();
-            assert_eq!(file_id, f.file_id);
+            let mut f = open_file(&dir, FileType::DataFile, storage_id).unwrap();
+            assert_eq!(storage_id, f.storage_id);
             assert_eq!(FileType::DataFile, f.file_type);
 
             let mut header_buf = vec![0; 8];
@@ -238,9 +247,9 @@ mod tests {
         }
 
         {
-            let p = FileType::DataFile.get_path(&dir, file_id);
+            let p = FileType::DataFile.get_path(&dir, storage_id);
             let mut f = open_file_by_path(FileType::DataFile, &p).unwrap();
-            assert_eq!(file_id, f.file_id);
+            assert_eq!(storage_id, f.storage_id);
             assert_eq!(FileType::DataFile, f.file_type);
 
             let mut header_buf = vec![0; 8];
@@ -255,25 +264,25 @@ mod tests {
     fn test_commit_file() {
         let from_dir = get_temporary_directory_path();
         let to_dir = get_temporary_directory_path();
-        let file_id = Some(123);
-        create_file(&from_dir, FileType::DataFile, file_id).unwrap();
-        assert!(FileType::DataFile.get_path(&from_dir, file_id).exists());
-        move_file(FileType::DataFile, file_id, &from_dir, &to_dir).unwrap();
-        assert!(!FileType::DataFile.get_path(&from_dir, file_id).exists());
-        assert!(FileType::DataFile.get_path(&to_dir, file_id).exists());
+        let storage_id = Some(123);
+        create_file(&from_dir, FileType::DataFile, storage_id).unwrap();
+        assert!(FileType::DataFile.get_path(&from_dir, storage_id).exists());
+        move_file(FileType::DataFile, storage_id, &from_dir, &to_dir).unwrap();
+        assert!(!FileType::DataFile.get_path(&from_dir, storage_id).exists());
+        assert!(FileType::DataFile.get_path(&to_dir, storage_id).exists());
     }
 
     #[test]
-    fn test_change_file_id() {
+    fn test_change_storage_id() {
         let dir = get_temporary_directory_path();
-        let file_id = 123;
-        let new_file_id = 456;
-        create_file(&dir, FileType::DataFile, Some(file_id)).unwrap();
-        assert!(FileType::DataFile.get_path(&dir, Some(file_id)).exists());
-        change_file_id(&dir, FileType::DataFile, file_id, new_file_id).unwrap();
-        assert!(!FileType::DataFile.get_path(&dir, Some(file_id)).exists());
+        let storage_id = 123;
+        let new_storage_id = 456;
+        create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        assert!(FileType::DataFile.get_path(&dir, Some(storage_id)).exists());
+        change_storage_id(&dir, FileType::DataFile, storage_id, new_storage_id).unwrap();
+        assert!(!FileType::DataFile.get_path(&dir, Some(storage_id)).exists());
         assert!(FileType::DataFile
-            .get_path(&dir, Some(new_file_id))
+            .get_path(&dir, Some(new_storage_id))
             .exists());
     }
 
@@ -305,13 +314,13 @@ mod tests {
     }
 
     #[test]
-    fn test_get_file_ids_in_dir() {
+    fn test_get_storage_ids_in_dir() {
         let dir = get_temporary_directory_path();
         create_file(&dir, FileType::DataFile, Some(103)).unwrap();
         create_file(&dir, FileType::HintFile, Some(100)).unwrap();
         create_file(&dir, FileType::DataFile, Some(102)).unwrap();
         create_file(&dir, FileType::DataFile, Some(101)).unwrap();
-        let file_ids = get_file_ids_in_dir(&dir, FileType::DataFile);
-        assert_eq!(vec![101, 102, 103], file_ids);
+        let storage_ids = get_storage_ids_in_dir(&dir, FileType::DataFile);
+        assert_eq!(vec![101, 102, 103], storage_ids);
     }
 }

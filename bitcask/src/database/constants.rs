@@ -1,9 +1,0 @@
-pub const CRC_SIZE: usize = 4;
-pub const TSTAMP_SIZE: usize = 8;
-pub const KEY_SIZE_SIZE: usize = 8;
-pub const VALUE_SIZE_SIZE: usize = 8;
-pub const ROW_OFFSET_SIZE: usize = 8;
-pub const DATA_FILE_TSTAMP_OFFSET: usize = CRC_SIZE;
-pub const DATA_FILE_KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
-pub const DATA_FILE_VALUE_SIZE_OFFSET: usize = DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
-pub const DATA_FILE_KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;

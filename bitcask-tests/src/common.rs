@@ -22,6 +22,13 @@ impl TestingKV {
         }
     }
 
+    pub fn key_ref(&self) -> &Vec<u8> {
+        &self.key
+    }
+    pub fn value_ref(&self) -> &Vec<u8> {
+        &self.value
+    }
+
     pub fn key(&self) -> Vec<u8> {
         self.key.clone()
     }
