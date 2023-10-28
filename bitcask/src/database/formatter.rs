@@ -28,24 +28,19 @@ pub type Result<T> = std::result::Result<T, FormatterError>;
 pub trait Formatter: std::marker::Send + 'static + Copy {
     fn header_size(&self) -> usize;
 
-    fn row_size<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> usize;
+    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
 
-    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> Bytes;
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
 
     fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta>;
 
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
 
-    fn validate(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
+    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 }
 
-pub trait RowDataChecker {
-    fn gen_crc<'a, V: Deref<Target = [u8]>>(
-        &self,
-        meta: &RowMeta,
-        key: &'a Vec<u8>,
-        value: &V,
-    ) -> u32;
+trait RowDataChecker {
+    fn gen_crc<V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32;
 
     fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &Bytes) -> u32;
 
@@ -62,22 +57,17 @@ pub trait RowDataChecker {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DefaultCrcChecker {}
+struct DefaultCrcChecker {}
 
 impl RowDataChecker for DefaultCrcChecker {
-    fn gen_crc<'a, V: Deref<Target = [u8]>>(
-        &self,
-        meta: &RowMeta,
-        key: &'a Vec<u8>,
-        value: &V,
-    ) -> u32 {
+    fn gen_crc<'a, V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
         ck.update(&meta.timestamp.to_be_bytes());
         ck.update(&meta.key_size.to_be_bytes());
         ck.update(&value.len().to_be_bytes());
         ck.update(key);
-        ck.update(&value);
+        ck.update(value);
         ck.finalize()
     }
 
@@ -94,10 +84,8 @@ impl RowDataChecker for DefaultCrcChecker {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FormatterV1 {
-    pub checker: DefaultCrcChecker,
+    checker: DefaultCrcChecker,
 }
-
-unsafe impl Send for FormatterV1 {}
 
 impl FormatterV1 {
     pub fn new() -> FormatterV1 {
@@ -112,12 +100,12 @@ impl Formatter for FormatterV1 {
         DATA_FILE_KEY_OFFSET
     }
 
-    fn row_size<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> usize {
+    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
         self.header_size() + row.key.len() + row.value.len()
     }
 
-    fn encode_row<'a, V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'a, V>) -> Bytes {
-        let mut bs = BytesMut::with_capacity(self.row_size(&row));
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
+        let mut bs = BytesMut::with_capacity(self.row_size(row));
 
         let crc = self.checker.gen_crc(&row.meta, row.key, &row.value);
 
@@ -170,7 +158,7 @@ impl Formatter for FormatterV1 {
         })
     }
 
-    fn validate(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
+    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
         self.checker.check_crc(header, kv)
     }
 }

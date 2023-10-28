@@ -306,7 +306,7 @@ impl<F: Formatter> FileDataStorage<F> {
         self.data_file.read_exact(&mut kv_buf)?;
         let kv_bs = Bytes::from(kv_buf);
 
-        self.formatter.validate(&header, &kv_bs)?;
+        self.formatter.validate_key_value(&header, &kv_bs)?;
         Ok((header.meta, kv_bs))
     }
 }
