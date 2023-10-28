@@ -5,7 +5,6 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     ops::Deref,
     path::{Path, PathBuf},
-    rc::Rc,
 };
 use thiserror::Error;
 
@@ -65,7 +64,7 @@ pub trait DataStorageReader {
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 }
 #[derive(Debug)]
-enum DataStorageImpl<F: Formatter + Copy> {
+enum DataStorageImpl<F: Formatter> {
     FileStorage(FileDataStorage<F>),
 }
 
@@ -75,7 +74,7 @@ pub struct DataStorageOptions {
 }
 
 #[derive(Debug)]
-pub struct DataStorage<F: Formatter + Copy + Copy> {
+pub struct DataStorage<F: Formatter + Copy> {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl<F>,
@@ -84,7 +83,7 @@ pub struct DataStorage<F: Formatter + Copy + Copy> {
     options: DataStorageOptions,
 }
 
-impl<F: Formatter + Copy + Copy> DataStorage<F> {
+impl<F: Formatter + Copy> DataStorage<F> {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
@@ -269,7 +268,7 @@ impl<F: Formatter + Copy> Iterator for StorageIter<F> {
 }
 
 #[derive(Debug)]
-pub struct FileDataStorage<F: Formatter + Copy> {
+pub struct FileDataStorage<F: Formatter> {
     database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
@@ -278,7 +277,7 @@ pub struct FileDataStorage<F: Formatter + Copy> {
     formatter: F,
 }
 
-impl<F: Formatter + Copy> FileDataStorage<F> {
+impl<F: Formatter> FileDataStorage<F> {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
@@ -350,7 +349,7 @@ impl<F: Formatter + Copy> DataStorageWriter<F> for FileDataStorage<F> {
     }
 }
 
-impl<F: Formatter + Copy> DataStorageReader for FileDataStorage<F> {
+impl<F: Formatter> DataStorageReader for FileDataStorage<F> {
     fn storage_size(&self) -> usize {
         self.capacity as usize
     }

@@ -5,7 +5,7 @@ use dashmap::{
 };
 
 use crate::{
-    database::{Database, RowLocation},
+    database::{formatter::Formatter, Database, RowLocation},
     error::BitcaskResult,
 };
 
@@ -20,7 +20,7 @@ impl KeyDir {
         KeyDir { index }
     }
 
-    pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
+    pub fn new<F: Formatter + Copy + 'static>(database: &Database<F>) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
         let kd = KeyDir { index };
         for ret in database.recovery_iter()? {

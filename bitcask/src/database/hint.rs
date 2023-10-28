@@ -164,7 +164,7 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start<F: Formatter + std::marker::Send + 'static + Clone + Copy>(
+    pub fn start<F: Formatter + std::marker::Send + 'static + Copy>(
         database_dir: &Path,
         formatter: F,
         storage_options: DataStorageOptions,
@@ -307,8 +307,6 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::{rc::Rc, sync::Arc};
-
     use crate::database::{
         common::RowToWrite, data_storage::DataStorageWriter, formatter::FormatterV1,
     };
