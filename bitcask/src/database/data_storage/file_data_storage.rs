@@ -10,7 +10,7 @@ use std::{
 use crate::{
     database::{
         common::{RowMeta, RowToRead, RowToWrite, Value},
-        formatter::Formatter,
+        formatter::{self, DataStorageFormatter, Formatter},
     },
     fs::FileType,
     storage_id::StorageId,
@@ -22,22 +22,22 @@ use super::{
 };
 
 #[derive(Debug)]
-pub struct FileDataStorage<F: Formatter> {
+pub struct FileDataStorage {
     database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
     capacity: u64,
     options: DataStorageOptions,
-    formatter: F,
+    formatter: DataStorageFormatter,
 }
 
-impl<F: Formatter> FileDataStorage<F> {
+impl FileDataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
         data_file: File,
         capacity: u64,
-        formatter: F,
+        formatter: DataStorageFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
@@ -66,7 +66,7 @@ impl<F: Formatter> FileDataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
+impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let data_to_write = self.formatter.encode_row(row);
         let value_offset = self.capacity;
@@ -79,7 +79,7 @@ impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
         })
     }
 
-    fn transit_to_readonly(mut self) -> Result<DataStorage<F>> {
+    fn transit_to_readonly(mut self) -> Result<DataStorage> {
         self.data_file.flush()?;
 
         let path = FileType::DataFile.get_path(&self.database_dir, Some(self.storage_id));
@@ -93,7 +93,6 @@ impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
             self.storage_id,
             self.data_file,
             meta,
-            self.formatter,
             self.options,
         )
     }
@@ -103,7 +102,7 @@ impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageReader for FileDataStorage<F> {
+impl DataStorageReader for FileDataStorage {
     fn storage_size(&self) -> usize {
         self.capacity as usize
     }
@@ -148,14 +147,14 @@ mod tests {
     use bitcask_tests::common::get_temporary_directory_path;
     use test_log::test;
 
-    fn get_file_storage(max_size: u64) -> DataStorage<FormatterV1> {
+    fn get_file_storage(max_size: u64) -> DataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
         let options = DataStorageOptions {
             max_file_size: max_size,
         };
-        DataStorage::open(&dir, 1, FormatterV1::new(), options).unwrap()
+        DataStorage::open(&dir, 1, options).unwrap()
     }
 
     #[test]

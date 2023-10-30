@@ -1,5 +1,5 @@
 mod v1;
-use std::ops::Deref;
+use std::{fs::File, ops::Deref};
 
 pub use self::v1::FormatterV1;
 
@@ -29,4 +29,55 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DataStorageFormatter {
+    V1(FormatterV1),
+}
+
+impl Formatter for DataStorageFormatter {
+    fn header_size(&self) -> usize {
+        match self {
+            DataStorageFormatter::V1(f) => f.header_size(),
+        }
+    }
+
+    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
+        match self {
+            DataStorageFormatter::V1(f) => f.row_size(row),
+        }
+    }
+
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
+        match self {
+            DataStorageFormatter::V1(f) => f.encode_row(row),
+        }
+    }
+
+    fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta> {
+        match self {
+            DataStorageFormatter::V1(f) => f.decode_row_meta(buf),
+        }
+    }
+
+    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader> {
+        match self {
+            DataStorageFormatter::V1(f) => f.decode_row_header(bs),
+        }
+    }
+
+    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
+        match self {
+            DataStorageFormatter::V1(f) => f.validate_key_value(header, kv),
+        }
+    }
+}
+
+pub fn initialize_new_file(file: File) -> File {
+    file
+}
+
+pub fn get_formatter_from_file(file: &File) -> DataStorageFormatter {
+    DataStorageFormatter::V1(FormatterV1::new())
 }

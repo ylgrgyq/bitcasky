@@ -211,8 +211,7 @@ impl HintWriter {
         formatter: F,
         storage_options: DataStorageOptions,
     ) -> BitcaskResult<()> {
-        let stable_file_opt =
-            DataStorage::open(database_dir, data_storage_id, formatter, storage_options)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
@@ -341,7 +340,6 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            FormatterV1::new(),
             DataStorageOptions {
                 max_file_size: 1024,
             },

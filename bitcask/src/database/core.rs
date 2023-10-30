@@ -64,8 +64,8 @@ pub struct DataBaseOptions {
 pub struct Database<F: Formatter> {
     pub database_dir: PathBuf,
     storage_id_generator: Arc<StorageIdGenerator>,
-    writing_storage: Mutex<DataStorage<F>>,
-    stable_storages: DashMap<StorageId, Mutex<DataStorage<F>>>,
+    writing_storage: Mutex<DataStorage>,
+    stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
     options: DataBaseOptions,
     hint_file_writer: HintWriter,
     formatter: F,
@@ -181,7 +181,7 @@ impl<F: Formatter> Database<F> {
         )
     }
 
-    pub fn iter(&self) -> BitcaskResult<DatabaseIter<F>> {
+    pub fn iter(&self) -> BitcaskResult<DatabaseIter> {
         let mut storage_ids: Vec<StorageId>;
         {
             let writing_storage = self.writing_storage.lock();
@@ -195,22 +195,17 @@ impl<F: Formatter> Database<F> {
             storage_ids.push(writing_storage_id);
         }
 
-        let files: BitcaskResult<Vec<DataStorage<F>>> = storage_ids
+        let files: BitcaskResult<Vec<DataStorage>> = storage_ids
             .iter()
             .map(|f| {
-                DataStorage::open(
-                    &self.database_dir,
-                    *f,
-                    self.formatter,
-                    self.options.storage_options,
-                )
-                .map_err(BitcaskError::StorageError)
+                DataStorage::open(&self.database_dir, *f, self.options.storage_options)
+                    .map_err(BitcaskError::StorageError)
             })
             .collect();
 
         let mut opened_stable_files = files?;
         opened_stable_files.sort_by_key(|e| e.storage_id());
-        let iters: crate::database::data_storage::Result<Vec<StorageIter<F>>> =
+        let iters: crate::database::data_storage::Result<Vec<StorageIter>> =
             opened_stable_files.iter().rev().map(|f| f.iter()).collect();
 
         Ok(DatabaseIter::new(iters?))
@@ -345,7 +340,7 @@ impl<F: Formatter> Database<F> {
 
     fn do_flush_writing_file(
         &self,
-        writing_file_ref: &mut MutexGuard<DataStorage<F>>,
+        writing_file_ref: &mut MutexGuard<DataStorage>,
     ) -> BitcaskResult<()> {
         if writing_file_ref.storage_size() == 0 {
             debug!(
@@ -358,7 +353,6 @@ impl<F: Formatter> Database<F> {
         let next_writing_file = DataStorage::new(
             &self.database_dir,
             next_storage_id,
-            self.formatter,
             self.options.storage_options,
         )?;
         let old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
@@ -376,7 +370,7 @@ impl<F: Formatter> Database<F> {
     fn get_file_to_read(
         &self,
         storage_id: StorageId,
-    ) -> BitcaskResult<RefMut<StorageId, Mutex<DataStorage<F>>>> {
+    ) -> BitcaskResult<RefMut<StorageId, Mutex<DataStorage>>> {
         self.stable_storages
             .get_mut(&storage_id)
             .ok_or(BitcaskError::TargetFileIdNotFound(storage_id))
@@ -393,13 +387,13 @@ impl<F: Formatter> Drop for Database<F> {
     }
 }
 
-pub struct DatabaseIter<F: Formatter> {
-    current_iter: Cell<Option<StorageIter<F>>>,
-    remain_iters: Vec<StorageIter<F>>,
+pub struct DatabaseIter {
+    current_iter: Cell<Option<StorageIter>>,
+    remain_iters: Vec<StorageIter>,
 }
 
-impl<F: Formatter> DatabaseIter<F> {
-    fn new(mut iters: Vec<StorageIter<F>>) -> Self {
+impl DatabaseIter {
+    fn new(mut iters: Vec<StorageIter>) -> Self {
         if iters.is_empty() {
             DatabaseIter {
                 remain_iters: iters,
@@ -415,7 +409,7 @@ impl<F: Formatter> DatabaseIter<F> {
     }
 }
 
-impl<F: Formatter> Iterator for DatabaseIter<F> {
+impl Iterator for DatabaseIter {
     type Item = BitcaskResult<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -448,7 +442,7 @@ fn recovered_iter<F: Formatter>(
         Ok(Box::new(HintFile::open_iterator(database_dir, storage_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", storage_id);
-        let stable_file = DataStorage::open(database_dir, storage_id, formatter, storage_options)?;
+        let stable_file = DataStorage::open(database_dir, storage_id, storage_options)?;
         let i = stable_file.iter().map(|iter| {
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
@@ -539,14 +533,14 @@ fn open_storages<P: AsRef<Path>, F: Formatter>(
     data_storage_ids: &[u32],
     formatter: F,
     storage_options: DataStorageOptions,
-) -> BitcaskResult<Vec<DataStorage<F>>> {
+) -> BitcaskResult<Vec<DataStorage>> {
     let mut storage_ids = data_storage_ids.to_owned();
     storage_ids.sort();
 
     Ok(storage_ids
         .iter()
-        .map(|id| DataStorage::open(&database_dir, *id, formatter, storage_options))
-        .collect::<crate::database::data_storage::Result<Vec<DataStorage<F>>>>()?)
+        .map(|id| DataStorage::open(&database_dir, *id, storage_options))
+        .collect::<crate::database::data_storage::Result<Vec<DataStorage>>>()?)
 }
 
 fn prepare_load_storages<P: AsRef<Path>, F: Formatter>(
@@ -555,16 +549,11 @@ fn prepare_load_storages<P: AsRef<Path>, F: Formatter>(
     formatter: F,
     storage_id_generator: &StorageIdGenerator,
     storage_options: DataStorageOptions,
-) -> BitcaskResult<(DataStorage<F>, Vec<DataStorage<F>>)> {
+) -> BitcaskResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, formatter, storage_options)?;
     let writing_storage = if storages.last().map_or(Ok(true), |s| s.is_readonly())? {
         let writing_storage_id = storage_id_generator.generate_next_id();
-        let storage = DataStorage::new(
-            &database_dir,
-            writing_storage_id,
-            formatter,
-            storage_options,
-        )?;
+        let storage = DataStorage::new(&database_dir, writing_storage_id, storage_options)?;
         debug!(target: "Database", "create writing file with id: {}", writing_storage_id);
         storage
     } else {

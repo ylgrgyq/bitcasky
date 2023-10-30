@@ -12,6 +12,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
+    database::formatter,
     fs::{self, create_file, FileType},
     storage_id::StorageId,
 };
@@ -19,7 +20,7 @@ use crate::{
 use super::{
     common::{RowToRead, RowToWrite, Value},
     formatter::Formatter,
-    formatter::FormatterError,
+    formatter::{DataStorageFormatter, FormatterError},
     RowLocation, TimedValue,
 };
 
@@ -48,10 +49,10 @@ pub enum DataStorageError {
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
 
-pub trait DataStorageWriter<F: Formatter> {
+pub trait DataStorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation>;
 
-    fn transit_to_readonly(self) -> Result<DataStorage<F>>;
+    fn transit_to_readonly(self) -> Result<DataStorage>;
 
     fn flush(&mut self) -> Result<()>;
 }
@@ -66,8 +67,8 @@ pub trait DataStorageReader {
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 }
 #[derive(Debug)]
-enum DataStorageImpl<F: Formatter> {
-    FileStorage(FileDataStorage<F>),
+enum DataStorageImpl {
+    FileStorage(FileDataStorage),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,36 +77,35 @@ pub struct DataStorageOptions {
 }
 
 #[derive(Debug)]
-pub struct DataStorage<F: Formatter> {
+pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
-    storage_impl: DataStorageImpl<F>,
+    storage_impl: DataStorageImpl,
     readonly: bool,
-    formatter: F,
+    formatter: DataStorageFormatter,
     options: DataStorageOptions,
 }
 
-impl<F: Formatter> DataStorage<F> {
+impl DataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        formatter: F,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
+        let data_file = formatter::initialize_new_file(data_file);
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
         );
         let meta = data_file.metadata()?;
-        DataStorage::open_by_file(&path, storage_id, data_file, meta, formatter, options)
+        DataStorage::open_by_file(&path, storage_id, data_file, meta, options)
     }
 
     pub fn open<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        formatter: F,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
@@ -119,7 +119,7 @@ impl<F: Formatter> DataStorage<F> {
             data_file.file.seek(SeekFrom::End(0))?;
         }
 
-        DataStorage::open_by_file(&path, storage_id, data_file.file, meta, formatter, options)
+        DataStorage::open_by_file(&path, storage_id, data_file.file, meta, options)
     }
 
     pub fn storage_id(&self) -> StorageId {
@@ -134,7 +134,7 @@ impl<F: Formatter> DataStorage<F> {
         Ok(self.readonly)
     }
 
-    pub fn iter(&self) -> Result<StorageIter<F>> {
+    pub fn iter(&self) -> Result<StorageIter> {
         let data_file = fs::open_file(
             &self.database_dir,
             FileType::DataFile,
@@ -151,7 +151,6 @@ impl<F: Formatter> DataStorage<F> {
                 self.storage_id,
                 data_file.file,
                 meta,
-                self.formatter,
                 self.options,
             )?,
         })
@@ -167,11 +166,10 @@ impl<F: Formatter> DataStorage<F> {
         storage_id: StorageId,
         data_file: File,
         meta: Metadata,
-        formatter: F,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();
-
+        let formatter = formatter::get_formatter_from_file(&data_file);
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 database_dir,
@@ -190,7 +188,7 @@ impl<F: Formatter> DataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
+impl DataStorageWriter for DataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         if self.check_storage_overflow(row) {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
@@ -206,7 +204,7 @@ impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
         Ok(r)
     }
 
-    fn transit_to_readonly(self) -> Result<DataStorage<F>> {
+    fn transit_to_readonly(self) -> Result<DataStorage> {
         match self.storage_impl {
             DataStorageImpl::FileStorage(s) => {
                 let storage_id = s.storage_id;
@@ -226,7 +224,7 @@ impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageReader for DataStorage<F> {
+impl DataStorageReader for DataStorage {
     fn storage_size(&self) -> usize {
         match &self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.storage_size(),
@@ -249,11 +247,11 @@ impl<F: Formatter> DataStorageReader for DataStorage<F> {
 }
 
 #[derive(Debug)]
-pub struct StorageIter<F: Formatter> {
-    storage: DataStorage<F>,
+pub struct StorageIter {
+    storage: DataStorage,
 }
 
-impl<F: Formatter> Iterator for StorageIter<F> {
+impl Iterator for StorageIter {
     type Item = Result<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {
