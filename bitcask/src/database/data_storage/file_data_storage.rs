@@ -10,7 +10,7 @@ use std::{
 use crate::{
     database::{
         common::{RowMeta, RowToRead, RowToWrite, Value},
-        formatter::{self, DataStorageFormatter, Formatter},
+        formatter::{DataStorageFormatter, Formatter},
     },
     fs::FileType,
     storage_id::StorageId,

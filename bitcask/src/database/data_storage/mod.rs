@@ -94,7 +94,7 @@ impl DataStorage {
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
-        let data_file = formatter::initialize_new_file(data_file);
+        let data_file = formatter::initialize_new_file(data_file)?;
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
@@ -164,12 +164,12 @@ impl DataStorage {
     fn open_by_file(
         database_dir: &PathBuf,
         storage_id: StorageId,
-        data_file: File,
+        mut data_file: File,
         meta: Metadata,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();
-        let formatter = formatter::get_formatter_from_file(&data_file);
+        let formatter = formatter::get_formatter_from_data_file(&mut data_file)?;
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 database_dir,
