@@ -41,10 +41,14 @@ pub enum DataStorageError {
     PermissionDenied(StorageId),
     #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Got IO Error: {0}")]
+    DataStorageFormatter(#[from] FormatterError),
     #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]
     CrcCheckFailed(u32, u64, u32, u32),
-    #[error("Got formatter Error: {0}")]
-    FormatterError(#[from] FormatterError),
+    #[error("Failed to write file header for storage with id: {1}")]
+    WriteFileHeaderError(#[source] FormatterError, StorageId),
+    #[error("Failed to read file header for storage with id: {1}")]
+    ReadFileHeaderError(#[source] FormatterError, StorageId),
 }
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
@@ -94,7 +98,8 @@ impl DataStorage {
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
-        let data_file = formatter::initialize_new_file(data_file)?;
+        let data_file = formatter::initialize_new_file(data_file)
+            .map_err(|e| DataStorageError::WriteFileHeaderError(e, storage_id))?;
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
@@ -169,7 +174,8 @@ impl DataStorage {
         options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();
-        let formatter = formatter::get_formatter_from_data_file(&mut data_file)?;
+        let formatter = formatter::get_formatter_from_data_file(&mut data_file)
+            .map_err(|e| DataStorageError::ReadFileHeaderError(e, storage_id))?;
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 database_dir,

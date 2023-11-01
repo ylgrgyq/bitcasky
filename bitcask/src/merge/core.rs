@@ -357,8 +357,12 @@ mod tests {
     use std::vec;
 
     use crate::{
-        database::database_tests_utils::{
-            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
+        database::{
+            database_tests_utils::{
+                assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow,
+                DEFAULT_OPTIONS,
+            },
+            formatter::initialize_new_file,
         },
         fs::FileType,
     };
@@ -373,7 +377,8 @@ mod tests {
     fn test_create_merge_file_dir() {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
+        let file = fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
+        initialize_new_file(file).unwrap();
 
         create_merge_file_dir(&dir).unwrap();
 
@@ -395,9 +400,18 @@ mod tests {
         let dir_path = get_temporary_directory_path();
 
         let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap();
+        initialize_new_file(
+            fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap(),
+        )
+        .unwrap();
+        initialize_new_file(
+            fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap(),
+        )
+        .unwrap();
+        initialize_new_file(
+            fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(
             vec![0, 1, 2,],

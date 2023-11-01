@@ -140,7 +140,10 @@ impl DataStorageReader for FileDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use crate::{database::formatter::FormatterV1, fs::create_file};
+    use crate::{
+        database::formatter::{initialize_new_file, FormatterV1},
+        fs::create_file,
+    };
 
     use super::*;
 
@@ -150,7 +153,8 @@ mod tests {
     fn get_file_storage(max_size: u64) -> DataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
-        create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        let file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        initialize_new_file(file).unwrap();
         let options = DataStorageOptions {
             max_file_size: max_size,
         };

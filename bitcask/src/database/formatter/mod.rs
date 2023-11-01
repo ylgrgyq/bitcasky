@@ -1,7 +1,7 @@
 mod v1;
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{self, Read, Seek, Write},
     ops::Deref,
 };
 
@@ -20,8 +20,8 @@ pub enum FormatterError {
     CrcCheckFailed { expected_crc: u32, actual_crc: u32 },
     #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Invalid data file: {0}")]
-    InvalidDataFile(String),
+    #[error("Invalid data file: {1}")]
+    InvalidDataFile(#[source] io::Error, String),
     #[error("Magic string does not match")]
     MagicNotMatch(),
     #[error("Unknown formatter version: {0}")]
@@ -96,9 +96,7 @@ pub fn initialize_new_file(mut file: File) -> Result<File> {
     bs.extend_from_slice(MAGIC);
     bs.put_u8(DEFAULT_FORMATTER_VERSION);
 
-    let a = bs.freeze();
-
-    file.write_all(&a)?;
+    file.write_all(&bs.freeze())?;
     file.flush()?;
 
     Ok(file)
@@ -107,11 +105,10 @@ pub fn initialize_new_file(mut file: File) -> Result<File> {
 pub fn get_formatter_from_data_file(file: &mut File) -> Result<DataStorageFormatter> {
     let mut file_header = vec![0; MAGIC.len() + 1];
 
-    info!("zzz {:?}", file_header);
-
-    file.read_exact(&mut file_header).map_err(|e| );
-
-    info!("zxcvxcvcv {:?}", file_header);
+    file.seek(io::SeekFrom::Start(0))?;
+    info!("SS {}", file.metadata()?.len());
+    file.read_exact(&mut file_header)
+        .map_err(|e| FormatterError::InvalidDataFile(e, "read file header failed".into()))?;
 
     if MAGIC != &file_header[0..3] {
         return Err(FormatterError::MagicNotMatch());
@@ -140,20 +137,6 @@ mod tests {
         let storage_id = 1;
         let file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
         initialize_new_file(file).unwrap();
-
-        let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
-            .unwrap()
-            .file;
-
-        let formatter = get_formatter_from_data_file(&mut file).unwrap();
-        assert_matches!(formatter, DataStorageFormatter::V1(_));
-    }
-
-    #[test]
-    fn test_formatter_v1_file2() {
-        let dir = get_temporary_directory_path();
-        let storage_id = 1;
-        let file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
 
         let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
             .unwrap()
