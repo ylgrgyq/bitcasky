@@ -758,7 +758,7 @@ mod tests {
             storage_id_generator,
             FormatterV1::new(),
             DataBaseOptions {
-                storage_options: DataStorageOptions { max_file_size: 100 },
+                storage_options: DataStorageOptions { max_file_size: 104 },
             },
         )
         .unwrap();

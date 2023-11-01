@@ -44,7 +44,7 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DataStorageFormatter {
     V1(FormatterV1),
 }
@@ -89,8 +89,9 @@ impl Formatter for DataStorageFormatter {
 
 const MAGIC: &[u8; 3] = b"btk";
 const DEFAULT_FORMATTER_VERSION: u8 = 0;
+pub const FILE_HEADER_SIZE: usize = 4;
 
-pub fn initialize_new_file(mut file: File) -> Result<File> {
+pub fn initialize_new_file(mut file: &mut File) -> Result<DataStorageFormatter> {
     let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
 
     bs.extend_from_slice(MAGIC);
@@ -99,14 +100,12 @@ pub fn initialize_new_file(mut file: File) -> Result<File> {
     file.write_all(&bs.freeze())?;
     file.flush()?;
 
-    Ok(file)
+    Ok(DataStorageFormatter::V1(FormatterV1::new()))
 }
 
 pub fn get_formatter_from_data_file(file: &mut File) -> Result<DataStorageFormatter> {
     let mut file_header = vec![0; MAGIC.len() + 1];
 
-    file.seek(io::SeekFrom::Start(0))?;
-    info!("SS {}", file.metadata()?.len());
     file.read_exact(&mut file_header)
         .map_err(|e| FormatterError::InvalidDataFile(e, "read file header failed".into()))?;
 
@@ -135,14 +134,15 @@ mod tests {
     fn test_formatter_v1_file() {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
-        let file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
-        initialize_new_file(file).unwrap();
+        let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        let init_formatter = initialize_new_file(&mut file).unwrap();
 
         let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
             .unwrap()
             .file;
 
-        let formatter = get_formatter_from_data_file(&mut file).unwrap();
-        assert_matches!(formatter, DataStorageFormatter::V1(_));
+        let read_formatter = get_formatter_from_data_file(&mut file).unwrap();
+        assert_matches!(read_formatter, DataStorageFormatter::V1(_));
+        assert_eq!(init_formatter, read_formatter);
     }
 }

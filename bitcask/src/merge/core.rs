@@ -377,8 +377,8 @@ mod tests {
     fn test_create_merge_file_dir() {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
-        let file = fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
-        initialize_new_file(file).unwrap();
+        let mut file = fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
+        initialize_new_file(&mut file).unwrap();
 
         create_merge_file_dir(&dir).unwrap();
 
@@ -401,15 +401,15 @@ mod tests {
 
         let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
         initialize_new_file(
-            fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap(),
+            &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap(),
         )
         .unwrap();
         initialize_new_file(
-            fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap(),
+            &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap(),
         )
         .unwrap();
         initialize_new_file(
-            fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap(),
+            &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap(),
         )
         .unwrap();
 

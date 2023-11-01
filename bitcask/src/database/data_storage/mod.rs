@@ -2,7 +2,7 @@ mod file_data_storage;
 
 pub use self::file_data_storage::FileDataStorage;
 
-use log::{debug, error};
+use log::{debug, error, info};
 use std::{
     fs::{File, Metadata},
     io::{Seek, SeekFrom},
@@ -12,7 +12,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    database::formatter,
+    database::formatter::{self, get_formatter_from_data_file},
     fs::{self, create_file, FileType},
     storage_id::StorageId,
 };
@@ -20,7 +20,7 @@ use crate::{
 use super::{
     common::{RowToRead, RowToWrite, Value},
     formatter::Formatter,
-    formatter::{DataStorageFormatter, FormatterError},
+    formatter::{DataStorageFormatter, FormatterError, FILE_HEADER_SIZE},
     RowLocation, TimedValue,
 };
 
@@ -97,15 +97,16 @@ impl DataStorage {
         options: DataStorageOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
-        let data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
-        let data_file = formatter::initialize_new_file(data_file)
+        let mut data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
+        let formatter = formatter::initialize_new_file(&mut data_file)
             .map_err(|e| DataStorageError::WriteFileHeaderError(e, storage_id))?;
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
         );
         let meta = data_file.metadata()?;
-        DataStorage::open_by_file(&path, storage_id, data_file, meta, options)
+
+        DataStorage::open_by_file(&path, storage_id, data_file, meta, formatter, options)
     }
 
     pub fn open<P: AsRef<Path>>(
@@ -120,11 +121,12 @@ impl DataStorage {
             &path, storage_id
         );
         let meta = data_file.file.metadata()?;
+        let formatter = get_formatter_from_data_file(&mut data_file.file)?;
         if !meta.permissions().readonly() {
             data_file.file.seek(SeekFrom::End(0))?;
         }
 
-        DataStorage::open_by_file(&path, storage_id, data_file.file, meta, options)
+        DataStorage::open_by_file(&path, storage_id, data_file.file, meta, formatter, options)
     }
 
     pub fn storage_id(&self) -> StorageId {
@@ -140,7 +142,7 @@ impl DataStorage {
     }
 
     pub fn iter(&self) -> Result<StorageIter> {
-        let data_file = fs::open_file(
+        let mut data_file = fs::open_file(
             &self.database_dir,
             FileType::DataFile,
             Some(self.storage_id),
@@ -149,6 +151,8 @@ impl DataStorage {
             "Create iterator under path: {:?} with storage id: {}",
             &self.database_dir, self.storage_id
         );
+        let formatter = formatter::get_formatter_from_data_file(&mut data_file.file)
+            .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?;
         let meta = data_file.file.metadata()?;
         Ok(StorageIter {
             storage: DataStorage::open_by_file(
@@ -156,6 +160,7 @@ impl DataStorage {
                 self.storage_id,
                 data_file.file,
                 meta,
+                formatter,
                 self.options,
             )?,
         })
@@ -169,13 +174,12 @@ impl DataStorage {
     fn open_by_file(
         database_dir: &PathBuf,
         storage_id: StorageId,
-        mut data_file: File,
+        data_file: File,
         meta: Metadata,
+        formatter: DataStorageFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();
-        let formatter = formatter::get_formatter_from_data_file(&mut data_file)
-            .map_err(|e| DataStorageError::ReadFileHeaderError(e, storage_id))?;
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 database_dir,
