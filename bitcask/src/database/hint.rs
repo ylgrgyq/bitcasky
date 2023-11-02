@@ -162,19 +162,13 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start<F: Formatter>(
-        database_dir: &Path,
-        formatter: F,
-        storage_options: DataStorageOptions,
-    ) -> HintWriter {
+    pub fn start(database_dir: &Path, storage_options: DataStorageOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
-                if let Err(e) =
-                    Self::write_hint_file(&moved_dir, storage_id, formatter, storage_options)
-                {
+                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, storage_options) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -205,10 +199,9 @@ impl HintWriter {
         self.sender.len()
     }
 
-    fn write_hint_file<F: Formatter>(
+    fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        formatter: F,
         storage_options: DataStorageOptions,
     ) -> BitcaskResult<()> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
@@ -355,7 +348,6 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
-                FormatterV1::new(),
                 DataStorageOptions {
                     max_file_size: 1024,
                 },
