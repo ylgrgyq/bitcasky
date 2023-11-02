@@ -8,10 +8,8 @@ use std::{
 };
 
 use crate::{
-    database::{
-        common::{RowMeta, RowToRead, RowToWrite, Value},
-        formatter::{DataStorageFormatter, Formatter, FILE_HEADER_SIZE},
-    },
+    database::common::{RowToRead, Value},
+    formatter::{DataStorageFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     fs::FileType,
     storage_id::StorageId,
 };
@@ -143,7 +141,7 @@ impl DataStorageReader for FileDataStorage {
 #[cfg(test)]
 mod tests {
     use crate::{
-        database::formatter::{initialize_new_file, FormatterV1},
+        formatter::{initialize_new_file, FormatterV1},
         fs::create_file,
     };
 

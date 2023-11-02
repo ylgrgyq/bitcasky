@@ -12,15 +12,16 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    database::formatter::{self, get_formatter_from_data_file},
+    formatter::{
+        self, get_formatter_from_data_file, DataStorageFormatter, Formatter, FormatterError,
+        RowToWrite,
+    },
     fs::{self, create_file, FileType},
     storage_id::StorageId,
 };
 
 use super::{
-    common::{RowToRead, RowToWrite, Value},
-    formatter::Formatter,
-    formatter::{DataStorageFormatter, FormatterError},
+    common::{RowToRead, Value},
     RowLocation, TimedValue,
 };
 

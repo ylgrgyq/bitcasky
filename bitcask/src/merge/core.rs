@@ -349,13 +349,10 @@ mod tests {
     use std::vec;
 
     use crate::{
-        database::{
-            database_tests_utils::{
-                assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow,
-                DEFAULT_OPTIONS,
-            },
-            formatter::initialize_new_file,
+        database::database_tests_utils::{
+            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
         },
+        formatter::initialize_new_file,
         fs::FileType,
     };
 

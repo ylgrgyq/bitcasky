@@ -12,6 +12,7 @@ use parking_lot::{Mutex, MutexGuard};
 use crate::{
     database::hint::{self, HintWriter},
     error::{BitcaskError, BitcaskResult},
+    formatter::RowToWrite,
     fs::{self as SelfFs, FileType},
     storage_id::{StorageId, StorageIdGenerator},
     utils,
@@ -26,7 +27,7 @@ use super::{
     DataStorageError,
 };
 use super::{
-    common::{RowLocation, RowToRead, RowToWrite},
+    common::{RowLocation, RowToRead},
     hint::HintFile,
 };
 /**

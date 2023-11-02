@@ -3,6 +3,7 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     ops::Deref,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 pub use self::v1::FormatterV1;
@@ -10,7 +11,48 @@ pub use self::v1::FormatterV1;
 use bytes::{BufMut, Bytes, BytesMut};
 use thiserror::Error;
 
-use super::common::{RowHeader, RowToWrite};
+#[derive(Debug)]
+pub struct RowMeta {
+    pub timestamp: u64,
+    pub key_size: u64,
+    pub value_size: u64,
+}
+
+pub struct RowHeader {
+    pub crc: u32,
+    pub meta: RowMeta,
+}
+
+#[derive(Debug)]
+pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
+    pub meta: RowMeta,
+    pub key: &'a Vec<u8>,
+    pub value: V,
+}
+
+impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
+    pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_millis() as u64;
+        RowToWrite::new_with_timestamp(key, value, now)
+    }
+
+    pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
+        let key_size = key.len() as u64;
+        let value_size = value.len() as u64;
+        RowToWrite {
+            meta: RowMeta {
+                timestamp,
+                key_size,
+                value_size,
+            },
+            key,
+            value,
+        }
+    }
+}
 
 #[derive(Error, Debug)]
 #[error("{}")]
@@ -27,6 +69,14 @@ pub enum FormatterError {
     UnknownFormatterVersion(u8),
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct HintRow {
+    pub timestamp: u64,
+    pub key_size: u64,
+    pub row_offset: u64,
+    pub key: Vec<u8>,
+}
+
 pub type Result<T> = std::result::Result<T, FormatterError>;
 
 pub trait Formatter: std::marker::Send + 'static + Copy {
@@ -39,6 +89,8 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
+
+    fn encode_row_hint(&self, hint: HintRow) -> Bytes;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,6 +126,12 @@ impl Formatter for DataStorageFormatter {
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
         match self {
             DataStorageFormatter::V1(f) => f.validate_key_value(header, kv),
+        }
+    }
+
+    fn encode_row_hint(&self, hint: HintRow) -> Bytes {
+        match self {
+            DataStorageFormatter::V1(f) => f.encode_row_hint(hint),
         }
     }
 }

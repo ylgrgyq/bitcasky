@@ -297,7 +297,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{common::RowToWrite, data_storage::DataStorageWriter};
+    use crate::{database::data_storage::DataStorageWriter, formatter::RowToWrite};
 
     use super::*;
     use test_log::test;

@@ -3,9 +3,7 @@ use std::ops::Deref;
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use crate::database::common::{RowHeader, RowMeta, RowToWrite};
-
-use super::{Formatter, FormatterError, Result};
+use super::{Formatter, FormatterError, Result, RowHeader, RowMeta, RowToWrite};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -15,6 +13,14 @@ const DATA_FILE_TSTAMP_OFFSET: usize = CRC_SIZE;
 const DATA_FILE_KEY_SIZE_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE;
 const DATA_FILE_VALUE_SIZE_OFFSET: usize = DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const DATA_FILE_KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
+
+const ROW_OFFSET_SIZE: usize = 8;
+const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
+const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
+const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
+const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SIZE;
+const DEFAULT_LOG_TARGET: &str = "Hint";
+const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FormatterV1 {}
@@ -100,5 +106,14 @@ impl Formatter for FormatterV1 {
             });
         }
         Ok(())
+    }
+
+    fn encode_row_hint(&self, hint: super::HintRow) -> Bytes {
+        let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + hint.key.len());
+        bs.extend_from_slice(&hint.timestamp.to_be_bytes());
+        bs.extend_from_slice(&hint.key_size.to_be_bytes());
+        bs.extend_from_slice(&hint.row_offset.to_be_bytes());
+        bs.extend_from_slice(&hint.key);
+        bs.freeze()
     }
 }
