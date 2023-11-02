@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
@@ -12,6 +12,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::{
     database::{DataBaseOptions, Database, TimedValue},
     error::{BitcaskError, BitcaskResult},
+    formatter::{get_formatter_from_data_file, initialize_new_file, Formatter, MergeMeta},
     fs::{self, FileType},
     keydir::KeyDir,
     storage_id::{StorageId, StorageIdGenerator},
@@ -322,25 +323,22 @@ fn purge_outdated_data_files(base_dir: &Path, max_storage_id: StorageId) -> Bitc
     Ok(())
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-struct MergeMeta {
-    pub known_max_storage_id: StorageId,
-}
-
 fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
     let mut merge_meta_file = fs::open_file(merge_file_dir, FileType::MergeMeta, None)?;
-    let mut buf = vec![0; 4];
+    let formatter = get_formatter_from_data_file(&mut merge_meta_file.file).map_err(|e| {
+        BitcaskError::MergeMetaFileCorrupted(e, merge_meta_file.path.display().to_string())
+    })?;
+
+    let mut buf = vec![0; formatter.merge_meta_size()];
     merge_meta_file.file.read_exact(&mut buf)?;
-    let mut bs = Bytes::from(buf);
-    let known_max_storage_id = bs.get_u32();
-    Ok(MergeMeta {
-        known_max_storage_id,
-    })
+    let bs = Bytes::from(buf);
+    Ok(formatter.decode_merge_meta(bs))
 }
 
 fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
     let mut merge_meta_file = fs::create_file(merge_file_dir, FileType::MergeMeta, None)?;
-    merge_meta_file.write_all(&merge_meta.known_max_storage_id.to_be_bytes())?;
+    let formater = initialize_new_file(&mut merge_meta_file)?;
+    merge_meta_file.write_all(&formater.encode_merge_meta(merge_meta))?;
     Ok(())
 }
 

@@ -99,8 +99,7 @@ impl DataStorage {
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
-        let formatter = formatter::initialize_new_file(&mut data_file)
-            .map_err(|e| DataStorageError::WriteFileHeaderError(e, storage_id))?;
+        let formatter = formatter::initialize_new_file(&mut data_file)?;
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id

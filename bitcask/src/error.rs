@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::formatter::FormatterError;
+
 #[derive(Error, Debug)]
 pub enum BitcaskError {
     #[error(transparent)]
@@ -18,6 +20,8 @@ pub enum BitcaskError {
     DataFileCorrupted(String, u32, String),
     #[error("Read non-existent file with id {0}")]
     TargetFileIdNotFound(u32),
+    #[error("Found corrupted merge meta file under file directory: {1}")]
+    MergeMetaFileCorrupted(#[source] FormatterError, String),
     #[error("Merge file directory: {0} is not empty. Maybe last merge is failed. Please remove files in this directory manually")]
     MergeFileDirectoryNotEmpty(String),
     #[error("Another merge is in progress")]

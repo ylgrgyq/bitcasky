@@ -6,6 +6,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::storage_id::StorageId;
+
 pub use self::v1::FormatterV1;
 
 use bytes::{BufMut, Bytes, BytesMut};
@@ -54,6 +56,11 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     }
 }
 
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub struct MergeMeta {
+    pub known_max_storage_id: StorageId,
+}
+
 #[derive(Error, Debug)]
 #[error("{}")]
 pub enum FormatterError {
@@ -91,6 +98,12 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 
     fn encode_row_hint(&self, hint: HintRow) -> Bytes;
+
+    fn merge_meta_size(&self) -> usize;
+
+    fn encode_merge_meta(&self, meta: MergeMeta) -> Bytes;
+
+    fn decode_merge_meta(&self, meta: Bytes) -> MergeMeta;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -134,13 +147,31 @@ impl Formatter for DataStorageFormatter {
             DataStorageFormatter::V1(f) => f.encode_row_hint(hint),
         }
     }
+
+    fn merge_meta_size(&self) -> usize {
+        match self {
+            DataStorageFormatter::V1(f) => f.merge_meta_size(),
+        }
+    }
+
+    fn encode_merge_meta(&self, meta: MergeMeta) -> Bytes {
+        match self {
+            DataStorageFormatter::V1(f) => f.encode_merge_meta(meta),
+        }
+    }
+
+    fn decode_merge_meta(&self, meta: Bytes) -> MergeMeta {
+        match self {
+            DataStorageFormatter::V1(f) => f.decode_merge_meta(meta),
+        }
+    }
 }
 
 const MAGIC: &[u8; 3] = b"btk";
 const DEFAULT_FORMATTER_VERSION: u8 = 0;
 pub const FILE_HEADER_SIZE: usize = 4;
 
-pub fn initialize_new_file(file: &mut File) -> Result<DataStorageFormatter> {
+pub fn initialize_new_file(file: &mut File) -> std::io::Result<DataStorageFormatter> {
     let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
 
     bs.extend_from_slice(MAGIC);

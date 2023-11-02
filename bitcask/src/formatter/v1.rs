@@ -3,7 +3,7 @@ use std::ops::Deref;
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use super::{Formatter, FormatterError, Result, RowHeader, RowMeta, RowToWrite};
+use super::{Formatter, FormatterError, MergeMeta, Result, RowHeader, RowMeta, RowToWrite};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -21,6 +21,8 @@ const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZ
 const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SIZE;
 const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
+
+const MERGE_META_FILE_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FormatterV1 {}
@@ -115,5 +117,20 @@ impl Formatter for FormatterV1 {
         bs.extend_from_slice(&hint.row_offset.to_be_bytes());
         bs.extend_from_slice(&hint.key);
         bs.freeze()
+    }
+
+    fn merge_meta_size(&self) -> usize {
+        MERGE_META_FILE_SIZE
+    }
+
+    fn encode_merge_meta(&self, meta: super::MergeMeta) -> Bytes {
+        Bytes::copy_from_slice(&meta.known_max_storage_id.to_be_bytes())
+    }
+
+    fn decode_merge_meta(&self, mut meta: Bytes) -> MergeMeta {
+        let known_max_storage_id = meta.get_u32();
+        MergeMeta {
+            known_max_storage_id,
+        }
     }
 }
