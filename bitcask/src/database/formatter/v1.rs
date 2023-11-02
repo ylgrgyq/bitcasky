@@ -47,12 +47,12 @@ impl FormatterV1 {
 }
 
 impl Formatter for FormatterV1 {
-    fn header_size(&self) -> usize {
+    fn row_header_size(&self) -> usize {
         DATA_FILE_KEY_OFFSET
     }
 
     fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
-        self.header_size() + row.key.len() + row.value.len()
+        self.row_header_size() + row.key.len() + row.value.len()
     }
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
@@ -67,24 +67,6 @@ impl Formatter for FormatterV1 {
         bs.extend_from_slice(row.key);
         bs.extend_from_slice(&row.value);
         bs.freeze()
-    }
-
-    fn decode_row_meta(&self, bs: Bytes) -> Result<RowMeta> {
-        let timestamp = bs
-            .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
-            .get_u64();
-
-        let key_size = bs
-            .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-            .get_u64();
-        let val_size = bs
-            .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-            .get_u64();
-        Ok(RowMeta {
-            timestamp,
-            key_size,
-            value_size: val_size,
-        })
     }
 
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader> {

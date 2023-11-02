@@ -51,7 +51,7 @@ impl FileDataStorage {
     }
 
     fn do_read_row(&mut self) -> Result<(RowMeta, Bytes)> {
-        let mut header_buf = vec![0; self.formatter.header_size()];
+        let mut header_buf = vec![0; self.formatter.row_header_size()];
         self.data_file.read_exact(&mut header_buf)?;
         let header_bs = Bytes::from(header_buf);
 

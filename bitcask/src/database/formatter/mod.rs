@@ -10,7 +10,7 @@ pub use self::v1::FormatterV1;
 use bytes::{BufMut, Bytes, BytesMut};
 use thiserror::Error;
 
-use super::common::{RowHeader, RowMeta, RowToWrite};
+use super::common::{RowHeader, RowToWrite};
 
 #[derive(Error, Debug)]
 #[error("{}")]
@@ -30,13 +30,11 @@ pub enum FormatterError {
 pub type Result<T> = std::result::Result<T, FormatterError>;
 
 pub trait Formatter: std::marker::Send + 'static + Copy {
-    fn header_size(&self) -> usize;
+    fn row_header_size(&self) -> usize;
 
     fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
-
-    fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta>;
 
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
 
@@ -49,9 +47,9 @@ pub enum DataStorageFormatter {
 }
 
 impl Formatter for DataStorageFormatter {
-    fn header_size(&self) -> usize {
+    fn row_header_size(&self) -> usize {
         match self {
-            DataStorageFormatter::V1(f) => f.header_size(),
+            DataStorageFormatter::V1(f) => f.row_header_size(),
         }
     }
 
@@ -64,12 +62,6 @@ impl Formatter for DataStorageFormatter {
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
         match self {
             DataStorageFormatter::V1(f) => f.encode_row(row),
-        }
-    }
-
-    fn decode_row_meta(&self, buf: Bytes) -> Result<RowMeta> {
-        match self {
-            DataStorageFormatter::V1(f) => f.decode_row_meta(buf),
         }
     }
 

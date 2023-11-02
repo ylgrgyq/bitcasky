@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE};
+use crate::{storage_id::StorageId, utils::TOMBSTONE_VALUE};
 
 #[derive(Debug)]
 pub struct RowMeta {
@@ -46,10 +46,6 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
             value,
         }
     }
-}
-
-pub trait BitcaskDataFile {
-    fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>>;
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
