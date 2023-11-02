@@ -7,7 +7,6 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::database::formatter::FormatterV1;
 use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::fs::{self};

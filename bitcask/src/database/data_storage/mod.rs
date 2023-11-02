@@ -2,7 +2,7 @@ mod file_data_storage;
 
 pub use self::file_data_storage::FileDataStorage;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{
     fs::{File, Metadata},
     io::{Seek, SeekFrom},
@@ -20,7 +20,7 @@ use crate::{
 use super::{
     common::{RowToRead, RowToWrite, Value},
     formatter::Formatter,
-    formatter::{DataStorageFormatter, FormatterError, FILE_HEADER_SIZE},
+    formatter::{DataStorageFormatter, FormatterError},
     RowLocation, TimedValue,
 };
 

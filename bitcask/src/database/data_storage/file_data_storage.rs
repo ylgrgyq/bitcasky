@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use log::info;
 
 use std::{
     fs::File,
@@ -144,14 +143,13 @@ impl DataStorageReader for FileDataStorage {
 #[cfg(test)]
 mod tests {
     use crate::{
-        database::formatter::{initialize_new_file, FormatterV1, FILE_HEADER_SIZE},
+        database::formatter::{initialize_new_file, FormatterV1},
         fs::create_file,
     };
 
     use super::*;
 
     use bitcask_tests::common::get_temporary_directory_path;
-    use log::info;
     use test_log::test;
 
     fn get_file_storage(max_size: u64) -> DataStorage {

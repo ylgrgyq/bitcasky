@@ -1,14 +1,13 @@
 mod v1;
 use std::{
     fs::File,
-    io::{self, Read, Seek, Write},
+    io::{self, Read, Write},
     ops::Deref,
 };
 
 pub use self::v1::FormatterV1;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use log::info;
 use thiserror::Error;
 
 use super::common::{RowHeader, RowMeta, RowToWrite};
@@ -91,7 +90,7 @@ const MAGIC: &[u8; 3] = b"btk";
 const DEFAULT_FORMATTER_VERSION: u8 = 0;
 pub const FILE_HEADER_SIZE: usize = 4;
 
-pub fn initialize_new_file(mut file: &mut File) -> Result<DataStorageFormatter> {
+pub fn initialize_new_file(file: &mut File) -> Result<DataStorageFormatter> {
     let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
 
     bs.extend_from_slice(MAGIC);

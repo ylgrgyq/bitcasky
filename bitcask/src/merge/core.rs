@@ -10,10 +10,7 @@ use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
 use crate::{
-    database::{
-        formatter::{Formatter, FormatterV1},
-        DataBaseOptions, Database, TimedValue,
-    },
+    database::{DataBaseOptions, Database, TimedValue},
     error::{BitcaskError, BitcaskResult},
     fs::{self, FileType},
     keydir::KeyDir,

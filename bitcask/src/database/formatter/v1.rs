@@ -24,8 +24,6 @@ impl FormatterV1 {
         FormatterV1 {}
     }
 
-    fn init_file() {}
-
     fn gen_crc<V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();

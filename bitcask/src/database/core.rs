@@ -23,7 +23,6 @@ use super::{
     data_storage::{
         DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, StorageIter,
     },
-    formatter::Formatter,
     DataStorageError,
 };
 use super::{
@@ -553,9 +552,7 @@ fn prepare_load_storages<P: AsRef<Path>>(
 pub mod database_tests_utils {
     use bitcask_tests::common::TestingKV;
 
-    use crate::database::{
-        common::TimedValue, data_storage::DataStorageOptions, formatter::Formatter, RowLocation,
-    };
+    use crate::database::{common::TimedValue, data_storage::DataStorageOptions, RowLocation};
 
     use super::{DataBaseOptions, Database};
 
@@ -620,11 +617,8 @@ pub mod database_tests_utils {
 #[cfg(test)]
 mod tests {
 
-    use crate::database::{
-        database_tests_utils::{
-            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
-        },
-        formatter::FormatterV1,
+    use crate::database::database_tests_utils::{
+        assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
     };
 
     use super::*;

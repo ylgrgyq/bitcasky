@@ -20,7 +20,7 @@ use crate::{
 };
 use crossbeam_channel::{unbounded, Sender};
 
-use super::{common::RecoveredRow, data_storage::DataStorageOptions, formatter::Formatter};
+use super::{common::RecoveredRow, data_storage::DataStorageOptions};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct HintRow {
@@ -297,9 +297,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{
-        common::RowToWrite, data_storage::DataStorageWriter, formatter::FormatterV1,
-    };
+    use crate::database::{common::RowToWrite, data_storage::DataStorageWriter};
 
     use super::*;
     use test_log::test;
