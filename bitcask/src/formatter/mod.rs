@@ -61,6 +61,13 @@ pub struct MergeMeta {
     pub known_max_storage_id: StorageId,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct RowHintHeader {
+    pub timestamp: u64,
+    pub key_size: u64,
+    pub row_offset: u64,
+}
+
 #[derive(Error, Debug)]
 #[error("{}")]
 pub enum FormatterError {
@@ -98,6 +105,10 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 
     fn encode_row_hint(&self, hint: HintRow) -> Bytes;
+
+    fn row_hint_header_size(&self) -> usize;
+
+    fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader;
 
     fn merge_meta_size(&self) -> usize;
 
@@ -142,9 +153,21 @@ impl Formatter for DataStorageFormatter {
         }
     }
 
+    fn row_hint_header_size(&self) -> usize {
+        match self {
+            DataStorageFormatter::V1(f) => f.row_hint_header_size(),
+        }
+    }
+
     fn encode_row_hint(&self, hint: HintRow) -> Bytes {
         match self {
             DataStorageFormatter::V1(f) => f.encode_row_hint(hint),
+        }
+    }
+
+    fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader {
+        match self {
+            DataStorageFormatter::V1(f) => f.decode_row_hint_header(header_bs),
         }
     }
 

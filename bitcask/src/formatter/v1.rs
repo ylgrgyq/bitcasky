@@ -3,7 +3,9 @@ use std::ops::Deref;
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
-use super::{Formatter, FormatterError, MergeMeta, Result, RowHeader, RowMeta, RowToWrite};
+use super::{
+    Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta, RowToWrite,
+};
 
 const CRC_SIZE: usize = 4;
 const TSTAMP_SIZE: usize = 8;
@@ -117,6 +119,26 @@ impl Formatter for FormatterV1 {
         bs.extend_from_slice(&hint.row_offset.to_be_bytes());
         bs.extend_from_slice(&hint.key);
         bs.freeze()
+    }
+
+    fn row_hint_header_size(&self) -> usize {
+        HINT_FILE_HEADER_SIZE
+    }
+
+    fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader {
+        let timestamp = header_bs.slice(0..TSTAMP_SIZE).get_u64();
+        let key_size = header_bs
+            .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
+            .get_u64();
+        let row_offset = header_bs
+            .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
+            .get_u64();
+
+        RowHintHeader {
+            timestamp,
+            key_size,
+            row_offset,
+        }
     }
 
     fn merge_meta_size(&self) -> usize {
