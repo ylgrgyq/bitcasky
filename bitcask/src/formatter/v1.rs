@@ -110,11 +110,12 @@ impl Formatter for FormatterV1 {
         Ok(())
     }
 
-    fn encode_row_hint(&self, hint: &super::HintRow) -> Bytes {
+    fn encode_row_hint(&self, hint: &super::RowHint) -> Bytes {
         let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + hint.key.len());
-        bs.extend_from_slice(&hint.timestamp.to_be_bytes());
-        bs.extend_from_slice(&hint.key_size.to_be_bytes());
-        bs.extend_from_slice(&hint.row_offset.to_be_bytes());
+        let header = &hint.header;
+        bs.extend_from_slice(&header.timestamp.to_be_bytes());
+        bs.extend_from_slice(&header.key_size.to_be_bytes());
+        bs.extend_from_slice(&header.row_offset.to_be_bytes());
         bs.extend_from_slice(&hint.key);
         bs.freeze()
     }
@@ -143,7 +144,7 @@ impl Formatter for FormatterV1 {
         MERGE_META_FILE_SIZE
     }
 
-    fn encode_merge_meta(&self, meta: super::MergeMeta) -> Bytes {
+    fn encode_merge_meta(&self, meta: &super::MergeMeta) -> Bytes {
         Bytes::copy_from_slice(&meta.known_max_storage_id.to_be_bytes())
     }
 

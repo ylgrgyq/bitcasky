@@ -338,7 +338,7 @@ fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
 fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
     let mut merge_meta_file = fs::create_file(merge_file_dir, FileType::MergeMeta, None)?;
     let formater = initialize_new_file(&mut merge_meta_file)?;
-    merge_meta_file.write_all(&formater.encode_merge_meta(merge_meta))?;
+    merge_meta_file.write_all(&formater.encode_merge_meta(&merge_meta))?;
     Ok(())
 }
 

@@ -15,7 +15,8 @@ use crate::{
     database::data_storage::DataStorage,
     error::{BitcaskError, BitcaskResult},
     formatter::{
-        get_formatter_from_data_file, initialize_new_file, DataStorageFormatter, Formatter, HintRow,
+        get_formatter_from_data_file, initialize_new_file, DataStorageFormatter, Formatter,
+        RowHint, RowHintHeader,
     },
     fs::{self, FileType},
     storage_id::StorageId,
@@ -61,27 +62,20 @@ impl HintFile {
         Ok(HintFileIterator { file })
     }
 
-    pub fn write_hint_row(&mut self, hint: &HintRow) -> BitcaskResult<()> {
+    pub fn write_hint_row(&mut self, hint: &RowHint) -> BitcaskResult<()> {
         let data_to_write = self.formatter.encode_row_hint(hint);
         self.file.write_all(&data_to_write)?;
-        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, key_size: {}, row_offset: {}, timestamp: {}", 
-            hint.key, hint.key_size, hint.row_offset, hint.timestamp);
+        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}", 
+            hint.key, hint.header);
         Ok(())
     }
 
-    pub fn read_hint_row(&mut self) -> BitcaskResult<HintRow> {
+    pub fn read_hint_row(&mut self) -> BitcaskResult<RowHint> {
         let mut header_buf = vec![0; self.formatter.row_hint_header_size()];
         self.file.read_exact(&mut header_buf)?;
 
         let header_bs = Bytes::from(header_buf);
         let header = self.formatter.decode_row_hint_header(header_bs);
-        // let timestamp = header_bs.slice(0..TSTAMP_SIZE).get_u64();
-        // let key_size = header_bs
-        //     .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
-        //     .get_u64();
-        // let row_offset = header_bs
-        //     .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
-        //     .get_u64();
 
         let mut k_buf = vec![0; header.key_size as usize];
         self.file.read_exact(&mut k_buf)?;
@@ -90,12 +84,7 @@ impl HintFile {
         debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, header: {:?}", 
             key, header);
 
-        Ok(HintRow {
-            timestamp: header.timestamp,
-            key_size: header.key_size,
-            row_offset: header.row_offset,
-            key,
-        })
+        Ok(RowHint { header, key })
     }
 
     fn open(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
@@ -135,9 +124,9 @@ impl Iterator for HintFileIterator {
             r => Some(r.map(|h| RecoveredRow {
                 row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
-                    row_offset: h.row_offset,
+                    row_offset: h.header.row_offset,
                 },
-                timestamp: h.timestamp,
+                timestamp: h.header.timestamp,
                 key: h.key,
                 is_tombstone: false,
             })),
@@ -214,10 +203,12 @@ impl HintWriter {
                     } else {
                         m.insert(
                             r.key.clone(),
-                            HintRow {
-                                timestamp: r.timestamp,
-                                key_size: r.key.len() as u64,
-                                row_offset: r.row_location.row_offset,
+                            RowHint {
+                                header: RowHintHeader {
+                                    timestamp: r.timestamp,
+                                    key_size: r.key.len() as u64,
+                                    row_offset: r.row_location.row_offset,
+                                },
                                 key: r.key,
                             },
                         );
@@ -299,10 +290,12 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let key = vec![1, 2, 3];
-        let expect_row = HintRow {
-            timestamp: 12345,
-            key_size: key.len() as u64,
-            row_offset: 789,
+        let expect_row = RowHint {
+            header: RowHintHeader {
+                timestamp: 12345,
+                key_size: key.len() as u64,
+                row_offset: 789,
+            },
             key,
         };
         {
@@ -347,7 +340,7 @@ mod tests {
         let hint_row = hint_file.read_hint_row().unwrap();
 
         assert_eq!(key, hint_row.key);
-        assert_eq!(key.len() as u64, hint_row.key_size);
-        assert_eq!(pos.row_offset, hint_row.row_offset);
+        assert_eq!(key.len() as u64, hint_row.header.key_size);
+        assert_eq!(pos.row_offset, hint_row.header.row_offset);
     }
 }

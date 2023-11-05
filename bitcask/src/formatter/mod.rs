@@ -32,6 +32,24 @@ pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
     pub value: V,
 }
 
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub struct MergeMeta {
+    pub known_max_storage_id: StorageId,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct RowHintHeader {
+    pub timestamp: u64,
+    pub key_size: u64,
+    pub row_offset: u64,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct RowHint {
+    pub header: RowHintHeader,
+    pub key: Vec<u8>,
+}
+
 impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
         let now = SystemTime::now()
@@ -56,18 +74,6 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub struct MergeMeta {
-    pub known_max_storage_id: StorageId,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct RowHintHeader {
-    pub timestamp: u64,
-    pub key_size: u64,
-    pub row_offset: u64,
-}
-
 #[derive(Error, Debug)]
 #[error("{}")]
 pub enum FormatterError {
@@ -83,14 +89,6 @@ pub enum FormatterError {
     UnknownFormatterVersion(u8),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct HintRow {
-    pub timestamp: u64,
-    pub key_size: u64,
-    pub row_offset: u64,
-    pub key: Vec<u8>,
-}
-
 pub type Result<T> = std::result::Result<T, FormatterError>;
 
 pub trait Formatter: std::marker::Send + 'static + Copy {
@@ -104,7 +102,7 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 
-    fn encode_row_hint(&self, hint: &HintRow) -> Bytes;
+    fn encode_row_hint(&self, hint: &RowHint) -> Bytes;
 
     fn row_hint_header_size(&self) -> usize;
 
@@ -112,7 +110,7 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 
     fn merge_meta_size(&self) -> usize;
 
-    fn encode_merge_meta(&self, meta: MergeMeta) -> Bytes;
+    fn encode_merge_meta(&self, meta: &MergeMeta) -> Bytes;
 
     fn decode_merge_meta(&self, meta: Bytes) -> MergeMeta;
 }
@@ -159,7 +157,7 @@ impl Formatter for DataStorageFormatter {
         }
     }
 
-    fn encode_row_hint(&self, hint: &HintRow) -> Bytes {
+    fn encode_row_hint(&self, hint: &RowHint) -> Bytes {
         match self {
             DataStorageFormatter::V1(f) => f.encode_row_hint(hint),
         }
@@ -177,7 +175,7 @@ impl Formatter for DataStorageFormatter {
         }
     }
 
-    fn encode_merge_meta(&self, meta: MergeMeta) -> Bytes {
+    fn encode_merge_meta(&self, meta: &MergeMeta) -> Bytes {
         match self {
             DataStorageFormatter::V1(f) => f.encode_merge_meta(meta),
         }
