@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     database::common::{RowToRead, Value},
-    formatter::{DataStorageFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     fs::FileType,
     storage_id::StorageId,
 };
@@ -26,7 +26,7 @@ pub struct FileDataStorage {
     pub storage_id: StorageId,
     capacity: u64,
     options: DataStorageOptions,
-    formatter: DataStorageFormatter,
+    formatter: BitcaskFormatter,
 }
 
 impl FileDataStorage {
@@ -35,7 +35,7 @@ impl FileDataStorage {
         storage_id: StorageId,
         data_file: File,
         capacity: u64,
-        formatter: DataStorageFormatter,
+        formatter: BitcaskFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {

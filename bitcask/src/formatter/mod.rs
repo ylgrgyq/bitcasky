@@ -1,4 +1,3 @@
-mod v1;
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -8,10 +7,11 @@ use std::{
 
 use crate::storage_id::StorageId;
 
-pub use self::v1::FormatterV1;
-
 use bytes::{BufMut, Bytes, BytesMut};
 use thiserror::Error;
+
+mod formatter_v1;
+pub use self::formatter_v1::FormatterV1;
 
 #[derive(Debug)]
 pub struct RowMeta {
@@ -81,8 +81,8 @@ pub enum FormatterError {
     CrcCheckFailed { expected_crc: u32, actual_crc: u32 },
     #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Invalid data file: {1}")]
-    InvalidDataFile(#[source] io::Error, String),
+    #[error("Read file header failed: {1}")]
+    ReadFileHeaderFailed(#[source] io::Error, String),
     #[error("Magic string does not match")]
     MagicNotMatch(),
     #[error("Unknown formatter version: {0}")]
@@ -116,74 +116,74 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DataStorageFormatter {
+pub enum BitcaskFormatter {
     V1(FormatterV1),
 }
 
-impl Formatter for DataStorageFormatter {
+impl Formatter for BitcaskFormatter {
     fn row_header_size(&self) -> usize {
         match self {
-            DataStorageFormatter::V1(f) => f.row_header_size(),
+            BitcaskFormatter::V1(f) => f.row_header_size(),
         }
     }
 
     fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
         match self {
-            DataStorageFormatter::V1(f) => f.row_size(row),
+            BitcaskFormatter::V1(f) => f.row_size(row),
         }
     }
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
         match self {
-            DataStorageFormatter::V1(f) => f.encode_row(row),
+            BitcaskFormatter::V1(f) => f.encode_row(row),
         }
     }
 
     fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader> {
         match self {
-            DataStorageFormatter::V1(f) => f.decode_row_header(bs),
+            BitcaskFormatter::V1(f) => f.decode_row_header(bs),
         }
     }
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
         match self {
-            DataStorageFormatter::V1(f) => f.validate_key_value(header, kv),
+            BitcaskFormatter::V1(f) => f.validate_key_value(header, kv),
         }
     }
 
     fn row_hint_header_size(&self) -> usize {
         match self {
-            DataStorageFormatter::V1(f) => f.row_hint_header_size(),
+            BitcaskFormatter::V1(f) => f.row_hint_header_size(),
         }
     }
 
     fn encode_row_hint(&self, hint: &RowHint) -> Bytes {
         match self {
-            DataStorageFormatter::V1(f) => f.encode_row_hint(hint),
+            BitcaskFormatter::V1(f) => f.encode_row_hint(hint),
         }
     }
 
     fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader {
         match self {
-            DataStorageFormatter::V1(f) => f.decode_row_hint_header(header_bs),
+            BitcaskFormatter::V1(f) => f.decode_row_hint_header(header_bs),
         }
     }
 
     fn merge_meta_size(&self) -> usize {
         match self {
-            DataStorageFormatter::V1(f) => f.merge_meta_size(),
+            BitcaskFormatter::V1(f) => f.merge_meta_size(),
         }
     }
 
     fn encode_merge_meta(&self, meta: &MergeMeta) -> Bytes {
         match self {
-            DataStorageFormatter::V1(f) => f.encode_merge_meta(meta),
+            BitcaskFormatter::V1(f) => f.encode_merge_meta(meta),
         }
     }
 
     fn decode_merge_meta(&self, meta: Bytes) -> MergeMeta {
         match self {
-            DataStorageFormatter::V1(f) => f.decode_merge_meta(meta),
+            BitcaskFormatter::V1(f) => f.decode_merge_meta(meta),
         }
     }
 }
@@ -192,7 +192,7 @@ const MAGIC: &[u8; 3] = b"btk";
 const DEFAULT_FORMATTER_VERSION: u8 = 0;
 pub const FILE_HEADER_SIZE: usize = 4;
 
-pub fn initialize_new_file(file: &mut File) -> std::io::Result<DataStorageFormatter> {
+pub fn initialize_new_file(file: &mut File) -> std::io::Result<BitcaskFormatter> {
     let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
 
     bs.extend_from_slice(MAGIC);
@@ -201,14 +201,14 @@ pub fn initialize_new_file(file: &mut File) -> std::io::Result<DataStorageFormat
     file.write_all(&bs.freeze())?;
     file.flush()?;
 
-    Ok(DataStorageFormatter::V1(FormatterV1::new()))
+    Ok(BitcaskFormatter::V1(FormatterV1::new()))
 }
 
-pub fn get_formatter_from_data_file(file: &mut File) -> Result<DataStorageFormatter> {
+pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
     let mut file_header = vec![0; MAGIC.len() + 1];
 
     file.read_exact(&mut file_header)
-        .map_err(|e| FormatterError::InvalidDataFile(e, "read file header failed".into()))?;
+        .map_err(|e| FormatterError::ReadFileHeaderFailed(e, "read file header failed".into()))?;
 
     if MAGIC != &file_header[0..3] {
         return Err(FormatterError::MagicNotMatch());
@@ -216,7 +216,7 @@ pub fn get_formatter_from_data_file(file: &mut File) -> Result<DataStorageFormat
 
     let formatter_version = file_header[3];
     if formatter_version == DEFAULT_FORMATTER_VERSION {
-        return Ok(DataStorageFormatter::V1(FormatterV1::new()));
+        return Ok(BitcaskFormatter::V1(FormatterV1::new()));
     }
 
     Err(FormatterError::UnknownFormatterVersion(formatter_version))
@@ -242,8 +242,53 @@ mod tests {
             .unwrap()
             .file;
 
-        let read_formatter = get_formatter_from_data_file(&mut file).unwrap();
-        assert_matches!(read_formatter, DataStorageFormatter::V1(_));
+        let read_formatter = get_formatter_from_file(&mut file).unwrap();
+        assert_matches!(read_formatter, BitcaskFormatter::V1(_));
         assert_eq!(init_formatter, read_formatter);
+    }
+
+    #[test]
+    fn test_read_file_header_failed() {
+        let dir = get_temporary_directory_path();
+        let storage_id = 1;
+        create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+
+        let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
+            .unwrap()
+            .file;
+
+        let read_formatter = get_formatter_from_file(&mut file).unwrap_err();
+        assert_matches!(read_formatter, FormatterError::ReadFileHeaderFailed(_, _));
+    }
+
+    #[test]
+    fn test_invalid_magic_word() {
+        let dir = get_temporary_directory_path();
+        let storage_id = 1;
+        let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        file.write(b"bad magic word").unwrap();
+
+        let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
+            .unwrap()
+            .file;
+
+        let read_formatter = get_formatter_from_file(&mut file).unwrap_err();
+        assert_matches!(read_formatter, FormatterError::MagicNotMatch());
+    }
+
+    #[test]
+    fn test_unknown_formatter_version() {
+        let dir = get_temporary_directory_path();
+        let storage_id = 1;
+        let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        file.write(MAGIC).unwrap();
+        file.write(b"invalid data").unwrap();
+
+        let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
+            .unwrap()
+            .file;
+
+        let read_formatter = get_formatter_from_file(&mut file).unwrap_err();
+        assert_matches!(read_formatter, FormatterError::UnknownFormatterVersion(_));
     }
 }

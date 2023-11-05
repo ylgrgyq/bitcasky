@@ -13,8 +13,7 @@ use thiserror::Error;
 
 use crate::{
     formatter::{
-        self, get_formatter_from_data_file, DataStorageFormatter, Formatter, FormatterError,
-        RowToWrite,
+        self, get_formatter_from_file, BitcaskFormatter, Formatter, FormatterError, RowToWrite,
     },
     fs::{self, create_file, FileType},
     storage_id::StorageId,
@@ -87,7 +86,7 @@ pub struct DataStorage {
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
     readonly: bool,
-    formatter: DataStorageFormatter,
+    formatter: BitcaskFormatter,
     options: DataStorageOptions,
 }
 
@@ -121,7 +120,7 @@ impl DataStorage {
             &path, storage_id
         );
         let meta = data_file.file.metadata()?;
-        let formatter = get_formatter_from_data_file(&mut data_file.file)?;
+        let formatter = get_formatter_from_file(&mut data_file.file)?;
         if !meta.permissions().readonly() {
             data_file.file.seek(SeekFrom::End(0))?;
         }
@@ -151,7 +150,7 @@ impl DataStorage {
             "Create iterator under path: {:?} with storage id: {}",
             &self.database_dir, self.storage_id
         );
-        let formatter = formatter::get_formatter_from_data_file(&mut data_file.file)
+        let formatter = formatter::get_formatter_from_file(&mut data_file.file)
             .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?;
         let meta = data_file.file.metadata()?;
         Ok(StorageIter {
@@ -176,7 +175,7 @@ impl DataStorage {
         storage_id: StorageId,
         data_file: File,
         meta: Metadata,
-        formatter: DataStorageFormatter,
+        formatter: BitcaskFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();

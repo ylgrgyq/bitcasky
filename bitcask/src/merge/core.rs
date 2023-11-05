@@ -12,7 +12,7 @@ use parking_lot::{Mutex, RwLock};
 use crate::{
     database::{DataBaseOptions, Database, TimedValue},
     error::{BitcaskError, BitcaskResult},
-    formatter::{get_formatter_from_data_file, initialize_new_file, Formatter, MergeMeta},
+    formatter::{get_formatter_from_file, initialize_new_file, Formatter, MergeMeta},
     fs::{self, FileType},
     keydir::KeyDir,
     storage_id::{StorageId, StorageIdGenerator},
@@ -325,7 +325,7 @@ fn purge_outdated_data_files(base_dir: &Path, max_storage_id: StorageId) -> Bitc
 
 fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
     let mut merge_meta_file = fs::open_file(merge_file_dir, FileType::MergeMeta, None)?;
-    let formatter = get_formatter_from_data_file(&mut merge_meta_file.file).map_err(|e| {
+    let formatter = get_formatter_from_file(&mut merge_meta_file.file).map_err(|e| {
         BitcaskError::MergeMetaFileCorrupted(e, merge_meta_file.path.display().to_string())
     })?;
 

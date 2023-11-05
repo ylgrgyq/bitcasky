@@ -15,8 +15,8 @@ use crate::{
     database::data_storage::DataStorage,
     error::{BitcaskError, BitcaskResult},
     formatter::{
-        get_formatter_from_data_file, initialize_new_file, DataStorageFormatter, Formatter,
-        RowHint, RowHintHeader,
+        get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, RowHint,
+        RowHintHeader,
     },
     fs::{self, FileType},
     storage_id::StorageId,
@@ -32,7 +32,7 @@ const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 pub struct HintFile {
     storage_id: StorageId,
     file: File,
-    formatter: DataStorageFormatter,
+    formatter: BitcaskFormatter,
 }
 
 impl HintFile {
@@ -89,7 +89,7 @@ impl HintFile {
 
     fn open(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
         let mut file = fs::open_file(database_dir, FileType::HintFile, Some(storage_id))?;
-        let formatter = get_formatter_from_data_file(&mut file.file).map_err(|e| {
+        let formatter = get_formatter_from_file(&mut file.file).map_err(|e| {
             BitcaskError::HintFileCorrupted(e, storage_id, database_dir.display().to_string())
         })?;
         Ok(HintFile {
