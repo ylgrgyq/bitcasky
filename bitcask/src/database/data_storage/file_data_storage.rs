@@ -53,7 +53,7 @@ impl FileDataStorage {
         self.data_file.read_exact(&mut header_buf)?;
         let header_bs = Bytes::from(header_buf);
 
-        let header = self.formatter.decode_row_header(header_bs)?;
+        let header = self.formatter.decode_row_header(header_bs);
 
         let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
         self.data_file.read_exact(&mut kv_buf)?;

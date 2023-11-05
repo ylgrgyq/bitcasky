@@ -13,13 +13,14 @@ use thiserror::Error;
 mod formatter_v1;
 pub use self::formatter_v1::FormatterV1;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RowMeta {
     pub timestamp: u64,
     pub key_size: u64,
     pub value_size: u64,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct RowHeader {
     pub crc: u32,
     pub meta: RowMeta,
@@ -98,7 +99,7 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
 
-    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader>;
+    fn decode_row_header(&self, bs: Bytes) -> RowHeader;
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 
@@ -139,7 +140,7 @@ impl Formatter for BitcaskFormatter {
         }
     }
 
-    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader> {
+    fn decode_row_header(&self, bs: Bytes) -> RowHeader {
         match self {
             BitcaskFormatter::V1(f) => f.decode_row_header(bs),
         }
@@ -266,7 +267,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
-        file.write(b"bad magic word").unwrap();
+        file.write_all(b"bad magic word").unwrap();
 
         let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
             .unwrap()
@@ -281,8 +282,8 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
-        file.write(MAGIC).unwrap();
-        file.write(b"invalid data").unwrap();
+        file.write_all(MAGIC).unwrap();
+        file.write_all(b"invalid data").unwrap();
 
         let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
             .unwrap()

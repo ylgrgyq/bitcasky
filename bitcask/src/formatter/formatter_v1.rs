@@ -77,7 +77,7 @@ impl Formatter for FormatterV1 {
         bs.freeze()
     }
 
-    fn decode_row_header(&self, bs: Bytes) -> Result<RowHeader> {
+    fn decode_row_header(&self, bs: Bytes) -> RowHeader {
         let expected_crc = bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
         let timestamp = bs
             .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
@@ -89,14 +89,14 @@ impl Formatter for FormatterV1 {
         let val_size = bs
             .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
             .get_u64();
-        Ok(RowHeader {
+        RowHeader {
             crc: expected_crc,
             meta: RowMeta {
                 timestamp,
                 key_size,
                 value_size: val_size,
             },
-        })
+        }
     }
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
@@ -153,5 +153,69 @@ impl Formatter for FormatterV1 {
         MergeMeta {
             known_max_storage_id,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::formatter::RowHint;
+
+    use super::*;
+
+    use test_log::test;
+
+    #[test]
+    fn test_encode_decode_merge_meta() {
+        let merge_meta = MergeMeta {
+            known_max_storage_id: 123,
+        };
+
+        let formatter = FormatterV1 {};
+        let bytes = formatter.encode_merge_meta(&merge_meta);
+        assert_eq!(formatter.merge_meta_size(), bytes.len());
+        assert_eq!(merge_meta, formatter.decode_merge_meta(bytes));
+    }
+
+    #[test]
+    fn test_encode_decode_row_hint() {
+        let k = b"Hello".to_vec();
+        let k_len = k.len();
+        let hint = RowHint {
+            header: RowHintHeader {
+                timestamp: 12345,
+                key_size: k.len() as u64,
+                row_offset: 56789,
+            },
+            key: k,
+        };
+
+        let formatter = FormatterV1 {};
+        let bytes = formatter.encode_row_hint(&hint);
+
+        assert_eq!(k_len + formatter.row_hint_header_size(), bytes.len());
+        assert_eq!(hint.header, formatter.decode_row_hint_header(bytes));
+    }
+
+    #[test]
+    fn test_encode_decode_row() {
+        let k = b"Hello".to_vec();
+        let v = b"World".to_vec();
+        let k_len = k.len();
+        let v_len = v.len();
+        let row = RowToWrite {
+            meta: RowMeta {
+                timestamp: 12345,
+                key_size: k.len() as u64,
+                value_size: v.len() as u64,
+            },
+            key: &k,
+            value: v,
+        };
+
+        let formatter = FormatterV1 {};
+        let bytes = formatter.encode_row(&row);
+
+        assert_eq!(v_len + k_len + formatter.row_header_size(), bytes.len());
+        assert_eq!(row.meta, formatter.decode_row_header(bytes).meta);
     }
 }
