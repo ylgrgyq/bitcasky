@@ -104,7 +104,7 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 
     fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
 
-    fn encode_row_hint(&self, hint: HintRow) -> Bytes;
+    fn encode_row_hint(&self, hint: &HintRow) -> Bytes;
 
     fn row_hint_header_size(&self) -> usize;
 
@@ -159,7 +159,7 @@ impl Formatter for DataStorageFormatter {
         }
     }
 
-    fn encode_row_hint(&self, hint: HintRow) -> Bytes {
+    fn encode_row_hint(&self, hint: &HintRow) -> Bytes {
         match self {
             DataStorageFormatter::V1(f) => f.encode_row_hint(hint),
         }

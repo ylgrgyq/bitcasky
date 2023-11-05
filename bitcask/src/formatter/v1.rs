@@ -21,8 +21,6 @@ const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
 const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
 const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
 const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SIZE;
-const DEFAULT_LOG_TARGET: &str = "Hint";
-const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 const MERGE_META_FILE_SIZE: usize = 4;
 
@@ -112,7 +110,7 @@ impl Formatter for FormatterV1 {
         Ok(())
     }
 
-    fn encode_row_hint(&self, hint: super::HintRow) -> Bytes {
+    fn encode_row_hint(&self, hint: &super::HintRow) -> Bytes {
         let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + hint.key.len());
         bs.extend_from_slice(&hint.timestamp.to_be_bytes());
         bs.extend_from_slice(&hint.key_size.to_be_bytes());

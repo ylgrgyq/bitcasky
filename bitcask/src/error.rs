@@ -18,6 +18,8 @@ pub enum BitcaskError {
     CrcCheckFailed(u32, u64, u32, u32),
     #[error("Data file with file id {1} under path {0} corrupted. Hint: {2}")]
     DataFileCorrupted(String, u32, String),
+    #[error("Hint file with file id {1} under path {0} corrupted")]
+    HintFileCorrupted(#[source] FormatterError, u32, String),
     #[error("Read non-existent file with id {0}")]
     TargetFileIdNotFound(u32),
     #[error("Found corrupted merge meta file under file directory: {1}")]
