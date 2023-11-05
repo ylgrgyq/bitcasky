@@ -12,14 +12,15 @@ use std::{
 use thiserror::Error;
 
 use crate::{
+    formatter::{
+        self, get_formatter_from_file, BitcaskFormatter, Formatter, FormatterError, RowToWrite,
+    },
     fs::{self, create_file, FileType},
     storage_id::StorageId,
 };
 
 use super::{
-    common::{RowToRead, RowToWrite, Value},
-    formatter::Formatter,
-    formatter::FormatterError,
+    common::{RowToRead, Value},
     RowLocation, TimedValue,
 };
 
@@ -40,18 +41,22 @@ pub enum DataStorageError {
     PermissionDenied(StorageId),
     #[error("Got IO Error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Got IO Error: {0}")]
+    DataStorageFormatter(#[from] FormatterError),
     #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]
     CrcCheckFailed(u32, u64, u32, u32),
-    #[error("Got formatter Error: {0}")]
-    FormatterError(#[from] FormatterError),
+    #[error("Failed to write file header for storage with id: {1}")]
+    WriteFileHeaderError(#[source] FormatterError, StorageId),
+    #[error("Failed to read file header for storage with id: {1}")]
+    ReadFileHeaderError(#[source] FormatterError, StorageId),
 }
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
 
-pub trait DataStorageWriter<F: Formatter> {
+pub trait DataStorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation>;
 
-    fn transit_to_readonly(self) -> Result<DataStorage<F>>;
+    fn transit_to_readonly(self) -> Result<DataStorage>;
 
     fn flush(&mut self) -> Result<()>;
 }
@@ -66,8 +71,8 @@ pub trait DataStorageReader {
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 }
 #[derive(Debug)]
-enum DataStorageImpl<F: Formatter> {
-    FileStorage(FileDataStorage<F>),
+enum DataStorageImpl {
+    FileStorage(FileDataStorage),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,36 +81,36 @@ pub struct DataStorageOptions {
 }
 
 #[derive(Debug)]
-pub struct DataStorage<F: Formatter> {
+pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
-    storage_impl: DataStorageImpl<F>,
+    storage_impl: DataStorageImpl,
     readonly: bool,
-    formatter: F,
+    formatter: BitcaskFormatter,
     options: DataStorageOptions,
 }
 
-impl<F: Formatter> DataStorage<F> {
+impl DataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        formatter: F,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
-        let data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
+        let mut data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
+        let formatter = formatter::initialize_new_file(&mut data_file)?;
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
         );
         let meta = data_file.metadata()?;
+
         DataStorage::open_by_file(&path, storage_id, data_file, meta, formatter, options)
     }
 
     pub fn open<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        formatter: F,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
@@ -115,6 +120,7 @@ impl<F: Formatter> DataStorage<F> {
             &path, storage_id
         );
         let meta = data_file.file.metadata()?;
+        let formatter = get_formatter_from_file(&mut data_file.file)?;
         if !meta.permissions().readonly() {
             data_file.file.seek(SeekFrom::End(0))?;
         }
@@ -134,8 +140,8 @@ impl<F: Formatter> DataStorage<F> {
         Ok(self.readonly)
     }
 
-    pub fn iter(&self) -> Result<StorageIter<F>> {
-        let data_file = fs::open_file(
+    pub fn iter(&self) -> Result<StorageIter> {
+        let mut data_file = fs::open_file(
             &self.database_dir,
             FileType::DataFile,
             Some(self.storage_id),
@@ -144,6 +150,8 @@ impl<F: Formatter> DataStorage<F> {
             "Create iterator under path: {:?} with storage id: {}",
             &self.database_dir, self.storage_id
         );
+        let formatter = formatter::get_formatter_from_file(&mut data_file.file)
+            .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?;
         let meta = data_file.file.metadata()?;
         Ok(StorageIter {
             storage: DataStorage::open_by_file(
@@ -151,7 +159,7 @@ impl<F: Formatter> DataStorage<F> {
                 self.storage_id,
                 data_file.file,
                 meta,
-                self.formatter,
+                formatter,
                 self.options,
             )?,
         })
@@ -167,11 +175,10 @@ impl<F: Formatter> DataStorage<F> {
         storage_id: StorageId,
         data_file: File,
         meta: Metadata,
-        formatter: F,
+        formatter: BitcaskFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
         let file_size = meta.len();
-
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 database_dir,
@@ -190,7 +197,7 @@ impl<F: Formatter> DataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
+impl DataStorageWriter for DataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         if self.check_storage_overflow(row) {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
@@ -206,7 +213,7 @@ impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
         Ok(r)
     }
 
-    fn transit_to_readonly(self) -> Result<DataStorage<F>> {
+    fn transit_to_readonly(self) -> Result<DataStorage> {
         match self.storage_impl {
             DataStorageImpl::FileStorage(s) => {
                 let storage_id = s.storage_id;
@@ -226,7 +233,7 @@ impl<F: Formatter> DataStorageWriter<F> for DataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageReader for DataStorage<F> {
+impl DataStorageReader for DataStorage {
     fn storage_size(&self) -> usize {
         match &self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.storage_size(),
@@ -249,11 +256,11 @@ impl<F: Formatter> DataStorageReader for DataStorage<F> {
 }
 
 #[derive(Debug)]
-pub struct StorageIter<F: Formatter> {
-    storage: DataStorage<F>,
+pub struct StorageIter {
+    storage: DataStorage,
 }
 
-impl<F: Formatter> Iterator for StorageIter<F> {
+impl Iterator for StorageIter {
     type Item = Result<RowToRead>;
 
     fn next(&mut self) -> Option<Self::Item> {

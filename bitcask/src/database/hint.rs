@@ -8,51 +8,46 @@ use std::{
     vec,
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::Bytes;
 use log::{debug, error, info, warn};
 
 use crate::{
     database::data_storage::DataStorage,
     error::{BitcaskError, BitcaskResult},
+    formatter::{
+        get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, RowHint,
+        RowHintHeader,
+    },
     fs::{self, FileType},
     storage_id::StorageId,
     utils,
 };
 use crossbeam_channel::{unbounded, Sender};
 
-use super::{common::RecoveredRow, data_storage::DataStorageOptions, formatter::Formatter};
+use super::{common::RecoveredRow, data_storage::DataStorageOptions};
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct HintRow {
-    pub timestamp: u64,
-    pub key_size: u64,
-    pub row_offset: u64,
-    pub key: Vec<u8>,
-}
-
-const TSTAMP_SIZE: usize = 8;
-const KEY_SIZE_SIZE: usize = 8;
-const ROW_OFFSET_SIZE: usize = 8;
-const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
-const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
-const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
-const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SIZE;
 const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 
 pub struct HintFile {
     storage_id: StorageId,
     file: File,
+    formatter: BitcaskFormatter,
 }
 
 impl HintFile {
     pub fn create(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
-        let file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
+        let mut file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
+        let formatter = initialize_new_file(&mut file)?;
         debug!(
             target: DEFAULT_LOG_TARGET,
             "create hint file with id: {}", storage_id
         );
-        Ok(HintFile { storage_id, file })
+        Ok(HintFile {
+            storage_id,
+            file,
+            formatter,
+        })
     }
 
     pub fn open_iterator(
@@ -67,56 +62,40 @@ impl HintFile {
         Ok(HintFileIterator { file })
     }
 
-    pub fn write_hint_row(&mut self, hint: &HintRow) -> BitcaskResult<()> {
-        let data_to_write = self.to_bytes(hint);
+    pub fn write_hint_row(&mut self, hint: &RowHint) -> BitcaskResult<()> {
+        let data_to_write = self.formatter.encode_row_hint(hint);
         self.file.write_all(&data_to_write)?;
-        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, key_size: {}, row_offset: {}, timestamp: {}", 
-            hint.key, hint.key_size, hint.row_offset, hint.timestamp);
+        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}", 
+            hint.key, hint.header);
         Ok(())
     }
 
-    pub fn read_hint_row(&mut self) -> BitcaskResult<HintRow> {
-        let mut header_buf = vec![0; HINT_FILE_HEADER_SIZE];
+    pub fn read_hint_row(&mut self) -> BitcaskResult<RowHint> {
+        let mut header_buf = vec![0; self.formatter.row_hint_header_size()];
         self.file.read_exact(&mut header_buf)?;
 
         let header_bs = Bytes::from(header_buf);
-        let timestamp = header_bs.slice(0..TSTAMP_SIZE).get_u64();
-        let key_size = header_bs
-            .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
-            .get_u64();
-        let row_offset = header_bs
-            .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
-            .get_u64();
+        let header = self.formatter.decode_row_hint_header(header_bs);
 
-        let mut k_buf = vec![0; key_size as usize];
+        let mut k_buf = vec![0; header.key_size as usize];
         self.file.read_exact(&mut k_buf)?;
         let key: Vec<u8> = Bytes::from(k_buf).into();
 
-        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, key_size: {}, row_offset: {}, timestamp: {}", 
-            key, key_size, row_offset, timestamp);
+        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, header: {:?}", 
+            key, header);
 
-        Ok(HintRow {
-            timestamp,
-            key_size,
-            row_offset,
-            key,
-        })
-    }
-
-    fn to_bytes(&self, row: &HintRow) -> Bytes {
-        let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + row.key.len());
-        bs.extend_from_slice(&row.timestamp.to_be_bytes());
-        bs.extend_from_slice(&row.key_size.to_be_bytes());
-        bs.extend_from_slice(&row.row_offset.to_be_bytes());
-        bs.extend_from_slice(&row.key);
-        bs.freeze()
+        Ok(RowHint { header, key })
     }
 
     fn open(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
-        let file = fs::open_file(database_dir, FileType::HintFile, Some(storage_id))?;
+        let mut file = fs::open_file(database_dir, FileType::HintFile, Some(storage_id))?;
+        let formatter = get_formatter_from_file(&mut file.file).map_err(|e| {
+            BitcaskError::HintFileCorrupted(e, storage_id, database_dir.display().to_string())
+        })?;
         Ok(HintFile {
             storage_id,
             file: file.file,
+            formatter,
         })
     }
 }
@@ -145,9 +124,9 @@ impl Iterator for HintFileIterator {
             r => Some(r.map(|h| RecoveredRow {
                 row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
-                    row_offset: h.row_offset,
+                    row_offset: h.header.row_offset,
                 },
-                timestamp: h.timestamp,
+                timestamp: h.header.timestamp,
                 key: h.key,
                 is_tombstone: false,
             })),
@@ -162,19 +141,13 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start<F: Formatter>(
-        database_dir: &Path,
-        formatter: F,
-        storage_options: DataStorageOptions,
-    ) -> HintWriter {
+    pub fn start(database_dir: &Path, storage_options: DataStorageOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
-                if let Err(e) =
-                    Self::write_hint_file(&moved_dir, storage_id, formatter, storage_options)
-                {
+                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, storage_options) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -205,14 +178,12 @@ impl HintWriter {
         self.sender.len()
     }
 
-    fn write_hint_file<F: Formatter>(
+    fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        formatter: F,
         storage_options: DataStorageOptions,
     ) -> BitcaskResult<()> {
-        let stable_file_opt =
-            DataStorage::open(database_dir, data_storage_id, formatter, storage_options)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
         if stable_file_opt.is_empty() {
             info!(
                 target: DEFAULT_LOG_TARGET,
@@ -232,10 +203,12 @@ impl HintWriter {
                     } else {
                         m.insert(
                             r.key.clone(),
-                            HintRow {
-                                timestamp: r.timestamp,
-                                key_size: r.key.len() as u64,
-                                row_offset: r.row_location.row_offset,
+                            RowHint {
+                                header: RowHintHeader {
+                                    timestamp: r.timestamp,
+                                    key_size: r.key.len() as u64,
+                                    row_offset: r.row_location.row_offset,
+                                },
                                 key: r.key,
                             },
                         );
@@ -305,9 +278,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::database::{
-        common::RowToWrite, data_storage::DataStorageWriter, formatter::FormatterV1,
-    };
+    use crate::{database::data_storage::DataStorageWriter, formatter::RowToWrite};
 
     use super::*;
     use test_log::test;
@@ -319,10 +290,12 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let key = vec![1, 2, 3];
-        let expect_row = HintRow {
-            timestamp: 12345,
-            key_size: key.len() as u64,
-            row_offset: 789,
+        let expect_row = RowHint {
+            header: RowHintHeader {
+                timestamp: 12345,
+                key_size: key.len() as u64,
+                row_offset: 789,
+            },
             key,
         };
         {
@@ -341,7 +314,6 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            FormatterV1::new(),
             DataStorageOptions {
                 max_file_size: 1024,
             },
@@ -357,7 +329,6 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
-                FormatterV1::new(),
                 DataStorageOptions {
                     max_file_size: 1024,
                 },
@@ -369,7 +340,7 @@ mod tests {
         let hint_row = hint_file.read_hint_row().unwrap();
 
         assert_eq!(key, hint_row.key);
-        assert_eq!(key.len() as u64, hint_row.key_size);
-        assert_eq!(pos.row_offset, hint_row.row_offset);
+        assert_eq!(key.len() as u64, hint_row.header.key_size);
+        assert_eq!(pos.row_offset, hint_row.header.row_offset);
     }
 }

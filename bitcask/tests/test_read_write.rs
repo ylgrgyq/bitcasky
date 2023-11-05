@@ -8,7 +8,6 @@ use bitcask_tests::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
 use test_log::test;
-use walkdir::WalkDir;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 10 * 1024,
@@ -141,14 +140,6 @@ fn test_delete_not_exists_key() {
 
     bc.delete(&"k3".into()).unwrap();
     assert_eq!(bc.get(&"k3".into()).unwrap(), None);
-
-    assert!(WalkDir::new(&dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .map(|e| e.metadata().unwrap())
-        .filter(|m| !m.is_dir())
-        .all(|meta| { meta.len() == 0 }));
 }
 
 #[test]

@@ -7,7 +7,6 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::database::formatter::FormatterV1;
 use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::fs::{self};
@@ -83,7 +82,7 @@ pub struct Bitcask {
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
     options: BitcaskOptions,
-    database: Database<FormatterV1>,
+    database: Database,
     merge_manager: MergeManager,
 }
 
@@ -118,7 +117,6 @@ impl Bitcask {
         let database = Database::open(
             directory,
             storage_id_generator,
-            FormatterV1::new(),
             options.get_database_options(),
         )?;
         let keydir = RwLock::new(KeyDir::new(&database)?);

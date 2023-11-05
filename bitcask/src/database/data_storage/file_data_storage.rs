@@ -8,10 +8,8 @@ use std::{
 };
 
 use crate::{
-    database::{
-        common::{RowMeta, RowToRead, RowToWrite, Value},
-        formatter::Formatter,
-    },
+    database::common::{RowToRead, Value},
+    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     fs::FileType,
     storage_id::StorageId,
 };
@@ -22,22 +20,22 @@ use super::{
 };
 
 #[derive(Debug)]
-pub struct FileDataStorage<F: Formatter> {
+pub struct FileDataStorage {
     database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
     capacity: u64,
     options: DataStorageOptions,
-    formatter: F,
+    formatter: BitcaskFormatter,
 }
 
-impl<F: Formatter> FileDataStorage<F> {
+impl FileDataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
         data_file: File,
         capacity: u64,
-        formatter: F,
+        formatter: BitcaskFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
@@ -51,11 +49,11 @@ impl<F: Formatter> FileDataStorage<F> {
     }
 
     fn do_read_row(&mut self) -> Result<(RowMeta, Bytes)> {
-        let mut header_buf = vec![0; self.formatter.header_size()];
+        let mut header_buf = vec![0; self.formatter.row_header_size()];
         self.data_file.read_exact(&mut header_buf)?;
         let header_bs = Bytes::from(header_buf);
 
-        let header = self.formatter.decode_row_header(header_bs)?;
+        let header = self.formatter.decode_row_header(header_bs);
 
         let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
         self.data_file.read_exact(&mut kv_buf)?;
@@ -66,7 +64,7 @@ impl<F: Formatter> FileDataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
+impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let data_to_write = self.formatter.encode_row(row);
         let value_offset = self.capacity;
@@ -79,14 +77,15 @@ impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
         })
     }
 
-    fn transit_to_readonly(mut self) -> Result<DataStorage<F>> {
+    fn transit_to_readonly(mut self) -> Result<DataStorage> {
         self.data_file.flush()?;
 
         let path = FileType::DataFile.get_path(&self.database_dir, Some(self.storage_id));
         let mut perms = std::fs::metadata(&path)?.permissions();
         perms.set_readonly(true);
         std::fs::set_permissions(path, perms)?;
-        self.data_file.seek(SeekFrom::Start(0))?;
+        self.data_file
+            .seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))?;
         let meta = self.data_file.metadata()?;
         DataStorage::open_by_file(
             &self.database_dir,
@@ -103,9 +102,9 @@ impl<F: Formatter> DataStorageWriter<F> for FileDataStorage<F> {
     }
 }
 
-impl<F: Formatter> DataStorageReader for FileDataStorage<F> {
+impl DataStorageReader for FileDataStorage {
     fn storage_size(&self) -> usize {
-        self.capacity as usize
+        self.capacity as usize - FILE_HEADER_SIZE
     }
 
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
@@ -141,21 +140,25 @@ impl<F: Formatter> DataStorageReader for FileDataStorage<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{database::formatter::FormatterV1, fs::create_file};
+    use crate::{
+        formatter::{initialize_new_file, FormatterV1},
+        fs::create_file,
+    };
 
     use super::*;
 
     use bitcask_tests::common::get_temporary_directory_path;
     use test_log::test;
 
-    fn get_file_storage(max_size: u64) -> DataStorage<FormatterV1> {
+    fn get_file_storage(max_size: u64) -> DataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
-        create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
+        initialize_new_file(&mut file).unwrap();
         let options = DataStorageOptions {
             max_file_size: max_size,
         };
-        DataStorage::open(&dir, 1, FormatterV1::new(), options).unwrap()
+        DataStorage::open(&dir, 1, options).unwrap()
     }
 
     #[test]
@@ -216,7 +219,9 @@ mod tests {
         storage.write_row(&row_to_write).unwrap();
 
         let mut storage = storage.transit_to_readonly().unwrap();
+
         let r = storage.read_next_row().unwrap().unwrap();
+
         assert_eq!(k1, r.key);
         assert_eq!(v1, r.value);
         let r = storage.read_next_row().unwrap().unwrap();

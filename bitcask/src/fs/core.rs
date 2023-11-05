@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
     io::Result,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use log::debug;
@@ -14,6 +14,7 @@ pub struct IdentifiedFile {
     pub file_type: FileType,
     pub file: File,
     pub storage_id: Option<StorageId>,
+    pub path: PathBuf,
 }
 
 pub fn check_directory_is_writable(base_dir: &Path) -> bool {
@@ -59,14 +60,15 @@ pub fn open_file<P: AsRef<Path>>(
 ) -> std::io::Result<IdentifiedFile> {
     let path = file_type.get_path(base_dir, storage_id);
     let file = if std::fs::metadata(&path)?.permissions().readonly() {
-        File::options().read(true).open(path)?
+        File::options().read(true).open(&path)?
     } else {
-        File::options().read(true).write(true).open(path)?
+        File::options().read(true).write(true).open(&path)?
     };
     Ok(IdentifiedFile {
         file_type,
         file,
         storage_id,
+        path,
     })
 }
 
@@ -189,6 +191,7 @@ mod tests {
                 file_type,
                 file,
                 storage_id,
+                path: file_path.to_path_buf(),
             });
         }
         let file_name = file_path

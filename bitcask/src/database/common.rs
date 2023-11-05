@@ -1,56 +1,6 @@
-use std::{
-    ops::Deref,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::ops::Deref;
 
-use crate::{error::BitcaskResult, storage_id::StorageId, utils::TOMBSTONE_VALUE};
-
-#[derive(Debug)]
-pub struct RowMeta {
-    pub timestamp: u64,
-    pub key_size: u64,
-    pub value_size: u64,
-}
-
-pub struct RowHeader {
-    pub crc: u32,
-    pub meta: RowMeta,
-}
-
-#[derive(Debug)]
-pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
-    pub meta: RowMeta,
-    pub key: &'a Vec<u8>,
-    pub value: V,
-}
-
-impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
-    pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
-        RowToWrite::new_with_timestamp(key, value, now)
-    }
-
-    pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
-        let key_size = key.len() as u64;
-        let value_size = value.len() as u64;
-        RowToWrite {
-            meta: RowMeta {
-                timestamp,
-                key_size,
-                value_size,
-            },
-            key,
-            value,
-        }
-    }
-}
-
-pub trait BitcaskDataFile {
-    fn read_value(&mut self, value_offset: u64, size: usize) -> BitcaskResult<Vec<u8>>;
-}
+use crate::{storage_id::StorageId, utils::TOMBSTONE_VALUE};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowLocation {

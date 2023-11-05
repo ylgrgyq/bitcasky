@@ -31,4 +31,5 @@ uuid = { version = "1.3.3", features = [
 test-log = "0.2.11"
 env_logger = "*"
 mockall = "0.11.4"
+assert_matches = "1.5.0"
 bitcask-tests = { version="0.1.0", path = "../bitcask-tests" }

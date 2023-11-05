@@ -4,17 +4,15 @@ use std::{
     sync::Arc,
 };
 
-use bytes::{Buf, Bytes};
+use bytes::Bytes;
 
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
 use crate::{
-    database::{
-        formatter::{Formatter, FormatterV1},
-        DataBaseOptions, Database, TimedValue,
-    },
+    database::{DataBaseOptions, Database, TimedValue},
     error::{BitcaskError, BitcaskResult},
+    formatter::{get_formatter_from_file, initialize_new_file, Formatter, MergeMeta},
     fs::{self, FileType},
     keydir::KeyDir,
     storage_id::{StorageId, StorageIdGenerator},
@@ -48,11 +46,7 @@ impl MergeManager {
         }
     }
 
-    pub fn merge<F: Formatter>(
-        &self,
-        database: &Database<F>,
-        keydir: &RwLock<KeyDir>,
-    ) -> BitcaskResult<()> {
+    pub fn merge(&self, database: &Database, keydir: &RwLock<KeyDir>) -> BitcaskResult<()> {
         let lock_ret = self.merge_lock.try_lock();
 
         if lock_ret.is_none() {
@@ -156,9 +150,9 @@ impl MergeManager {
         Ok(())
     }
 
-    fn flush_writing_file<F: Formatter>(
+    fn flush_writing_file(
         &self,
-        database: &Database<F>,
+        database: &Database,
         keydir: &RwLock<KeyDir>,
     ) -> BitcaskResult<(KeyDir, StorageId)> {
         // stop writing and switch the writing file to stable files
@@ -168,9 +162,9 @@ impl MergeManager {
         Ok((_kd.clone(), known_max_storage_id))
     }
 
-    fn write_merged_files<F: Formatter>(
+    fn write_merged_files(
         &self,
-        database: &Database<F>,
+        database: &Database,
         merge_file_dir: &Path,
         key_dir_to_write: &KeyDir,
         known_max_storage_id: StorageId,
@@ -186,7 +180,6 @@ impl MergeManager {
         let merge_db = Database::open(
             merge_file_dir,
             self.storage_id_generator.clone(),
-            FormatterV1::new(),
             self.options,
         )?;
 
@@ -330,25 +323,22 @@ fn purge_outdated_data_files(base_dir: &Path, max_storage_id: StorageId) -> Bitc
     Ok(())
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-struct MergeMeta {
-    pub known_max_storage_id: StorageId,
-}
-
 fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
     let mut merge_meta_file = fs::open_file(merge_file_dir, FileType::MergeMeta, None)?;
-    let mut buf = vec![0; 4];
+    let formatter = get_formatter_from_file(&mut merge_meta_file.file).map_err(|e| {
+        BitcaskError::MergeMetaFileCorrupted(e, merge_meta_file.path.display().to_string())
+    })?;
+
+    let mut buf = vec![0; formatter.merge_meta_size()];
     merge_meta_file.file.read_exact(&mut buf)?;
-    let mut bs = Bytes::from(buf);
-    let known_max_storage_id = bs.get_u32();
-    Ok(MergeMeta {
-        known_max_storage_id,
-    })
+    let bs = Bytes::from(buf);
+    Ok(formatter.decode_merge_meta(bs))
 }
 
 fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
     let mut merge_meta_file = fs::create_file(merge_file_dir, FileType::MergeMeta, None)?;
-    merge_meta_file.write_all(&merge_meta.known_max_storage_id.to_be_bytes())?;
+    let formater = initialize_new_file(&mut merge_meta_file)?;
+    merge_meta_file.write_all(&formater.encode_merge_meta(&merge_meta))?;
     Ok(())
 }
 
@@ -360,6 +350,7 @@ mod tests {
         database::database_tests_utils::{
             assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
         },
+        formatter::initialize_new_file,
         fs::FileType,
     };
 
@@ -373,7 +364,8 @@ mod tests {
     fn test_create_merge_file_dir() {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
+        let mut file = fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
+        initialize_new_file(&mut file).unwrap();
 
         create_merge_file_dir(&dir).unwrap();
 
@@ -395,9 +387,18 @@ mod tests {
         let dir_path = get_temporary_directory_path();
 
         let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap();
-        fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap();
+        initialize_new_file(
+            &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap(),
+        )
+        .unwrap();
+        initialize_new_file(
+            &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap(),
+        )
+        .unwrap();
+        initialize_new_file(
+            &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap(),
+        )
+        .unwrap();
 
         assert_eq!(
             vec![0, 1, 2,],
@@ -433,13 +434,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = Database::open(
-                &dir,
-                storage_id_generator.clone(),
-                FormatterV1::new(),
-                DEFAULT_OPTIONS,
-            )
-            .unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -458,13 +453,7 @@ mod tests {
             DEFAULT_OPTIONS,
         );
         merge_manager.recover_merge().unwrap();
-        let db = Database::open(
-            &dir,
-            storage_id_generator.clone(),
-            FormatterV1::new(),
-            DEFAULT_OPTIONS,
-        )
-        .unwrap();
+        let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(1, storage_id_generator.get_id());
         assert_eq!(0, db.get_storage_ids().stable_storage_ids.len());
         assert_rows_value(&db, &rows);
@@ -477,13 +466,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = Database::open(
-                &dir,
-                storage_id_generator.clone(),
-                FormatterV1::new(),
-                DEFAULT_OPTIONS,
-            )
-            .unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -496,7 +479,6 @@ mod tests {
             let db = Database::open(
                 &merge_file_dir,
                 storage_id_generator.clone(),
-                FormatterV1::new(),
                 DEFAULT_OPTIONS,
             )
             .unwrap();
@@ -518,13 +500,7 @@ mod tests {
             DEFAULT_OPTIONS,
         );
         merge_manager.recover_merge().unwrap();
-        let db = Database::open(
-            &dir,
-            storage_id_generator.clone(),
-            FormatterV1::new(),
-            DEFAULT_OPTIONS,
-        )
-        .unwrap();
+        let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(3, storage_id_generator.get_id());
         assert_eq!(0, db.get_storage_ids().stable_storage_ids.len());
         assert_rows_value(&db, &rows);
@@ -537,13 +513,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         {
-            let db = Database::open(
-                &dir,
-                storage_id_generator.clone(),
-                FormatterV1::new(),
-                DEFAULT_OPTIONS,
-            )
-            .unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -568,7 +538,6 @@ mod tests {
             let db = Database::open(
                 &merge_file_dir,
                 storage_id_generator.clone(),
-                FormatterV1::new(),
                 DEFAULT_OPTIONS,
             )
             .unwrap();
@@ -587,13 +556,7 @@ mod tests {
             DEFAULT_OPTIONS,
         );
         merge_manager.recover_merge().unwrap();
-        let db = Database::open(
-            &dir,
-            storage_id_generator.clone(),
-            FormatterV1::new(),
-            DEFAULT_OPTIONS,
-        )
-        .unwrap();
+        let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         assert_eq!(3, storage_id_generator.get_id());
         assert_eq!(0, db.get_storage_ids().stable_storage_ids.len());
         assert_rows_value(&db, &rows);
@@ -607,13 +570,7 @@ mod tests {
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
         let mut rows: Vec<TestingRow> = vec![];
         {
-            let db = Database::open(
-                &dir,
-                storage_id_generator.clone(),
-                FormatterV1::new(),
-                DEFAULT_OPTIONS,
-            )
-            .unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -630,7 +587,6 @@ mod tests {
             let db = Database::open(
                 &merge_file_dir,
                 storage_id_generator.clone(),
-                FormatterV1::new(),
                 DEFAULT_OPTIONS,
             )
             .unwrap();
@@ -659,13 +615,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::new());
-        let old_db = Database::open(
-            &dir,
-            storage_id_generator.clone(),
-            FormatterV1::new(),
-            DEFAULT_OPTIONS,
-        )
-        .unwrap();
+        let old_db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -673,13 +623,8 @@ mod tests {
         rows.append(&mut write_kvs_to_db(&old_db, kvs));
         {
             let merge_path = create_merge_file_dir(&dir).unwrap();
-            let db = Database::open(
-                &merge_path,
-                storage_id_generator.clone(),
-                FormatterV1::new(),
-                DEFAULT_OPTIONS,
-            )
-            .unwrap();
+            let db =
+                Database::open(&merge_path, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
                 TestingKV::new("k3", "hello world"),
                 TestingKV::new("k1", "value4"),
