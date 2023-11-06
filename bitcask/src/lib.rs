@@ -10,5 +10,6 @@ mod formatter;
 mod fs;
 mod keydir;
 mod merge;
+mod optimizer;
 mod storage_id;
 mod utils;
