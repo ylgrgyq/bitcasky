@@ -59,6 +59,7 @@ impl BitcaskOptions {
             storage_options: DataStorageOptions {
                 max_file_size: self.max_file_size,
             },
+            sync_interval_sec: 60,
         }
     }
 }

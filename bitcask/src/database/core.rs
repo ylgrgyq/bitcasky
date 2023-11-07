@@ -4,6 +4,8 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use dashmap::{mapref::one::RefMut, DashMap};
@@ -17,7 +19,7 @@ use crate::{
     storage_id::{StorageId, StorageIdGenerator},
     utils,
 };
-use log::{debug, error, info};
+use log::{debug, error, info, trace};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
@@ -58,16 +60,20 @@ pub struct StorageIds {
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub storage_options: DataStorageOptions,
+    /// How frequent can we flush data
+    pub sync_interval_sec: u64,
 }
 
 #[derive(Debug)]
 pub struct Database {
     pub database_dir: PathBuf,
     storage_id_generator: Arc<StorageIdGenerator>,
-    writing_storage: Mutex<DataStorage>,
+    writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
     options: DataBaseOptions,
     hint_file_writer: HintWriter,
+    /// Process that periodically flushes writing storage
+    sync_worker: Option<JoinHandle<()>>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -102,17 +108,24 @@ impl Database {
             m
         });
 
+        let writing_storage = Arc::new(Mutex::new(writing_storage));
         let db = Database {
-            writing_storage: Mutex::new(writing_storage),
+            writing_storage,
             storage_id_generator,
             database_dir,
             stable_storages,
             options,
             hint_file_writer,
+            sync_worker: None,
             is_error: Mutex::new(None),
         };
+
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
         Ok(db)
+    }
+
+    pub fn start(&self) {
+        self.sync_worker = Some(self.start_sync_worker(self.writing_storage.clone()));
     }
 
     pub fn get_database_dir(&self) -> &Path {
@@ -330,6 +343,20 @@ impl Database {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
         Ok(())
+    }
+
+    fn start_sync_worker(
+        &self,
+        database: Arc<Mutex<DataStorage>>,
+        // mut stop_receiver: oneshot::Receiver<()>,
+    ) -> JoinHandle<()> {
+        let receiver = crossbeam_channel::tick(Duration::from_secs(self.options.sync_interval_sec));
+        thread::spawn(move || loop {
+            let a = receiver.recv();
+            trace!("Attempting syncing");
+            let mut f = database.lock();
+            f.flush().unwrap();
+        })
     }
 
     fn do_flush_writing_file(
@@ -561,6 +588,7 @@ pub mod database_tests_utils {
         storage_options: DataStorageOptions {
             max_file_size: 1024,
         },
+        sync_interval_sec: 60,
     };
 
     pub struct TestingRow {
@@ -707,6 +735,7 @@ mod tests {
             storage_id_generator,
             DataBaseOptions {
                 storage_options: DataStorageOptions { max_file_size: 104 },
+                sync_interval_sec: 60,
             },
         )
         .unwrap();
