@@ -29,6 +29,8 @@ pub struct BitcaskOptions {
     pub max_key_size: usize,
     // maximum value size
     pub max_value_size: usize,
+    // How frequent can we flush data
+    pub sync_interval_sec: u64,
 }
 
 impl BitcaskOptions {
@@ -59,7 +61,7 @@ impl BitcaskOptions {
             storage_options: DataStorageOptions {
                 max_file_size: self.max_file_size,
             },
-            sync_interval_sec: 60,
+            sync_interval_sec: self.sync_interval_sec,
         }
     }
 }
@@ -71,6 +73,7 @@ impl Default for BitcaskOptions {
             max_file_size: 128 * 1024 * 1024,
             max_key_size: 64,
             max_value_size: 100 * 1024,
+            sync_interval_sec: 60,
         }
     }
 }

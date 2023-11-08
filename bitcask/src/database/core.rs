@@ -109,7 +109,7 @@ impl Database {
         });
 
         let writing_storage = Arc::new(Mutex::new(writing_storage));
-        let db = Database {
+        let mut db = Database {
             writing_storage,
             storage_id_generator,
             database_dir,
@@ -119,12 +119,13 @@ impl Database {
             sync_worker: None,
             is_error: Mutex::new(None),
         };
+        db.start();
 
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
         Ok(db)
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         self.sync_worker = Some(self.start_sync_worker(self.writing_storage.clone()));
     }
 
@@ -348,14 +349,18 @@ impl Database {
     fn start_sync_worker(
         &self,
         database: Arc<Mutex<DataStorage>>,
-        // mut stop_receiver: oneshot::Receiver<()>,
+        // receiver: Receiver<Instant>,
     ) -> JoinHandle<()> {
         let receiver = crossbeam_channel::tick(Duration::from_secs(self.options.sync_interval_sec));
         thread::spawn(move || loop {
-            let a = receiver.recv();
-            trace!("Attempting syncing");
-            let mut f = database.lock();
-            f.flush().unwrap();
+            while let Ok(_) = receiver.recv() {
+                trace!("Attempting syncing");
+                let mut f = database.lock();
+                if let Err(e) = f.flush() {
+                    error!(target: "Database", "flush database failed: {}", e);
+                }
+            }
+            info!(target: "Database", "sync worker done");
         })
     }
 
