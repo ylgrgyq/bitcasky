@@ -29,7 +29,7 @@ pub struct BitcaskOptions {
     pub max_key_size: usize,
     // maximum value size
     pub max_value_size: usize,
-    // How frequent can we flush data
+    // How frequent can we sync data to file. 0 to stop auto sync
     pub sync_interval_sec: u64,
 }
 

@@ -13,6 +13,7 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
     max_file_size: 10 * 1024,
     max_key_size: 64,
     max_value_size: 1024,
+    sync_interval_sec: 1,
 };
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {

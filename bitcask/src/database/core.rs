@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use dashmap::{mapref::one::RefMut, DashMap};
@@ -119,14 +119,13 @@ impl Database {
             sync_worker: None,
             is_error: Mutex::new(None),
         };
-        db.start();
+
+        if options.sync_interval_sec > 0 {
+            db.sync_worker = Some(db.start_sync_worker(db.writing_storage.clone()));
+        }
 
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
         Ok(db)
-    }
-
-    pub fn start(&mut self) {
-        self.sync_worker = Some(self.start_sync_worker(self.writing_storage.clone()));
     }
 
     pub fn get_database_dir(&self) -> &Path {
@@ -346,19 +345,22 @@ impl Database {
         Ok(())
     }
 
-    fn start_sync_worker(
-        &self,
-        database: Arc<Mutex<DataStorage>>,
-        // receiver: Receiver<Instant>,
-    ) -> JoinHandle<()> {
-        let receiver = crossbeam_channel::tick(Duration::from_secs(self.options.sync_interval_sec));
+    fn start_sync_worker(&self, datastorage: Arc<Mutex<DataStorage>>) -> JoinHandle<()> {
+        let sync_duration = Duration::from_secs(self.options.sync_interval_sec);
+        let receiver = crossbeam_channel::tick(sync_duration);
         thread::spawn(move || loop {
+            let mut last_sync = Instant::now();
             while let Ok(_) = receiver.recv() {
+                if last_sync.elapsed() < sync_duration {
+                    continue;
+                }
+
                 trace!("Attempting syncing");
-                let mut f = database.lock();
+                let mut f = datastorage.lock();
                 if let Err(e) = f.flush() {
                     error!(target: "Database", "flush database failed: {}", e);
                 }
+                last_sync = Instant::now();
             }
             info!(target: "Database", "sync worker done");
         })
