@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crossbeam_channel::{Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
@@ -19,7 +20,7 @@ use crate::{
     storage_id::{StorageId, StorageIdGenerator},
     utils,
 };
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
@@ -74,6 +75,7 @@ pub struct Database {
     hint_file_writer: HintWriter,
     /// Process that periodically flushes writing storage
     sync_worker: Option<JoinHandle<()>>,
+    sync_worker_stop: Option<Sender<()>>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -117,11 +119,18 @@ impl Database {
             options,
             hint_file_writer,
             sync_worker: None,
+            sync_worker_stop: None,
             is_error: Mutex::new(None),
         };
 
         if options.sync_interval_sec > 0 {
-            db.sync_worker = Some(db.start_sync_worker(db.writing_storage.clone()));
+            let (sender, receiver) = crossbeam_channel::bounded(1);
+            db.sync_worker_stop = Some(sender);
+            db.sync_worker = Some(start_sync_worker(
+                db.writing_storage.clone(),
+                receiver,
+                options.sync_interval_sec,
+            ));
         }
 
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
@@ -307,6 +316,7 @@ impl Database {
         Ok(())
     }
 
+    // Clear this database completely. Delete data physically and delete all data files.
     pub fn drop(&self) -> BitcaskResult<()> {
         debug!("Drop database called");
 
@@ -321,6 +331,7 @@ impl Database {
         }
         for storage_id in self.stable_storages.iter().map(|v| v.lock().storage_id()) {
             SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(storage_id))?;
+            SelfFs::delete_file(&self.database_dir, FileType::HintFile, Some(storage_id))?;
         }
         self.stable_storages.clear();
         Ok(())
@@ -343,27 +354,6 @@ impl Database {
             return Err(BitcaskError::DatabaseBroken(err.as_ref().unwrap().clone()));
         }
         Ok(())
-    }
-
-    fn start_sync_worker(&self, datastorage: Arc<Mutex<DataStorage>>) -> JoinHandle<()> {
-        let sync_duration = Duration::from_secs(self.options.sync_interval_sec);
-        let receiver = crossbeam_channel::tick(sync_duration);
-        thread::spawn(move || loop {
-            let mut last_sync = Instant::now();
-            while let Ok(_) = receiver.recv() {
-                if last_sync.elapsed() < sync_duration {
-                    continue;
-                }
-
-                trace!("Attempting syncing");
-                let mut f = datastorage.lock();
-                if let Err(e) = f.flush() {
-                    error!(target: "Database", "flush database failed: {}", e);
-                }
-                last_sync = Instant::now();
-            }
-            info!(target: "Database", "sync worker done");
-        })
     }
 
     fn do_flush_writing_file(
@@ -411,8 +401,52 @@ impl Drop for Database {
         if ret.is_err() {
             error!(target: "Database", "close database failed: {}", ret.err().unwrap())
         }
+
+        if let Some(sender) = self.sync_worker_stop.take() {
+            if let Err(_) = sender.send(()) {
+                warn!("Failed to stop sync worker.");
+            }
+        }
+
+        if let Some(handle) = self.sync_worker.take() {
+            if let Err(_) = handle.join() {
+                warn!(target: "Database", "wait sync worker done failed");
+            }
+        }
+
         info!(target: "Database", "database on directory: {:?} closed", self.database_dir)
     }
+}
+
+fn start_sync_worker(
+    datastorage: Arc<Mutex<DataStorage>>,
+    stop_channel: Receiver<()>,
+    sync_interval_sec: u64,
+) -> JoinHandle<()> {
+    let sync_duration = Duration::from_secs(sync_interval_sec);
+    let receiver = crossbeam_channel::tick(sync_duration);
+    thread::spawn(move || loop {
+        let mut last_sync = Instant::now();
+        crossbeam_channel::select! {
+            recv(stop_channel) -> _ => {
+                debug!("Stopping sync worker.");
+                return
+            }
+            recv(receiver) -> _ => {
+                if last_sync.elapsed() < sync_duration {
+                    continue;
+                }
+
+                trace!("Attempting syncing");
+                let mut f = datastorage.lock();
+                if let Err(e) = f.flush() {
+                    error!(target: "Database", "flush database failed: {}", e);
+                }
+                last_sync = Instant::now();
+            },
+        }
+        info!(target: "Database", "sync worker done");
+    })
 }
 
 pub struct DatabaseIter {
