@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{select, Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
@@ -74,8 +74,7 @@ pub struct Database {
     options: DataBaseOptions,
     hint_file_writer: HintWriter,
     /// Process that periodically flushes writing storage
-    sync_worker: Option<JoinHandle<()>>,
-    sync_worker_stop: Option<Sender<()>>,
+    sync_worker: Option<SyncWorker>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -119,16 +118,12 @@ impl Database {
             options,
             hint_file_writer,
             sync_worker: None,
-            sync_worker_stop: None,
             is_error: Mutex::new(None),
         };
 
         if options.sync_interval_sec > 0 {
-            let (sender, receiver) = crossbeam_channel::bounded(1);
-            db.sync_worker_stop = Some(sender);
-            db.sync_worker = Some(start_sync_worker(
+            db.sync_worker = Some(SyncWorker::start_sync_worker(
                 db.writing_storage.clone(),
-                receiver,
                 options.sync_interval_sec,
             ));
         }
@@ -310,12 +305,6 @@ impl Database {
         })
     }
 
-    pub fn close(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_storage.lock();
-        writing_file_ref.flush()?;
-        Ok(())
-    }
-
     // Clear this database completely. Delete data physically and delete all data files.
     pub fn drop(&self) -> BitcaskResult<()> {
         debug!("Drop database called");
@@ -397,56 +386,79 @@ impl Database {
 
 impl Drop for Database {
     fn drop(&mut self) {
-        let ret = self.close();
-        if ret.is_err() {
-            error!(target: "Database", "close database failed: {}", ret.err().unwrap())
+        let mut writing_file_ref = self.writing_storage.lock();
+        if let Err(e) = writing_file_ref.flush() {
+            warn!(target: "Database", "sync database failed: {}", e)
         }
 
-        if let Some(sender) = self.sync_worker_stop.take() {
-            if let Err(_) = sender.send(()) {
-                warn!("Failed to stop sync worker.");
-            }
-        }
-
-        if let Some(handle) = self.sync_worker.take() {
-            if let Err(_) = handle.join() {
-                warn!(target: "Database", "wait sync worker done failed");
-            }
+        if let Some(worker) = self.sync_worker.take() {
+            drop(worker);
         }
 
         info!(target: "Database", "database on directory: {:?} closed", self.database_dir)
     }
 }
 
-fn start_sync_worker(
-    datastorage: Arc<Mutex<DataStorage>>,
-    stop_channel: Receiver<()>,
-    sync_interval_sec: u64,
-) -> JoinHandle<()> {
-    let sync_duration = Duration::from_secs(sync_interval_sec);
-    let receiver = crossbeam_channel::tick(sync_duration);
-    thread::spawn(move || loop {
-        let mut last_sync = Instant::now();
-        crossbeam_channel::select! {
-            recv(stop_channel) -> _ => {
-                debug!("Stopping sync worker.");
-                return
-            }
-            recv(receiver) -> _ => {
-                if last_sync.elapsed() < sync_duration {
-                    continue;
-                }
+#[derive(Debug)]
+struct SyncWorker {
+    stop_sender: Sender<()>,
+    handle: Option<JoinHandle<()>>,
+}
 
-                trace!("Attempting syncing");
-                let mut f = datastorage.lock();
-                if let Err(e) = f.flush() {
-                    error!(target: "Database", "flush database failed: {}", e);
+impl SyncWorker {
+    fn start_sync_worker(
+        datastorage: Arc<Mutex<DataStorage>>,
+        sync_interval_sec: u64,
+    ) -> SyncWorker {
+        let channel = crossbeam_channel::bounded(1);
+        let stop_sender = channel.0;
+        let stop_receiver: Receiver<()> = channel.1;
+
+        let sync_duration = Duration::from_secs(sync_interval_sec);
+        let receiver = crossbeam_channel::tick(sync_duration);
+        let handle = thread::spawn(move || {
+            let mut last_sync = Instant::now();
+            loop {
+                select! {
+                    recv(stop_receiver) -> _ => {
+                        info!(target: "Database", "stopping sync worker");
+                        return
+                    }
+
+                    recv(receiver) -> _ => {
+                        if last_sync.elapsed() < sync_duration {
+                            continue;
+                        }
+
+                        trace!("Attempting syncing");
+                        let mut f = datastorage.lock();
+                        if let Err(e) = f.flush() {
+                            error!(target: "Database", "flush database failed: {}", e);
+                        }
+                        last_sync = Instant::now();
+                    },
                 }
-                last_sync = Instant::now();
-            },
+            }
+        });
+        SyncWorker {
+            stop_sender,
+            handle: Some(handle),
         }
-        info!(target: "Database", "sync worker done");
-    })
+    }
+}
+
+impl Drop for SyncWorker {
+    fn drop(&mut self) {
+        if self.stop_sender.send(()).is_err() {
+            warn!("Failed to stop sync worker.");
+        }
+
+        if let Some(handle) = self.handle.take() {
+            if handle.join().is_err() {
+                warn!(target: "Database", "wait sync worker done failed");
+            }
+        }
+    }
 }
 
 pub struct DatabaseIter {
