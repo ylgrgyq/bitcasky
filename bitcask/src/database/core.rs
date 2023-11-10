@@ -72,7 +72,7 @@ pub struct Database {
     writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
     options: DataBaseOptions,
-    hint_file_writer: HintWriter,
+    hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
     is_error: Mutex<Option<String>>,
@@ -95,7 +95,7 @@ impl Database {
             storage_id_generator.update_id(*id);
         }
 
-        let hint_file_writer = HintWriter::start(&database_dir, options.storage_options);
+        let hint_file_writer = Some(HintWriter::start(&database_dir, options.storage_options));
 
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
@@ -301,7 +301,11 @@ impl Database {
         Ok(DatabaseStats {
             number_of_data_files: self.stable_storages.len() + 1,
             total_data_size_in_bytes,
-            number_of_pending_hint_files: self.hint_file_writer.len(),
+            number_of_pending_hint_files: self
+                .hint_file_writer
+                .as_ref()
+                .map(|w| w.len())
+                .unwrap_or(0),
         })
     }
 
@@ -369,7 +373,9 @@ impl Database {
         let storage_id = stable_storage.storage_id();
         self.stable_storages
             .insert(storage_id, Mutex::new(stable_storage));
-        self.hint_file_writer.async_write_hint_file(storage_id);
+        self.hint_file_writer
+            .as_ref()
+            .and_then(|w| Some(w.async_write_hint_file(storage_id)));
         debug!(target: "Database", "writing file with id: {} flushed, new writing file with id: {} created", storage_id, next_storage_id);
         Ok(())
     }
@@ -393,6 +399,10 @@ impl Drop for Database {
 
         if let Some(worker) = self.sync_worker.take() {
             drop(worker);
+        }
+
+        if let Some(hint_w) = self.hint_file_writer.take() {
+            drop(hint_w);
         }
 
         info!(target: "Database", "database on directory: {:?} closed", self.database_dir)
