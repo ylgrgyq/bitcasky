@@ -9,14 +9,17 @@ use bytes::Bytes;
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
-use crate::{
-    database::{DataBaseOptions, Database, TimedValue},
-    error::{BitcaskError, BitcaskResult},
+use common::{
     formatter::{get_formatter_from_file, initialize_new_file, Formatter, MergeMeta},
     fs::{self, FileType},
-    keydir::KeyDir,
     storage_id::{StorageId, StorageIdGenerator},
-    utils::is_tombstone,
+    tombstone::is_tombstone,
+};
+use database::{DataBaseOptions, Database, TimedValue};
+
+use crate::{
+    error::{BitcaskError, BitcaskResult},
+    keydir::KeyDir,
 };
 
 const MERGE_FILES_DIRECTORY: &str = "Merge";
@@ -66,7 +69,11 @@ impl MergeManager {
             let kd = keydir.write();
             database.flush_writing_file()?;
             self.commit_merge(&storage_ids, known_max_storage_id)
-                .and_then(|storage_ids| database.reload_data_files(storage_ids))
+                .and_then(|storage_ids| {
+                    database
+                        .reload_data_files(storage_ids)
+                        .map_err(|e| BitcaskError::DatabaseError(e))
+                })
                 .map_err(|e| {
                     database.mark_db_error(e.to_string());
                     error!(target: "Bitcask", "database commit merge failed with error: {}", &e);
@@ -346,17 +353,70 @@ fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResu
 mod tests {
     use std::vec;
 
-    use crate::{
-        database::database_tests_utils::{
-            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
-        },
-        formatter::initialize_new_file,
-        fs::FileType,
-    };
+    use common::{formatter::initialize_new_file, fs::FileType};
+    use database::{DataStorageOptions, RowLocation};
 
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
+
+    pub const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
+        storage_options: DataStorageOptions {
+            max_file_size: 1024,
+        },
+        sync_interval_sec: 60,
+    };
+
+    pub struct TestingRow {
+        pub kv: TestingKV,
+        pub pos: RowLocation,
+    }
+
+    impl TestingRow {
+        pub fn new(kv: TestingKV, pos: RowLocation) -> Self {
+            TestingRow { kv, pos }
+        }
+    }
+
+    pub fn assert_row_value(db: &Database, expect: &TestingRow) {
+        let actual = db.read_value(&expect.pos).unwrap();
+        assert_eq!(*expect.kv.value(), *actual.value);
+    }
+
+    pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
+        let mut i = 0;
+        for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
+            let expect_row = expect_rows.get(i).unwrap();
+            assert_eq!(expect_row.kv.key(), actual_row.key);
+            assert_eq!(expect_row.kv.value(), actual_row.value);
+            assert_eq!(expect_row.pos, actual_row.row_location);
+            i += 1;
+        }
+        assert_eq!(expect_rows.len(), i);
+    }
+
+    pub fn assert_rows_value(db: &Database, expect: &Vec<TestingRow>) {
+        for row in expect {
+            assert_row_value(db, row);
+        }
+    }
+
+    pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
+        kvs.into_iter()
+            .map(|kv| {
+                let pos = db
+                    .write(&kv.key(), TimedValue::immortal_value(kv.value()))
+                    .unwrap();
+                TestingRow::new(
+                    kv,
+                    RowLocation {
+                        storage_id: pos.storage_id,
+                        row_offset: pos.row_offset,
+                    },
+                )
+            })
+            .collect::<Vec<TestingRow>>()
+    }
 
     const INSTANCE_ID: String = String::new();
 

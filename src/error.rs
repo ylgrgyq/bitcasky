@@ -1,6 +1,7 @@
+use database::DatabaseError;
 use thiserror::Error;
 
-use crate::formatter::FormatterError;
+use common::formatter::FormatterError;
 
 #[derive(Error, Debug)]
 pub enum BitcaskError {
@@ -29,7 +30,7 @@ pub enum BitcaskError {
     #[error("Unknown server error: {0}")]
     UnknownServerError(String),
     #[error(transparent)]
-    StorageError(#[from] crate::database::DataStorageError),
+    DatabaseError(#[from] DatabaseError),
 }
 
 pub type BitcaskResult<T> = Result<T, BitcaskError>;

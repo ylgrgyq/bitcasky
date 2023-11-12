@@ -4,10 +4,8 @@ use dashmap::{
     DashMap,
 };
 
-use crate::{
-    database::{Database, RowLocation},
-    error::BitcaskResult,
-};
+use crate::error::BitcaskResult;
+use database::{Database, RowLocation};
 
 #[derive(Clone, Debug)]
 pub struct KeyDir {

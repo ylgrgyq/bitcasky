@@ -1,25 +1,10 @@
 [package]
-name = "bitcask"
+name = "common"
 version = "0.1.0"
+
 edition = "2021"
 
-[[test]]
-name = "test_read_write"
-
-[[test]]
-name = "test_merge"
-
-[[bench]]
-name = "file_data_storage"
-harness = false
-
-[lib]
-bench = false
-
 [dependencies]
-common = { path = "lib/common" }
-database = { path = "lib/database" }
-
 crc = "3.0.0"
 walkdir = "2.3.2"
 bytes = "1.3.0"
@@ -46,9 +31,4 @@ criterion = "0.5"
 tempfile = "3.3.0"
 mockall = "0.11.4"
 assert_matches = "1.5.0"
-bitcask-tests = { version="0.1.0", path = "./lib/bitcask-tests" }
-
-[workspace]
-members = [
-  "lib/*",
-]
+bitcask-tests = { version="0.1.0", path = "../bitcask-tests" }

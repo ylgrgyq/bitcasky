@@ -11,16 +11,19 @@ use std::{
 use bytes::Bytes;
 use log::{debug, error, info, warn};
 
-use crate::{
-    database::data_storage::DataStorage,
-    error::{BitcaskError, BitcaskResult},
+use common::{
     formatter::{
         get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, RowHint,
         RowHintHeader,
     },
     fs::{self, FileType},
     storage_id::StorageId,
-    utils,
+    tombstone,
+};
+
+use crate::{
+    common::{DatabaseError, DatabaseResult},
+    data_storage::DataStorage,
 };
 use crossbeam_channel::{unbounded, Sender};
 
@@ -36,7 +39,7 @@ pub struct HintFile {
 }
 
 impl HintFile {
-    pub fn create(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
+    pub fn create(database_dir: &Path, storage_id: StorageId) -> DatabaseResult<Self> {
         let mut file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
         let formatter = initialize_new_file(&mut file)?;
         debug!(
@@ -53,7 +56,7 @@ impl HintFile {
     pub fn open_iterator(
         database_dir: &Path,
         storage_id: StorageId,
-    ) -> BitcaskResult<HintFileIterator> {
+    ) -> DatabaseResult<HintFileIterator> {
         let file = Self::open(database_dir, storage_id)?;
         debug!(
             target: DEFAULT_LOG_TARGET,
@@ -62,7 +65,7 @@ impl HintFile {
         Ok(HintFileIterator { file })
     }
 
-    pub fn write_hint_row(&mut self, hint: &RowHint) -> BitcaskResult<()> {
+    pub fn write_hint_row(&mut self, hint: &RowHint) -> DatabaseResult<()> {
         let data_to_write = self.formatter.encode_row_hint(hint);
         self.file.write_all(&data_to_write)?;
         debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}", 
@@ -70,7 +73,7 @@ impl HintFile {
         Ok(())
     }
 
-    pub fn read_hint_row(&mut self) -> BitcaskResult<RowHint> {
+    pub fn read_hint_row(&mut self) -> DatabaseResult<RowHint> {
         let mut header_buf = vec![0; self.formatter.row_hint_header_size()];
         self.file.read_exact(&mut header_buf)?;
 
@@ -87,10 +90,10 @@ impl HintFile {
         Ok(RowHint { header, key })
     }
 
-    fn open(database_dir: &Path, storage_id: StorageId) -> BitcaskResult<Self> {
+    fn open(database_dir: &Path, storage_id: StorageId) -> DatabaseResult<Self> {
         let mut file = fs::open_file(database_dir, FileType::HintFile, Some(storage_id))?;
         let formatter = get_formatter_from_file(&mut file.file).map_err(|e| {
-            BitcaskError::HintFileCorrupted(e, storage_id, database_dir.display().to_string())
+            DatabaseError::HintFileCorrupted(e, storage_id, database_dir.display().to_string())
         })?;
         Ok(HintFile {
             storage_id,
@@ -113,13 +116,13 @@ pub struct HintFileIterator {
 }
 
 impl Iterator for HintFileIterator {
-    type Item = BitcaskResult<RecoveredRow>;
+    type Item = DatabaseResult<RecoveredRow>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.file.read_hint_row() {
-            Err(BitcaskError::IoError(e)) => match e.kind() {
+            Err(DatabaseError::IoError(e)) => match e.kind() {
                 std::io::ErrorKind::UnexpectedEof => None,
-                _ => Some(Err(BitcaskError::IoError(e))),
+                _ => Some(Err(DatabaseError::IoError(e))),
             },
             r => Some(r.map(|h| RecoveredRow {
                 row_location: super::RowLocation {
@@ -182,7 +185,7 @@ impl HintWriter {
         database_dir: &Path,
         data_storage_id: StorageId,
         storage_options: DataStorageOptions,
-    ) -> BitcaskResult<()> {
+    ) -> DatabaseResult<()> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
         if stable_file_opt.is_empty() {
             info!(
@@ -198,7 +201,7 @@ impl HintWriter {
         for row in data_itr {
             match row {
                 Ok(r) => {
-                    if utils::is_tombstone(&r.value) {
+                    if tombstone::is_tombstone(&r.value) {
                         m.remove(&r.key);
                     } else {
                         m.insert(
@@ -214,7 +217,7 @@ impl HintWriter {
                         );
                     }
                 }
-                Err(e) => return Err(BitcaskError::StorageError(e)),
+                Err(e) => return Err(DatabaseError::StorageError(e)),
             }
         }
 
@@ -222,7 +225,7 @@ impl HintWriter {
         let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_storage_id)?;
         m.values()
             .map(|r| hint_file.write_hint_row(r))
-            .collect::<BitcaskResult<Vec<_>>>()?;
+            .collect::<DatabaseResult<Vec<_>>>()?;
         fs::move_file(
             FileType::HintFile,
             Some(data_storage_id),
@@ -267,7 +270,7 @@ pub fn clear_temp_hint_file_directory(database_dir: &Path) {
     }
 }
 
-fn create_hint_file_tmp_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
+fn create_hint_file_tmp_dir(base_dir: &Path) -> DatabaseResult<PathBuf> {
     let p = hint_file_tmp_dir(base_dir);
     fs::create_dir(p.as_path())?;
     Ok(p)
@@ -279,7 +282,8 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::{database::data_storage::DataStorageWriter, formatter::RowToWrite};
+    use crate::data_storage::DataStorageWriter;
+    use common::formatter::RowToWrite;
 
     use super::*;
     use test_log::test;

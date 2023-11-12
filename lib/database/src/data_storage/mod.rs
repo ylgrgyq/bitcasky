@@ -11,7 +11,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::{
+use common::{
     formatter::{
         self, get_formatter_from_file, BitcaskFormatter, Formatter, FormatterError, RowToWrite,
     },
@@ -78,6 +78,14 @@ enum DataStorageImpl {
 #[derive(Debug, Clone, Copy)]
 pub struct DataStorageOptions {
     pub max_file_size: u64,
+}
+
+impl Default for DataStorageOptions {
+    fn default() -> Self {
+        Self {
+            max_file_size: 512 * 1024 * 1024,
+        }
+    }
 }
 
 #[derive(Debug)]

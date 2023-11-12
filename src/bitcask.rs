@@ -12,13 +12,15 @@ use parking_lot::RwLock;
 use tokio::runtime::{self, Runtime};
 use uuid::Uuid;
 
-use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
-use crate::fs::{self};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
-use crate::storage_id::StorageIdGenerator;
-use crate::utils::is_tombstone;
+use common::{
+    fs::{self},
+    storage_id::StorageIdGenerator,
+    tombstone::is_tombstone,
+};
+use database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
@@ -237,7 +239,7 @@ impl Bitcask {
             if let Ok(row) = row_ret {
                 f(&row.key, &row.value);
             } else {
-                return Err(row_ret.unwrap_err());
+                return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
             }
         }
 
@@ -256,7 +258,7 @@ impl Bitcask {
             if let Ok(row) = row_ret {
                 acc = f(&row.key, &row.value, acc)?;
             } else {
-                return Err(row_ret.unwrap_err());
+                return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
             }
         }
         Ok(acc)
@@ -282,7 +284,7 @@ impl Bitcask {
         if let Err(e) = self.database.drop() {
             self.database
                 .mark_db_error(format!("drop database failed. {}", e));
-            return Err(e);
+            return Err(BitcaskError::DatabaseError(e));
         }
 
         kd.clear();
@@ -291,7 +293,7 @@ impl Bitcask {
 
     /// Flushes all buffers to disk ensuring all data is written
     pub fn sync(&self) -> BitcaskResult<()> {
-        self.database.sync()
+        Ok(self.database.sync()?)
     }
 
     /// Merges all datafiles in the database. Old keys are squashed and deleted keys removes.

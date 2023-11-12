@@ -7,12 +7,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    database::common::{RowToRead, Value},
+use common::{
     formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     fs::FileType,
     storage_id::StorageId,
 };
+
+use crate::common::{RowToRead, Value};
 
 use super::{
     DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, Result, RowLocation,
@@ -140,7 +141,7 @@ impl DataStorageReader for FileDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use common::{
         formatter::{initialize_new_file, FormatterV1},
         fs::create_file,
     };
