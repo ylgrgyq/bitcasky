@@ -200,7 +200,7 @@ mod tests {
         storage.write_row(&row_to_write).unwrap();
 
         assert_eq!(
-            FormatterV1::new().row_size(&row_to_write),
+            FormatterV1::default().row_size(&row_to_write),
             storage.storage_size()
         );
     }

@@ -116,7 +116,7 @@ impl Bitcask {
         validate_database_directory(directory)?;
 
         let id = Uuid::new_v4();
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let merge_manager = MergeManager::new(
             id.to_string(),
             directory,

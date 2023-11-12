@@ -72,7 +72,7 @@ impl MergeManager {
                 .and_then(|storage_ids| {
                     database
                         .reload_data_files(storage_ids)
-                        .map_err(|e| BitcaskError::DatabaseError(e))
+                        .map_err(BitcaskError::DatabaseError)
                 })
                 .map_err(|e| {
                     database.mark_db_error(e.to_string());
@@ -492,7 +492,7 @@ mod tests {
     fn test_recover_merge_with_only_merge_meta() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
             let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
@@ -524,7 +524,7 @@ mod tests {
     fn test_recover_merge_with_invalid_merge_meta() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
             let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
@@ -571,7 +571,7 @@ mod tests {
     #[test]
     fn test_recover_merge() {
         let dir = get_temporary_directory_path();
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
             let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn test_recover_merge_failed_with_unexpeded_error() {
         let dir = get_temporary_directory_path();
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let mut rows: Vec<TestingRow> = vec![];
         {
             let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
@@ -674,7 +674,7 @@ mod tests {
     fn test_load_merged_files() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let old_db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),

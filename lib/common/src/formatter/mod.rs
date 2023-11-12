@@ -202,7 +202,7 @@ pub fn initialize_new_file(file: &mut File) -> std::io::Result<BitcaskFormatter>
     file.write_all(&bs.freeze())?;
     file.flush()?;
 
-    Ok(BitcaskFormatter::V1(FormatterV1::new()))
+    Ok(BitcaskFormatter::V1(FormatterV1::default()))
 }
 
 pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
@@ -217,7 +217,7 @@ pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
 
     let formatter_version = file_header[3];
     if formatter_version == DEFAULT_FORMATTER_VERSION {
-        return Ok(BitcaskFormatter::V1(FormatterV1::new()));
+        return Ok(BitcaskFormatter::V1(FormatterV1::default()));
     }
 
     Err(FormatterError::UnknownFormatterVersion(formatter_version))

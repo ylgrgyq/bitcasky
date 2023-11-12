@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn test_read_write_writing_file() {
         let dir = get_temporary_directory_path();
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let db = Database::open(&dir, storage_id_generator, DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
@@ -742,7 +742,7 @@ mod tests {
     fn test_read_write_with_stable_files() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
@@ -768,7 +768,7 @@ mod tests {
     fn test_recovery() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
             let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
             let kvs = vec![
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_wrap_file() {
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let dir = get_temporary_directory_path();
         let db = Database::open(
             &dir,

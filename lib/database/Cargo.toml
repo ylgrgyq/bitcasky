@@ -4,6 +4,13 @@ version = "0.1.0"
 
 edition = "2021"
 
+[[bench]]
+name = "file_data_storage"
+harness = false
+
+[lib]
+bench = false
+
 [dependencies]
 common = { path = "../common" }
 

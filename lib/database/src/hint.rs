@@ -246,7 +246,6 @@ impl Drop for HintWriter {
                     "wait worker thread finish failed"
                 );
             }
-            info!("asdfasdfsdf");
         }
     }
 }

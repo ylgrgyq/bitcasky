@@ -83,7 +83,7 @@ pub struct DataStorageOptions {
 impl Default for DataStorageOptions {
     fn default() -> Self {
         Self {
-            max_file_size: 512 * 1024 * 1024,
+            max_file_size: 128 * 1024 * 1024,
         }
     }
 }
