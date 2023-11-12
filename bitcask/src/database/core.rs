@@ -4,8 +4,11 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
+use crossbeam_channel::{select, Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
@@ -17,7 +20,7 @@ use crate::{
     storage_id::{StorageId, StorageIdGenerator},
     utils,
 };
-use log::{debug, error, info};
+use log::{debug, error, info, trace, warn};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
@@ -58,16 +61,20 @@ pub struct StorageIds {
 #[derive(Debug, Clone, Copy)]
 pub struct DataBaseOptions {
     pub storage_options: DataStorageOptions,
+    /// How frequent can we flush data
+    pub sync_interval_sec: u64,
 }
 
 #[derive(Debug)]
 pub struct Database {
     pub database_dir: PathBuf,
     storage_id_generator: Arc<StorageIdGenerator>,
-    writing_storage: Mutex<DataStorage>,
+    writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
     options: DataBaseOptions,
-    hint_file_writer: HintWriter,
+    hint_file_writer: Option<HintWriter>,
+    /// Process that periodically flushes writing storage
+    sync_worker: Option<SyncWorker>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -88,7 +95,7 @@ impl Database {
             storage_id_generator.update_id(*id);
         }
 
-        let hint_file_writer = HintWriter::start(&database_dir, options.storage_options);
+        let hint_file_writer = Some(HintWriter::start(&database_dir, options.storage_options));
 
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
@@ -102,15 +109,25 @@ impl Database {
             m
         });
 
-        let db = Database {
-            writing_storage: Mutex::new(writing_storage),
+        let writing_storage = Arc::new(Mutex::new(writing_storage));
+        let mut db = Database {
+            writing_storage,
             storage_id_generator,
             database_dir,
             stable_storages,
             options,
             hint_file_writer,
+            sync_worker: None,
             is_error: Mutex::new(None),
         };
+
+        if options.sync_interval_sec > 0 {
+            db.sync_worker = Some(SyncWorker::start_sync_worker(
+                db.writing_storage.clone(),
+                options.sync_interval_sec,
+            ));
+        }
+
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
         Ok(db)
     }
@@ -284,16 +301,15 @@ impl Database {
         Ok(DatabaseStats {
             number_of_data_files: self.stable_storages.len() + 1,
             total_data_size_in_bytes,
-            number_of_pending_hint_files: self.hint_file_writer.len(),
+            number_of_pending_hint_files: self
+                .hint_file_writer
+                .as_ref()
+                .map(|w| w.len())
+                .unwrap_or(0),
         })
     }
 
-    pub fn close(&self) -> BitcaskResult<()> {
-        let mut writing_file_ref = self.writing_storage.lock();
-        writing_file_ref.flush()?;
-        Ok(())
-    }
-
+    // Clear this database completely. Delete data physically and delete all data files.
     pub fn drop(&self) -> BitcaskResult<()> {
         debug!("Drop database called");
 
@@ -308,6 +324,7 @@ impl Database {
         }
         for storage_id in self.stable_storages.iter().map(|v| v.lock().storage_id()) {
             SelfFs::delete_file(&self.database_dir, FileType::DataFile, Some(storage_id))?;
+            SelfFs::delete_file(&self.database_dir, FileType::HintFile, Some(storage_id))?;
         }
         self.stable_storages.clear();
         Ok(())
@@ -356,7 +373,9 @@ impl Database {
         let storage_id = stable_storage.storage_id();
         self.stable_storages
             .insert(storage_id, Mutex::new(stable_storage));
-        self.hint_file_writer.async_write_hint_file(storage_id);
+        if let Some(w) = self.hint_file_writer.as_ref() {
+            w.async_write_hint_file(storage_id);
+        }
         debug!(target: "Database", "writing file with id: {} flushed, new writing file with id: {} created", storage_id, next_storage_id);
         Ok(())
     }
@@ -373,11 +392,82 @@ impl Database {
 
 impl Drop for Database {
     fn drop(&mut self) {
-        let ret = self.close();
-        if ret.is_err() {
-            error!(target: "Database", "close database failed: {}", ret.err().unwrap())
+        let mut writing_file_ref = self.writing_storage.lock();
+        if let Err(e) = writing_file_ref.flush() {
+            warn!(target: "Database", "sync database failed: {}", e)
         }
+
+        if let Some(worker) = self.sync_worker.take() {
+            drop(worker);
+        }
+
+        if let Some(hint_w) = self.hint_file_writer.take() {
+            drop(hint_w);
+        }
+
         info!(target: "Database", "database on directory: {:?} closed", self.database_dir)
+    }
+}
+
+#[derive(Debug)]
+struct SyncWorker {
+    stop_sender: Sender<()>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl SyncWorker {
+    fn start_sync_worker(
+        datastorage: Arc<Mutex<DataStorage>>,
+        sync_interval_sec: u64,
+    ) -> SyncWorker {
+        let channel = crossbeam_channel::bounded(1);
+        let stop_sender = channel.0;
+        let stop_receiver: Receiver<()> = channel.1;
+
+        let sync_duration = Duration::from_secs(sync_interval_sec);
+        let receiver = crossbeam_channel::tick(sync_duration);
+        let handle = thread::spawn(move || {
+            let mut last_sync = Instant::now();
+            loop {
+                select! {
+                    recv(stop_receiver) -> _ => {
+                        info!(target: "Database", "stopping sync worker");
+                        return
+                    }
+
+                    recv(receiver) -> _ => {
+                        if last_sync.elapsed() < sync_duration {
+                            continue;
+                        }
+
+                        trace!("Attempting syncing");
+                        let mut f = datastorage.lock();
+                        if let Err(e) = f.flush() {
+                            error!(target: "Database", "flush database failed: {}", e);
+                        }
+                        last_sync = Instant::now();
+                    },
+                }
+            }
+        });
+        SyncWorker {
+            stop_sender,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for SyncWorker {
+    fn drop(&mut self) {
+        if self.stop_sender.send(()).is_err() {
+            warn!("Failed to stop sync worker.");
+        }
+
+        if let Some(handle) = self.handle.take() {
+            if handle.join().is_err() {
+                warn!(target: "Database", "wait sync worker done failed");
+            }
+        }
     }
 }
 
@@ -561,6 +651,7 @@ pub mod database_tests_utils {
         storage_options: DataStorageOptions {
             max_file_size: 1024,
         },
+        sync_interval_sec: 60,
     };
 
     pub struct TestingRow {
@@ -707,6 +798,7 @@ mod tests {
             storage_id_generator,
             DataBaseOptions {
                 storage_options: DataStorageOptions { max_file_size: 104 },
+                sync_interval_sec: 60,
             },
         )
         .unwrap();
