@@ -373,9 +373,9 @@ impl Database {
         let storage_id = stable_storage.storage_id();
         self.stable_storages
             .insert(storage_id, Mutex::new(stable_storage));
-        self.hint_file_writer
-            .as_ref()
-            .and_then(|w| Some(w.async_write_hint_file(storage_id)));
+        if let Some(w) = self.hint_file_writer.as_ref() {
+            w.async_write_hint_file(storage_id);
+        }
         debug!(target: "Database", "writing file with id: {} flushed, new writing file with id: {} created", storage_id, next_storage_id);
         Ok(())
     }
