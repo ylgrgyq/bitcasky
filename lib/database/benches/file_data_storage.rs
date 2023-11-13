@@ -1,3 +1,5 @@
+use std::{path::PathBuf, str::FromStr};
+
 use bitcask_tests::common::RandomTestingDataGenerator;
 use common::formatter::RowToWrite;
 use database::data_storage::{DataStorage, DataStorageOptions, DataStorageWriter};
@@ -35,13 +37,13 @@ fn write_row_benchmark(c: &mut Criterion) {
     let mut generator = RandomTestingDataGenerator::new(key_size, value_size, vec![]);
     let input = generator.generate_testing_kv();
 
-    let mut query_count = 0;
-    group.bench_function("write-small-row", |b| {
+    let mut write_count = 0;
+    group.bench_function("write-row", |b| {
         b.iter(|| {
             let k = input.key();
             let row = RowToWrite::new(&k, input.value());
             data_storage.write_row(&row).unwrap();
-            query_count += 1;
+            write_count += 1;
         })
     });
 
@@ -49,15 +51,53 @@ fn write_row_benchmark(c: &mut Criterion) {
 
     println!(
         "Execute {} times. Write {} data",
-        query_count,
-        format_bytes(query_count * (key_size + value_size)),
+        write_count,
+        format_bytes(write_count * (key_size + value_size)),
+    );
+}
+
+fn sync_write_row_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("write-row");
+
+    let dir = Builder::new().prefix("storage_dir").tempdir().unwrap();
+    let mut data_storage = DataStorage::new(
+        dir,
+        100,
+        DataStorageOptions {
+            max_file_size: u64::MAX,
+        },
+    )
+    .unwrap();
+
+    let key_size = 100;
+    let value_size = 100;
+    let mut generator = RandomTestingDataGenerator::new(key_size, value_size, vec![]);
+    let input = generator.generate_testing_kv();
+
+    let mut write_count = 0;
+    group.bench_function("sync-write-row", |b| {
+        b.iter(|| {
+            let k = input.key();
+            let row = RowToWrite::new(&k, input.value());
+            data_storage.write_row(&row).unwrap();
+            data_storage.flush().unwrap();
+            write_count += 1;
+        })
+    });
+
+    group.finish();
+
+    println!(
+        "Execute {} times. Write {} data",
+        write_count,
+        format_bytes(write_count * (key_size + value_size)),
     );
 }
 
 criterion_group! {
     name = benches;
     config = Criterion::default();
-    targets = write_row_benchmark
+    targets = write_row_benchmark, sync_write_row_benchmark
 }
 
 criterion_main!(benches);
