@@ -1,6 +1,5 @@
-mod file_data_storage;
-
-pub use self::file_data_storage::FileDataStorage;
+pub mod file_data_storage;
+pub mod mmap_data_storage;
 
 use log::{debug, error};
 use std::{
@@ -18,6 +17,8 @@ use common::{
     fs::{self, create_file, FileType},
     storage_id::StorageId,
 };
+
+use self::file_data_storage::FileDataStorage;
 
 use super::{
     common::{RowToRead, Value},
