@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr, vec};
+use std::vec;
 
 use bitcask_tests::common::RandomTestingDataGenerator;
 use common::formatter::RowToWrite;
