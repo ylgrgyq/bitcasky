@@ -1,8 +1,35 @@
+[package]
+name = "bitcask"
+version = "0.1.0"
+edition = "2021"
+
+[[test]]
+name = "test_read_write"
+
+[[test]]
+name = "test_merge"
+
+[dependencies]
+common = { path = "lib/common" }
+database = { path = "lib/database" }
+
+bytes = "1.3.0"
+thiserror = "1.0.38"
+dashmap = "5.4.0"
+log = "0.4.17"
+parking_lot = { version = "0.12.1" }
+uuid = { version = "1.3.3", features = [
+    "v4",                # Lets you generate random UUIDs
+    "fast-rng",          # Use a faster (but still sufficiently random) RNG
+    "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
+]}
+
+[dev-dependencies]
+test-log = "0.2.11"
+env_logger = "*"
+bitcask-tests = { version="0.1.0", path = "./lib/bitcask-tests" }
+
 [workspace]
-
 members = [
-  "bitcask",
-
-  # Internal
-  "bitcask-tests",
+  "lib/*",
 ]

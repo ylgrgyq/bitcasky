@@ -1,6 +1,9 @@
+use common::formatter::FormatterError;
+use common::{storage_id::StorageId, tombstone::TOMBSTONE_VALUE};
 use std::ops::Deref;
+use thiserror::Error;
 
-use crate::{storage_id::StorageId, utils::TOMBSTONE_VALUE};
+use crate::DataStorageError;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowLocation {
@@ -68,3 +71,21 @@ pub struct RecoveredRow {
     pub key: Vec<u8>,
     pub is_tombstone: bool,
 }
+
+#[derive(Error, Debug)]
+pub enum DatabaseError {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error("Permission Denied: \"{0}\"")]
+    PermissionDenied(String),
+    #[error("Database is broken due to previos unrecoverable error: {0}.")]
+    DatabaseBroken(String),
+    #[error("Hint file with file id {1} under path {2} corrupted")]
+    HintFileCorrupted(#[source] FormatterError, u32, String),
+    #[error("Read non-existent file with id {0}")]
+    TargetFileIdNotFound(u32),
+    #[error(transparent)]
+    StorageError(#[from] DataStorageError),
+}
+
+pub type DatabaseResult<T> = Result<T, DatabaseError>;

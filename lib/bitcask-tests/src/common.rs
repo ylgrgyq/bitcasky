@@ -39,6 +39,7 @@ impl TestingKV {
 
 #[derive(Clone)]
 pub enum TestingOperator {
+    NONE,
     DELETE,
     PUT,
     MERGE,
@@ -152,6 +153,9 @@ impl RandomTestingDataGenerator {
     }
 
     pub fn generate_write_operator(&mut self) -> TestingOperator {
+        if self.candidate_operators.is_empty() {
+            return TestingOperator::NONE;
+        }
         let inx = self.rng.next_u64() % self.candidate_operators.len() as u64;
         self.candidate_operators[inx as usize].clone()
     }

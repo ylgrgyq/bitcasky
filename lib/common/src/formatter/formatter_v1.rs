@@ -24,14 +24,10 @@ const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SI
 
 const MERGE_META_FILE_SIZE: usize = 4;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct FormatterV1 {}
 
 impl FormatterV1 {
-    pub fn new() -> FormatterV1 {
-        FormatterV1 {}
-    }
-
     fn gen_crc<V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();

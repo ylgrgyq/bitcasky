@@ -3,14 +3,12 @@ use std::{
     path::Path,
 };
 
-use crate::error::BitcaskResult;
-
 use super::FileType;
 
 use fs4::FileExt;
 use log::error;
 
-pub fn lock_directory(base_dir: &Path) -> BitcaskResult<Option<File>> {
+pub fn lock_directory(base_dir: &Path) -> std::io::Result<Option<File>> {
     fs::create_dir_all(base_dir)?;
     let p = FileType::LockFile.get_path(base_dir, None);
     let file = File::options()

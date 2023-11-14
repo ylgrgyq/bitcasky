@@ -11,10 +11,6 @@ pub struct StorageIdGenerator {
 }
 
 impl StorageIdGenerator {
-    pub fn new() -> StorageIdGenerator {
-        StorageIdGenerator { id: Mutex::new(0) }
-    }
-
     pub fn generate_next_id(&self) -> StorageId {
         let mut id = self.id.lock();
         let next_id = id.add(1);
@@ -37,6 +33,12 @@ impl StorageIdGenerator {
     }
 }
 
+impl Default for StorageIdGenerator {
+    fn default() -> Self {
+        StorageIdGenerator { id: Mutex::new(0) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,7 +46,7 @@ mod tests {
 
     #[test]
     fn test_generate_id() {
-        let id_gen = StorageIdGenerator::new();
+        let id_gen = StorageIdGenerator::default();
         assert_eq!(1, id_gen.generate_next_id());
         assert_eq!(2, id_gen.generate_next_id());
         assert_eq!(3, id_gen.generate_next_id());
@@ -53,7 +55,7 @@ mod tests {
 
     #[test]
     fn test_update_storage_id() {
-        let id_gen = StorageIdGenerator::new();
+        let id_gen = StorageIdGenerator::default();
         assert_eq!(1, id_gen.generate_next_id());
         id_gen.update_id(10);
         assert_eq!(11, id_gen.generate_next_id());

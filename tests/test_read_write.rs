@@ -22,6 +22,7 @@ fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
             TestingOperator::PUT => bc.put(op.key(), op.value()).unwrap(),
             TestingOperator::DELETE => bc.delete(&op.key()).unwrap(),
             TestingOperator::MERGE => bc.merge().unwrap(),
+            TestingOperator::NONE => {}
         }
     }
 }

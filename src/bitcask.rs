@@ -2,23 +2,20 @@ use std::fs::File;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
-use std::{
-    io,
-    sync::atomic::{AtomicUsize, Ordering},
-};
 
 use log::{debug, error};
 use parking_lot::RwLock;
-use tokio::runtime::{self, Runtime};
 use uuid::Uuid;
 
-use crate::database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 use crate::error::{BitcaskError, BitcaskResult};
-use crate::fs::{self};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
-use crate::storage_id::StorageIdGenerator;
-use crate::utils::is_tombstone;
+use common::{
+    fs::{self},
+    storage_id::StorageIdGenerator,
+    tombstone::is_tombstone,
+};
+use database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
@@ -114,7 +111,7 @@ impl Bitcask {
         validate_database_directory(directory)?;
 
         let id = Uuid::new_v4();
-        let storage_id_generator = Arc::new(StorageIdGenerator::new());
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let merge_manager = MergeManager::new(
             id.to_string(),
             directory,
@@ -237,7 +234,7 @@ impl Bitcask {
             if let Ok(row) = row_ret {
                 f(&row.key, &row.value);
             } else {
-                return Err(row_ret.unwrap_err());
+                return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
             }
         }
 
@@ -256,7 +253,7 @@ impl Bitcask {
             if let Ok(row) = row_ret {
                 acc = f(&row.key, &row.value, acc)?;
             } else {
-                return Err(row_ret.unwrap_err());
+                return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
             }
         }
         Ok(acc)
@@ -282,7 +279,7 @@ impl Bitcask {
         if let Err(e) = self.database.drop() {
             self.database
                 .mark_db_error(format!("drop database failed. {}", e));
-            return Err(e);
+            return Err(BitcaskError::DatabaseError(e));
         }
 
         kd.clear();
@@ -291,7 +288,7 @@ impl Bitcask {
 
     /// Flushes all buffers to disk ensuring all data is written
     pub fn sync(&self) -> BitcaskResult<()> {
-        self.database.sync()
+        Ok(self.database.sync()?)
     }
 
     /// Merges all datafiles in the database. Old keys are squashed and deleted keys removes.
@@ -333,22 +330,4 @@ fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
         )));
     }
     Ok(())
-}
-
-pub fn create_optimization_runtime(max_optimization_threads: usize) -> io::Result<Runtime> {
-    let mut optimize_runtime_builder = runtime::Builder::new_multi_thread();
-
-    optimize_runtime_builder
-        .enable_time()
-        .thread_name_fn(move || {
-            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
-            let optimizer_id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
-            format!("optimize-{optimizer_id}")
-        });
-
-    if max_optimization_threads > 0 {
-        // panics if val is not larger than 0.
-        optimize_runtime_builder.max_blocking_threads(max_optimization_threads);
-    }
-    optimize_runtime_builder.build()
 }
