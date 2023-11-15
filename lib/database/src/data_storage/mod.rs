@@ -11,10 +11,11 @@ use std::{
 use thiserror::Error;
 
 use common::{
+    create_file,
     formatter::{
         self, get_formatter_from_file, BitcaskFormatter, Formatter, FormatterError, RowToWrite,
     },
-    fs::{self, create_file, FileType},
+    fs::{self, FileType},
     storage_id::StorageId,
 };
 
@@ -122,9 +123,14 @@ impl DataStorage {
         options: DataStorageOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
-        let mut data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
         let formatter = BitcaskFormatter::default();
-        formatter::initialize_new_file(&mut data_file, formatter.version())?;
+        let data_file = create_file(
+            &path,
+            FileType::DataFile,
+            Some(storage_id),
+            &formatter,
+            options.init_data_file_capacity,
+        )?;
 
         debug!(
             "Create storage under path: {:?} with storage id: {}",
