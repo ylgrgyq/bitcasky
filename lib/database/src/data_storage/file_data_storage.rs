@@ -155,7 +155,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
-        initialize_new_file(&mut file).unwrap();
+        initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
         let options = DataStorageOptions {
             max_file_size: max_size,
         };

@@ -41,7 +41,8 @@ pub struct HintFile {
 impl HintFile {
     pub fn create(database_dir: &Path, storage_id: StorageId) -> DatabaseResult<Self> {
         let mut file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
-        let formatter = initialize_new_file(&mut file)?;
+        let formatter = BitcaskFormatter::default();
+        initialize_new_file(&mut file, formatter.version())?;
         debug!(
             target: DEFAULT_LOG_TARGET,
             "create hint file with id: {}", storage_id

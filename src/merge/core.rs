@@ -10,7 +10,9 @@ use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
 use common::{
-    formatter::{get_formatter_from_file, initialize_new_file, Formatter, MergeMeta},
+    formatter::{
+        get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, MergeMeta,
+    },
     fs::{self, FileType},
     storage_id::{StorageId, StorageIdGenerator},
     tombstone::is_tombstone,
@@ -344,7 +346,8 @@ fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
 
 fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
     let mut merge_meta_file = fs::create_file(merge_file_dir, FileType::MergeMeta, None)?;
-    let formater = initialize_new_file(&mut merge_meta_file)?;
+    let formater = BitcaskFormatter::default();
+    initialize_new_file(&mut merge_meta_file, formater.version())?;
     merge_meta_file.write_all(&formater.encode_merge_meta(&merge_meta))?;
     Ok(())
 }
@@ -353,7 +356,10 @@ fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResu
 mod tests {
     use std::vec;
 
-    use common::{formatter::initialize_new_file, fs::FileType};
+    use common::{
+        formatter::{initialize_new_file, BitcaskFormatter},
+        fs::FileType,
+    };
     use database::{DataStorageOptions, RowLocation};
 
     use super::*;
@@ -425,7 +431,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
         let mut file = fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
-        initialize_new_file(&mut file).unwrap();
+        initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
 
         create_merge_file_dir(&dir).unwrap();
 
@@ -449,14 +455,17 @@ mod tests {
         let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
         initialize_new_file(
             &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap(),
+            BitcaskFormatter::default().version(),
         )
         .unwrap();
         initialize_new_file(
             &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap(),
+            BitcaskFormatter::default().version(),
         )
         .unwrap();
         initialize_new_file(
             &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap(),
+            BitcaskFormatter::default().version(),
         )
         .unwrap();
 

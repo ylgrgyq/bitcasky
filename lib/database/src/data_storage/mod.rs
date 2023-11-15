@@ -107,7 +107,8 @@ impl DataStorage {
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
-        let formatter = formatter::initialize_new_file(&mut data_file)?;
+        let formatter = BitcaskFormatter::default();
+        formatter::initialize_new_file(&mut data_file, formatter.version())?;
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
