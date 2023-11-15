@@ -2,6 +2,7 @@ use std::fs::File;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use log::{debug, error};
 use parking_lot::RwLock;
@@ -20,19 +21,69 @@ use database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, Tim
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
-    // maximum datafile size
-    pub max_file_size: u64,
-    // maximum key size
+    // maximum data file size, default: 128 MB
+    pub max_data_file_size: usize,
+    // data file initial capacity, default: 1 MB
+    pub init_data_file_capacity: usize,
+    // maximum key size, default: 1 KB
     pub max_key_size: usize,
-    // maximum value size
+    // maximum value size, default: 100 KB
     pub max_value_size: usize,
-    // How frequent can we sync data to file. 0 to stop auto sync
-    pub sync_interval_sec: u64,
+    // How frequent can we sync data to file. 0 to stop auto sync. default: 1 min
+    pub sync_interval: Duration,
+}
+
+/// Default Bitcask Options
+impl Default for BitcaskOptions {
+    fn default() -> Self {
+        Self {
+            max_data_file_size: 128 * 1024 * 1024,
+            init_data_file_capacity: 1024 * 1024,
+            max_key_size: 1024,
+            max_value_size: 100 * 1024,
+            sync_interval: Duration::from_secs(60),
+        }
+    }
 }
 
 impl BitcaskOptions {
+    pub fn max_data_file_size(mut self, size: usize) -> BitcaskOptions {
+        assert!(size > 0);
+        self.max_data_file_size = size;
+        self
+    }
+
+    pub fn init_data_file_capacity(mut self, capacity: usize) -> BitcaskOptions {
+        assert!(capacity > 0);
+        self.init_data_file_capacity = capacity;
+        self
+    }
+
+    pub fn max_key_size(mut self, size: usize) -> BitcaskOptions {
+        assert!(size > 0);
+        self.max_key_size = size;
+        self
+    }
+
+    pub fn max_value_size(mut self, size: usize) -> BitcaskOptions {
+        assert!(size > 0);
+        self.max_value_size = size;
+        self
+    }
+
+    pub fn sync_interval(mut self, interval: Duration) -> BitcaskOptions {
+        self.sync_interval = interval;
+        self
+    }
+
     fn validate(&self) -> Option<BitcaskError> {
-        if self.max_file_size == 0 {
+        if self.max_data_file_size == 0 {
+            return Some(BitcaskError::InvalidParameter(
+                "max_file_size".into(),
+                "need a positive value".into(),
+            ));
+        }
+        if self.init_data_file_capacity == 0 {
             return Some(BitcaskError::InvalidParameter(
                 "max_file_size".into(),
                 "need a positive value".into(),
@@ -56,21 +107,10 @@ impl BitcaskOptions {
     fn get_database_options(&self) -> DataBaseOptions {
         DataBaseOptions {
             storage_options: DataStorageOptions {
-                max_file_size: self.max_file_size,
+                max_data_file_size: self.max_data_file_size,
+                init_data_file_capacity: self.init_data_file_capacity,
             },
-            sync_interval_sec: self.sync_interval_sec,
-        }
-    }
-}
-
-/// Default Bitcask Options
-impl Default for BitcaskOptions {
-    fn default() -> Self {
-        Self {
-            max_file_size: 128 * 1024 * 1024,
-            max_key_size: 64,
-            max_value_size: 100 * 1024,
-            sync_interval_sec: 60,
+            sync_interval_sec: self.sync_interval.as_secs(),
         }
     }
 }

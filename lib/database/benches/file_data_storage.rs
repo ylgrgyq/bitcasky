@@ -15,7 +15,8 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
         dir,
         100,
         DataStorageOptions {
-            max_file_size: u64::MAX,
+            max_data_file_size: usize::MAX,
+            init_data_file_capacity: 100,
         },
     )
     .unwrap()

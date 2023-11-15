@@ -653,7 +653,8 @@ pub mod database_tests_utils {
 
     pub const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
         storage_options: DataStorageOptions {
-            max_file_size: 1024,
+            max_data_file_size: 1024,
+            init_data_file_capacity: 100,
         },
         sync_interval_sec: 60,
     };
@@ -801,7 +802,10 @@ mod tests {
             &dir,
             storage_id_generator,
             DataBaseOptions {
-                storage_options: DataStorageOptions { max_file_size: 104 },
+                storage_options: DataStorageOptions {
+                    max_data_file_size: 104,
+                    init_data_file_capacity: 100,
+                },
                 sync_interval_sec: 60,
             },
         )

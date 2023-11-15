@@ -78,14 +78,30 @@ enum DataStorageImpl {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DataStorageOptions {
-    pub max_file_size: u64,
+    pub max_data_file_size: usize,
+    pub init_data_file_capacity: usize,
 }
 
 impl Default for DataStorageOptions {
     fn default() -> Self {
         Self {
-            max_file_size: 128 * 1024 * 1024,
+            max_data_file_size: 128 * 1024 * 1024,
+            init_data_file_capacity: 1024 * 1024,
         }
+    }
+}
+
+impl DataStorageOptions {
+    pub fn max_data_file_size(mut self, size: usize) -> DataStorageOptions {
+        assert!(size > 0);
+        self.max_data_file_size = size;
+        self
+    }
+
+    pub fn init_data_file_capacity(mut self, capacity: usize) -> DataStorageOptions {
+        assert!(capacity > 0);
+        self.init_data_file_capacity = capacity;
+        self
     }
 }
 
@@ -109,6 +125,7 @@ impl DataStorage {
         let mut data_file = create_file(&path, FileType::DataFile, Some(storage_id))?;
         let formatter = BitcaskFormatter::default();
         formatter::initialize_new_file(&mut data_file, formatter.version())?;
+
         debug!(
             "Create storage under path: {:?} with storage id: {}",
             &path, storage_id
@@ -177,7 +194,7 @@ impl DataStorage {
 
     pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         let row_size = self.formatter.row_size(row);
-        (row_size + self.storage_size()) as u64 > self.options.max_file_size
+        (row_size + self.storage_size()) > self.options.max_data_file_size
     }
 
     fn open_by_file(

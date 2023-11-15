@@ -151,13 +151,14 @@ mod tests {
     use bitcask_tests::common::get_temporary_directory_path;
     use test_log::test;
 
-    fn get_file_storage(max_size: u64) -> DataStorage {
+    fn get_file_storage(max_size: usize) -> DataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
         initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
         let options = DataStorageOptions {
-            max_file_size: max_size,
+            max_data_file_size: max_size,
+            init_data_file_capacity: max_size,
         };
         DataStorage::open(&dir, 1, options).unwrap()
     }

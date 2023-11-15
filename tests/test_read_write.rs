@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use bitcask::{
     bitcask::{Bitcask, BitcaskOptions},
@@ -10,10 +10,11 @@ use bitcask_tests::common::{
 use test_log::test;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-    max_file_size: 10 * 1024,
+    max_data_file_size: 10 * 1024,
     max_key_size: 64,
     max_value_size: 1024,
-    sync_interval_sec: 1,
+    sync_interval: Duration::from_secs(1),
+    init_data_file_capacity: 100,
 };
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {

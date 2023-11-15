@@ -320,7 +320,8 @@ mod tests {
             &dir,
             storage_id,
             DataStorageOptions {
-                max_file_size: 1024,
+                max_data_file_size: 1024,
+                init_data_file_capacity: 100,
             },
         )
         .unwrap();
@@ -335,7 +336,8 @@ mod tests {
             let writer = HintWriter::start(
                 &dir,
                 DataStorageOptions {
-                    max_file_size: 1024,
+                    max_data_file_size: 1024,
+                    init_data_file_capacity: 100,
                 },
             );
             writer.async_write_hint_file(storage_id);
