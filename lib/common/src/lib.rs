@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -75,9 +75,49 @@ pub fn create_file<P: AsRef<Path>>(
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
-        .create(true)
+        .create(false)
         .open(&path)?;
     file.seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))?;
 
     Ok(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use crate::formatter::get_formatter_from_file;
+
+    use super::*;
+
+    use bitcask_tests::common::get_temporary_directory_path;
+    use bytes::{Buf, BufMut, Bytes, BytesMut};
+    use test_log::test;
+
+    #[test]
+    fn test_create_file() {
+        let dir = get_temporary_directory_path();
+        let storage_id = 1;
+        let formatter = BitcaskFormatter::default();
+        let mut file =
+            create_file(&dir, FileType::DataFile, Some(storage_id), &formatter, 100).unwrap();
+
+        let mut bs = BytesMut::with_capacity(4);
+        bs.put_u32(101);
+
+        file.write_all(&bs.freeze()).unwrap();
+        file.flush().unwrap();
+
+        let mut reopen_file = fs::open_file(dir, FileType::DataFile, Some(storage_id))
+            .unwrap()
+            .file;
+        assert_eq!(
+            formatter,
+            get_formatter_from_file(&mut reopen_file).unwrap()
+        );
+
+        let mut buf = vec![0; 4];
+        reopen_file.read_exact(&mut buf).unwrap();
+        assert_eq!(101, Bytes::from(buf).get_u32());
+    }
 }
