@@ -70,7 +70,7 @@ impl FileDataStorage {
         Ok((header.meta, kv_bs))
     }
 
-    pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
+    fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         let row_size = self.formatter.row_size(row);
         (row_size + self.write_offset as usize) > self.options.max_data_file_size
     }
