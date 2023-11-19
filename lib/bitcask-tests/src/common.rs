@@ -1,7 +1,7 @@
 use rand::{rngs::ThreadRng, RngCore};
 use std::{collections::HashMap, path::PathBuf};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TestingKV {
     key: Vec<u8>,
     value: Vec<u8>,

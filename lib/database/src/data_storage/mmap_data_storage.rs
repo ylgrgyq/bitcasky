@@ -50,10 +50,6 @@ impl DataStorageWriter for MmapDataStorage {
 }
 
 impl DataStorageReader for MmapDataStorage {
-    fn storage_size(&self) -> usize {
-        todo!()
-    }
-
     fn read_value(
         &mut self,
         row_offset: u64,

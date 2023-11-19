@@ -1,10 +1,9 @@
 pub mod file_data_storage;
 pub mod mmap_data_storage;
 
-use log::{debug, error};
+use log::{debug, error, info};
 use std::{
     fs::{File, Metadata},
-    io::{Seek, SeekFrom},
     ops::Deref,
     path::{Path, PathBuf},
 };
@@ -13,7 +12,8 @@ use thiserror::Error;
 use common::{
     create_file,
     formatter::{
-        self, get_formatter_from_file, BitcaskFormatter, Formatter, FormatterError, RowToWrite,
+        self, get_formatter_from_file, BitcaskFormatter, FormatterError, RowToWrite,
+        FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
     storage_id::StorageId,
@@ -45,10 +45,6 @@ pub enum DataStorageError {
     IoError(#[from] std::io::Error),
     #[error("Got IO Error: {0}")]
     DataStorageFormatter(#[from] FormatterError),
-    #[error("Crc check failed on reading value with file id: {0}, offset: {1}. expect crc is: {2}, actual crc is: {3}")]
-    CrcCheckFailed(u32, u64, u32, u32),
-    #[error("Failed to write file header for storage with id: {1}")]
-    WriteFileHeaderError(#[source] FormatterError, StorageId),
     #[error("Failed to read file header for storage with id: {1}")]
     ReadFileHeaderError(#[source] FormatterError, StorageId),
 }
@@ -64,12 +60,10 @@ pub trait DataStorageWriter {
 }
 
 pub trait DataStorageReader {
-    /// Total size in bytes of this storage
-    fn storage_size(&self) -> usize;
-
     /// Read value from this storage at row_offset
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>>;
 
+    /// Read next value from this storage
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 }
 #[derive(Debug)]
@@ -112,8 +106,8 @@ pub struct DataStorage {
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
     readonly: bool,
-    formatter: BitcaskFormatter,
     options: DataStorageOptions,
+    dirty: bool,
 }
 
 impl DataStorage {
@@ -138,7 +132,15 @@ impl DataStorage {
         );
         let meta = data_file.metadata()?;
 
-        DataStorage::open_by_file(&path, storage_id, data_file, meta, formatter, options)
+        DataStorage::open_by_file(
+            &path,
+            storage_id,
+            data_file,
+            meta,
+            FILE_HEADER_SIZE as u64,
+            formatter,
+            options,
+        )
     }
 
     pub fn open<P: AsRef<Path>>(
@@ -155,22 +157,45 @@ impl DataStorage {
         let meta = data_file.file.metadata()?;
         let formatter = get_formatter_from_file(&mut data_file.file)?;
         if !meta.permissions().readonly() {
-            data_file.file.seek(SeekFrom::End(0))?;
+            let storage = DataStorage::open_by_file(
+                &path,
+                storage_id,
+                data_file.file,
+                meta,
+                FILE_HEADER_SIZE as u64,
+                formatter,
+                options,
+            );
+            let iter = storage.iter();
+            // Todo need to optimise this
+            for _ in iter {
+                debug!("loop iter");
+            }
+            return storage;
         }
 
-        DataStorage::open_by_file(&path, storage_id, data_file.file, meta, formatter, options)
+        let offset = meta.len();
+        DataStorage::open_by_file(
+            &path,
+            storage_id,
+            data_file.file,
+            meta,
+            offset,
+            formatter,
+            options,
+        )
     }
 
     pub fn storage_id(&self) -> StorageId {
         self.storage_id
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.storage_size() == 0
-    }
-
     pub fn is_readonly(&self) -> Result<bool> {
         Ok(self.readonly)
+    }
+
+    pub fn is_dirty(&mut self) -> bool {
+        self.dirty
     }
 
     pub fn iter(&self) -> Result<StorageIter> {
@@ -186,21 +211,18 @@ impl DataStorage {
         let formatter = formatter::get_formatter_from_file(&mut data_file.file)
             .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?;
         let meta = data_file.file.metadata()?;
+        let offset = meta.len();
         Ok(StorageIter {
             storage: DataStorage::open_by_file(
                 &self.database_dir,
                 self.storage_id,
                 data_file.file,
                 meta,
+                offset,
                 formatter,
                 self.options,
             )?,
         })
-    }
-
-    pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
-        let row_size = self.formatter.row_size(row);
-        (row_size + self.storage_size()) > self.options.max_data_file_size
     }
 
     fn open_by_file(
@@ -208,41 +230,39 @@ impl DataStorage {
         storage_id: StorageId,
         data_file: File,
         meta: Metadata,
+        write_offset: u64,
         formatter: BitcaskFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
-        let file_size = meta.len();
+        let capacity = meta.len();
         Ok(DataStorage {
             storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
                 database_dir,
                 storage_id,
                 data_file,
-                file_size,
+                write_offset,
+                capacity,
                 formatter,
                 options,
             )?),
             storage_id,
             database_dir: database_dir.clone(),
             readonly: meta.permissions().readonly(),
-            formatter,
             options,
+            dirty: false,
         })
     }
 }
 
 impl DataStorageWriter for DataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
-        if self.check_storage_overflow(row) {
-            return Err(DataStorageError::StorageOverflow(self.storage_id));
-        }
         if self.readonly {
             return Err(DataStorageError::PermissionDenied(self.storage_id));
         }
         let r = match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s
-                .write_row(row)
-                .map_err(|e| DataStorageError::WriteRowFailed(s.storage_id, e.to_string())),
+            DataStorageImpl::FileStorage(s) => s.write_row(row),
         }?;
+        self.dirty = true;
         Ok(r)
     }
 
@@ -267,12 +287,6 @@ impl DataStorageWriter for DataStorage {
 }
 
 impl DataStorageReader for DataStorage {
-    fn storage_size(&self) -> usize {
-        match &self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s.storage_size(),
-        }
-    }
-
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s

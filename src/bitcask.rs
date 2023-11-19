@@ -118,7 +118,6 @@ impl BitcaskOptions {
 #[derive(PartialEq, Eq, Debug)]
 pub struct BitcaskStats {
     pub number_of_data_files: usize,
-    pub total_data_size_in_bytes: u64,
     pub number_of_keys: usize,
     pub number_of_pending_hint_files: usize,
 }
@@ -348,7 +347,6 @@ impl Bitcask {
         Ok(BitcaskStats {
             number_of_data_files: db_stats.number_of_data_files,
             number_of_pending_hint_files: db_stats.number_of_pending_hint_files,
-            total_data_size_in_bytes: db_stats.total_data_size_in_bytes,
             number_of_keys: key_size,
         })
     }

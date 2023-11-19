@@ -13,7 +13,10 @@ use common::{
     storage_id::StorageId,
 };
 
-use crate::common::{RowToRead, Value};
+use crate::{
+    common::{RowToRead, Value},
+    DataStorageError,
+};
 
 use super::{
     DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, Result, RowLocation,
@@ -25,6 +28,7 @@ pub struct FileDataStorage {
     database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
+    write_offset: u64,
     capacity: u64,
     options: DataStorageOptions,
     formatter: BitcaskFormatter,
@@ -35,6 +39,7 @@ impl FileDataStorage {
         database_dir: P,
         storage_id: StorageId,
         data_file: File,
+        write_offset: u64,
         capacity: u64,
         formatter: BitcaskFormatter,
         options: DataStorageOptions,
@@ -43,6 +48,7 @@ impl FileDataStorage {
             database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             storage_id,
+            write_offset,
             capacity,
             options,
             formatter,
@@ -63,14 +69,25 @@ impl FileDataStorage {
         self.formatter.validate_key_value(&header, &kv_bs)?;
         Ok((header.meta, kv_bs))
     }
+
+    pub fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
+        let row_size = self.formatter.row_size(row);
+        (row_size + self.write_offset as usize) > self.options.max_data_file_size
+    }
 }
 
 impl DataStorageWriter for FileDataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
+        if self.check_storage_overflow(row) {
+            return Err(DataStorageError::StorageOverflow(self.storage_id));
+        }
+
         let data_to_write = self.formatter.encode_row(row);
-        let value_offset = self.capacity;
-        self.data_file.write_all(&data_to_write)?;
-        self.capacity += data_to_write.len() as u64;
+        let value_offset = self.write_offset;
+        self.data_file
+            .write_all(&data_to_write)
+            .map_err(|e| DataStorageError::WriteRowFailed(self.storage_id, e.to_string()))?;
+        self.write_offset += data_to_write.len() as u64;
 
         Ok(RowLocation {
             storage_id: self.storage_id,
@@ -88,11 +105,13 @@ impl DataStorageWriter for FileDataStorage {
         self.data_file
             .seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))?;
         let meta = self.data_file.metadata()?;
+        let file_size = meta.len();
         DataStorage::open_by_file(
             &self.database_dir,
             self.storage_id,
             self.data_file,
             meta,
+            file_size,
             self.formatter,
             self.options,
         )
@@ -104,10 +123,6 @@ impl DataStorageWriter for FileDataStorage {
 }
 
 impl DataStorageReader for FileDataStorage {
-    fn storage_size(&self) -> usize {
-        self.capacity as usize - FILE_HEADER_SIZE
-    }
-
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
         self.data_file.seek(SeekFrom::Start(row_offset))?;
 
@@ -141,10 +156,7 @@ impl DataStorageReader for FileDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use common::{
-        formatter::{initialize_new_file, FormatterV1},
-        fs::create_file,
-    };
+    use common::{formatter::initialize_new_file, fs::create_file};
 
     use super::*;
 
@@ -189,21 +201,6 @@ mod tests {
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
         storage.write_row(&row_to_write).expect_err("overflow");
-    }
-
-    #[test]
-    fn test_write_file_size() {
-        let mut storage = get_file_storage(100);
-
-        let k1: Vec<u8> = "key1".into();
-        let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-        storage.write_row(&row_to_write).unwrap();
-
-        assert_eq!(
-            FormatterV1::default().row_size(&row_to_write),
-            storage.storage_size()
-        );
     }
 
     #[test]

@@ -374,6 +374,7 @@ mod tests {
         sync_interval_sec: 60,
     };
 
+    #[derive(Debug)]
     pub struct TestingRow {
         pub kv: TestingKV,
         pub pos: RowLocation,

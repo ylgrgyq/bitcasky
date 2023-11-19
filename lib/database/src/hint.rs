@@ -9,7 +9,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 
 use common::{
     formatter::{
@@ -188,13 +188,6 @@ impl HintWriter {
         storage_options: DataStorageOptions,
     ) -> DatabaseResult<()> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
-        if stable_file_opt.is_empty() {
-            info!(
-                target: DEFAULT_LOG_TARGET,
-                "skip write hint for empty data file with id: {}", &data_storage_id
-            );
-            return Ok(());
-        }
 
         let data_itr = stable_file_opt.iter()?;
 

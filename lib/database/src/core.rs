@@ -47,10 +47,6 @@ pub struct DatabaseStats {
      */
     pub number_of_data_files: usize,
     /**
-     * Data size in bytes of this Database
-     */
-    pub total_data_size_in_bytes: u64,
-    /**
      * Number of hint files waiting to write
      */
     pub number_of_pending_hint_files: usize,
@@ -285,26 +281,8 @@ impl Database {
     }
 
     pub fn stats(&self) -> DatabaseResult<DatabaseStats> {
-        let writing_file_size: u64;
-        {
-            writing_file_size = self.writing_storage.lock().storage_size() as u64;
-        }
-        let mut total_data_size_in_bytes: u64 = self
-            .stable_storages
-            .iter()
-            .map(|f| {
-                let file = f.value().lock();
-                file.storage_size() as u64
-            })
-            .collect::<Vec<u64>>()
-            .iter()
-            .sum();
-
-        total_data_size_in_bytes += writing_file_size;
-
         Ok(DatabaseStats {
             number_of_data_files: self.stable_storages.len() + 1,
-            total_data_size_in_bytes,
             number_of_pending_hint_files: self
                 .hint_file_writer
                 .as_ref()
@@ -357,7 +335,7 @@ impl Database {
         &self,
         writing_file_ref: &mut MutexGuard<DataStorage>,
     ) -> DatabaseResult<()> {
-        if writing_file_ref.storage_size() == 0 {
+        if !writing_file_ref.is_dirty() {
             debug!(
                 "Skip flush empty wirting file with id: {}",
                 writing_file_ref.storage_id()
