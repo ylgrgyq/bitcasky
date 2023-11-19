@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{Read, Seek, SeekFrom},
+    io::{Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
@@ -29,7 +29,7 @@ pub fn create_file<P: AsRef<Path>>(
     init_data_file_capacity: usize,
 ) -> std::io::Result<File> {
     // Round capacity down to the nearest 8-byte alignment, since the
-    // segment would not be able to take advantage of the space.
+    // data storage would not be able to take advantage of the space.
     let capacity = std::cmp::max(FILE_HEADER_SIZE, init_data_file_capacity) & !7;
 
     let path = file_type.get_path(&base_dir, storage_id);
@@ -84,7 +84,7 @@ pub fn create_file<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::io::{Read, Write};
 
     use crate::formatter::get_formatter_from_file;
 
