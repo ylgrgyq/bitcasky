@@ -66,6 +66,7 @@ impl MergeManager {
         let (storage_ids, merged_key_dir) =
             self.write_merged_files(database, &merge_dir_path, &kd, known_max_storage_id)?;
 
+        info!("write merged files done");
         {
             // stop read/write
             let kd = keydir.write();
@@ -185,6 +186,7 @@ impl MergeManager {
             },
         )?;
 
+        info!("write merge meta done");
         let merged_key_dir = KeyDir::new_empty_key_dir();
         let merge_db = Database::open(
             merge_file_dir,
@@ -195,7 +197,9 @@ impl MergeManager {
         let mut write_key_count = 0;
         for r in key_dir_to_write.iter() {
             let k = r.key();
+            info!("write to merge data {:?} {:?}", k, r.value());
             let v = database.read_value(r.value())?;
+            info!("read to merge data {:?} {:?} {:?}", k, r.value(), &v);
             if !is_tombstone(&v.value) {
                 let pos = merge_db.write(k, TimedValue::has_time_value(v.value, v.timestamp))?;
                 merged_key_dir.checked_put(k.clone(), pos);
