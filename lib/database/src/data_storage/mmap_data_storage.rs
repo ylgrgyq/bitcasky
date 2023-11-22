@@ -44,7 +44,6 @@ impl MmapDataStorage {
                 .len(capacity)
                 .map_mut(&data_file)?
         };
-        // let map_view = Arc::new(Mutex::new(UnsafeCell::new(mmap)));
 
         Ok(MmapDataStorage {
             database_dir: database_dir.as_ref().to_path_buf(),
@@ -60,7 +59,7 @@ impl MmapDataStorage {
 
     fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         let row_size = self.formatter.row_size(row);
-        (row_size + self.write_offset) > self.options.max_data_file_size
+        (row_size + self.write_offset) > self.capacity
     }
 
     fn as_mut_slice(&mut self) -> &mut [u8] {
@@ -85,8 +84,6 @@ impl MmapDataStorage {
     }
 
     fn do_read_row(&mut self, row_offset: u64) -> Result<(RowMeta, Bytes)> {
-        let mut header_buf = vec![0; self.formatter.row_header_size()];
-
         let header_bs = Bytes::copy_from_slice(
             &self.as_slice()
                 [row_offset as usize..(row_offset as usize + self.formatter.row_header_size())],
@@ -94,11 +91,12 @@ impl MmapDataStorage {
 
         let header = self.formatter.decode_row_header(header_bs);
 
-        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
-
         let kv_bs = Bytes::copy_from_slice(
-            &self.as_slice()[row_offset as usize + header_buf.len()
-                ..(header.meta.key_size + header.meta.value_size) as usize],
+            &self.as_slice()[row_offset as usize + self.formatter.row_header_size()
+                ..row_offset as usize
+                    + self.formatter.row_header_size()
+                    + header.meta.key_size as usize
+                    + header.meta.value_size as usize],
         );
 
         self.formatter.validate_key_value(&header, &kv_bs)?;
@@ -141,8 +139,6 @@ impl DataStorageReader for MmapDataStorage {
         &mut self,
         row_offset: u64,
     ) -> super::Result<crate::TimedValue<crate::common::Value>> {
-        // self.data_file.seek(SeekFrom::Start(row_offset))?;
-
         let (meta, kv_bs) = self.do_read_row(row_offset)?;
 
         Ok(TimedValue {
@@ -198,20 +194,20 @@ mod tests {
 
     #[test]
     fn test_read_write_mmap_storage() {
-        // let mut storage = get_file_storage(1024);
+        let mut storage = get_file_storage(1024);
 
-        // let k1: Vec<u8> = "key1".into();
-        // let v1: Vec<u8> = "value1".into();
-        // let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-        // let row_location1 = storage.write_row(&row_to_write).unwrap();
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        let row_location1 = storage.write_row(&row_to_write).unwrap();
 
-        // let k2: Vec<u8> = "key2".into();
-        // let v2: Vec<u8> = "value2".into();
-        // let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
-        // let row_location2 = storage.write_row(&row_to_write).unwrap();
+        let k2: Vec<u8> = "key2".into();
+        let v2: Vec<u8> = "value2".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
+        let row_location2 = storage.write_row(&row_to_write).unwrap();
 
-        // assert_eq!(v1, *storage.read_value(row_location1.row_offset).unwrap());
-        // assert_eq!(v2, *storage.read_value(row_location2.row_offset).unwrap());
+        assert_eq!(v1, *storage.read_value(row_location1.row_offset).unwrap());
+        assert_eq!(v2, *storage.read_value(row_location2.row_offset).unwrap());
     }
 
     // #[test]
