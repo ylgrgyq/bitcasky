@@ -144,7 +144,7 @@ impl DataStorageReader for FileDataStorage {
             .map_err(|e| {
                 DataStorageError::ReadRowFailed(
                     self.storage_id,
-                    format!("seek to: {} failed, error: {}", row_offset, e.to_string()),
+                    format!("seek to: {} failed, error: {}", row_offset, e),
                 )
             })?;
 
