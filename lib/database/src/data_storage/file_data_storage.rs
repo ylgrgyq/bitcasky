@@ -28,7 +28,7 @@ pub struct FileDataStorage {
     database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
-    write_offset: u64,
+    offset: u64,
     capacity: u64,
     options: DataStorageOptions,
     formatter: BitcaskFormatter,
@@ -48,7 +48,7 @@ impl FileDataStorage {
             database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             storage_id,
-            write_offset,
+            offset: write_offset,
             capacity,
             options,
             formatter,
@@ -84,7 +84,7 @@ impl FileDataStorage {
 
     fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         let row_size = self.formatter.row_size(row);
-        (row_size + self.write_offset as usize) > self.options.max_data_file_size
+        (row_size + self.offset as usize) > self.options.max_data_file_size
     }
 }
 
@@ -95,13 +95,13 @@ impl DataStorageWriter for FileDataStorage {
         }
 
         let data_to_write = self.formatter.encode_row(row);
-        let value_offset = self.write_offset;
+        let value_offset = self.offset;
         self.data_file
             .write_all(&data_to_write)
             .map_err(|e| DataStorageError::WriteRowFailed(self.storage_id, e.to_string()))?;
-        self.write_offset += data_to_write.len() as u64;
-        if self.write_offset > self.capacity {
-            self.capacity = self.write_offset;
+        self.offset += data_to_write.len() as u64;
+        if self.offset > self.capacity {
+            self.capacity = self.offset;
         }
 
         Ok(RowLocation {
@@ -167,7 +167,7 @@ impl DataStorageReader for FileDataStorage {
         let value_offset = self.data_file.stream_position()?;
 
         if let Some((meta, kv_bs)) = self.do_read_row(value_offset)? {
-            self.write_offset =
+            self.offset =
                 value_offset + self.formatter.row_header_size() as u64 + kv_bs.len() as u64;
             return Ok(Some(RowToRead {
                 key: kv_bs.slice(0..meta.key_size as usize).into(),

@@ -19,7 +19,7 @@ use common::{
     storage_id::StorageId,
 };
 
-use self::file_data_storage::FileDataStorage;
+use self::{file_data_storage::FileDataStorage, mmap_data_storage::MmapDataStorage};
 
 use super::{
     common::{RowToRead, Value},
@@ -71,6 +71,7 @@ pub trait DataStorageReader {
 #[derive(Debug)]
 enum DataStorageImpl {
     FileStorage(FileDataStorage),
+    MmapStorage(MmapDataStorage),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -235,12 +236,12 @@ impl DataStorage {
     ) -> Result<Self> {
         let capacity = meta.len();
         Ok(DataStorage {
-            storage_impl: DataStorageImpl::FileStorage(FileDataStorage::new(
+            storage_impl: DataStorageImpl::MmapStorage(MmapDataStorage::new(
                 database_dir,
                 storage_id,
                 data_file,
-                write_offset,
-                capacity,
+                write_offset as usize,
+                capacity as usize,
                 formatter,
                 options,
             )?),
@@ -260,6 +261,7 @@ impl DataStorageWriter for DataStorage {
         }
         let r = match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.write_row(row),
+            DataStorageImpl::MmapStorage(s) => s.write_row(row),
         }?;
         self.dirty = true;
         Ok(r)
@@ -273,12 +275,21 @@ impl DataStorageWriter for DataStorage {
                     DataStorageError::TransitToReadOnlyFailed(storage_id, e.to_string())
                 })
             }
+            DataStorageImpl::MmapStorage(s) => {
+                let storage_id = s.storage_id;
+                s.transit_to_readonly().map_err(|e| {
+                    DataStorageError::TransitToReadOnlyFailed(storage_id, e.to_string())
+                })
+            }
         }
     }
 
     fn flush(&mut self) -> Result<()> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
+                .flush()
+                .map_err(|e| DataStorageError::FlushStorageFailed(s.storage_id, e.to_string())),
+            DataStorageImpl::MmapStorage(s) => s
                 .flush()
                 .map_err(|e| DataStorageError::FlushStorageFailed(s.storage_id, e.to_string())),
         }
@@ -291,18 +302,23 @@ impl DataStorageReader for DataStorage {
             DataStorageImpl::FileStorage(s) => s
                 .read_value(row_offset)
                 .map_err(|e| DataStorageError::ReadRowFailed(s.storage_id, e.to_string())),
+            DataStorageImpl::MmapStorage(s) => s
+                .read_value(row_offset)
+                .map_err(|e| DataStorageError::ReadRowFailed(s.storage_id, e.to_string())),
         }
     }
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.read_next_row(),
+            DataStorageImpl::MmapStorage(s) => s.read_next_row(),
         }
     }
 
     fn seek_to_end(&mut self) -> Result<()> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.seek_to_end(),
+            DataStorageImpl::MmapStorage(s) => s.seek_to_end(),
         }
     }
 }

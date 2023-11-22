@@ -82,6 +82,18 @@ pub fn create_file<P: AsRef<Path>>(
     Ok(file)
 }
 
+pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<()> {
+    // fs4 provides some cross-platform bindings which help for Windows.
+    #[cfg(not(unix))]
+    file.allocate(required_capacity as u64)?;
+    // For all unix systems WAL can just use ftruncate directly
+    #[cfg(unix)]
+    {
+        rustix::fs::ftruncate(&file, required_capacity as u64)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};

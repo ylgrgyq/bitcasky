@@ -1,5 +1,7 @@
 use std::{
     fs::File,
+    io::Write,
+    mem,
     ops::Deref,
     path::{Path, PathBuf},
     ptr,
@@ -8,13 +10,18 @@ use std::{
 use bytes::Bytes;
 use common::{
     formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite},
+    fs::FileType,
     storage_id::StorageId,
 };
+use log::{debug, info};
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::{common::Value, DataStorageError, DataStorageOptions, RowLocation, TimedValue};
+use crate::{
+    common::{RowToRead, Value},
+    DataStorageError, DataStorageOptions, RowLocation, TimedValue,
+};
 
-use super::{DataStorageReader, DataStorageWriter, Result};
+use super::{DataStorage, DataStorageReader, DataStorageWriter, Result};
 
 #[derive(Debug)]
 pub struct MmapDataStorage {
@@ -57,9 +64,35 @@ impl MmapDataStorage {
         })
     }
 
-    fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
+    fn ensure_capacity<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<()> {
         let row_size = self.formatter.row_size(row);
-        (row_size + self.write_offset) > self.capacity
+        let required_capacity = row_size + self.write_offset;
+        if required_capacity > self.options.max_data_file_size {
+            return Err(DataStorageError::StorageOverflow(self.storage_id));
+        }
+
+        if required_capacity > self.capacity {
+            let mut new_capacity =
+                std::cmp::max(required_capacity, self.capacity + self.capacity / 3);
+            new_capacity = std::cmp::min(new_capacity, self.options.max_data_file_size);
+            debug!(
+                "data file with storage id: {:?}, resizing to {} bytes",
+                self.storage_id, new_capacity
+            );
+            self.flush()?;
+
+            common::resize_file(&self.data_file, new_capacity)?;
+            let mut mmap = unsafe {
+                MmapOptions::new()
+                    .offset(0)
+                    .len(new_capacity)
+                    .map_mut(&self.data_file)?
+            }
+            .into();
+            mem::swap(&mut mmap, &mut self.map_view);
+            self.capacity = new_capacity;
+        }
+        Ok(())
     }
 
     fn as_mut_slice(&mut self) -> &mut [u8] {
@@ -83,24 +116,37 @@ impl MmapDataStorage {
         4usize.wrapping_sub(len) & 7
     }
 
-    fn do_read_row(&mut self, row_offset: u64) -> Result<(RowMeta, Bytes)> {
+    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Bytes)>> {
+        let header_size = self.formatter.row_header_size();
+        if offset + header_size >= self.capacity {
+            return Ok(None);
+        }
+
         let header_bs = Bytes::copy_from_slice(
-            &self.as_slice()
-                [row_offset as usize..(row_offset as usize + self.formatter.row_header_size())],
+            &self.as_slice()[offset..(offset + self.formatter.row_header_size())],
         );
 
         let header = self.formatter.decode_row_header(header_bs);
+        if header.meta.key_size == 0 {
+            return Ok(None);
+        }
+
+        if offset + header_size + header.meta.key_size as usize + header.meta.value_size as usize
+            > self.capacity
+        {
+            return Ok(None);
+        }
 
         let kv_bs = Bytes::copy_from_slice(
-            &self.as_slice()[row_offset as usize + self.formatter.row_header_size()
-                ..row_offset as usize
+            &self.as_slice()[offset + self.formatter.row_header_size()
+                ..offset
                     + self.formatter.row_header_size()
                     + header.meta.key_size as usize
                     + header.meta.value_size as usize],
         );
 
         self.formatter.validate_key_value(&header, &kv_bs)?;
-        Ok((header.meta, kv_bs))
+        Ok(Some((header.meta, kv_bs)))
     }
 }
 
@@ -109,9 +155,7 @@ impl DataStorageWriter for MmapDataStorage {
         &mut self,
         row: &common::formatter::RowToWrite<V>,
     ) -> super::Result<crate::RowLocation> {
-        if self.check_storage_overflow(row) {
-            return Err(DataStorageError::StorageOverflow(self.storage_id));
-        }
+        self.ensure_capacity(row)?;
 
         let data_to_write = self.formatter.encode_row(row);
 
@@ -125,8 +169,25 @@ impl DataStorageWriter for MmapDataStorage {
         })
     }
 
-    fn transit_to_readonly(self) -> super::Result<super::DataStorage> {
-        todo!()
+    fn transit_to_readonly(mut self) -> super::Result<super::DataStorage> {
+        self.data_file.flush()?;
+
+        let path = FileType::DataFile.get_path(&self.database_dir, Some(self.storage_id));
+        let mut perms = std::fs::metadata(&path)?.permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(path, perms)?;
+
+        let meta = self.data_file.metadata()?;
+        let file_size = meta.len();
+        DataStorage::open_by_file(
+            &self.database_dir,
+            self.storage_id,
+            self.data_file,
+            meta,
+            file_size,
+            self.formatter,
+            self.options,
+        )
     }
 
     fn flush(&mut self) -> super::Result<()> {
@@ -139,30 +200,52 @@ impl DataStorageReader for MmapDataStorage {
         &mut self,
         row_offset: u64,
     ) -> super::Result<crate::TimedValue<crate::common::Value>> {
-        let (meta, kv_bs) = self.do_read_row(row_offset)?;
-
-        Ok(TimedValue {
-            value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
-            timestamp: meta.timestamp,
-        })
+        if let Some((meta, kv_bs)) = self
+            .do_read_row(row_offset as usize)
+            .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
+        {
+            return Ok(TimedValue {
+                value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
+                timestamp: meta.timestamp,
+            });
+        }
+        Err(DataStorageError::ReadRowFailed(
+            self.storage_id,
+            format!("no value found at offset: {}", row_offset),
+        ))
     }
 
-    fn read_next_row(&mut self) -> super::Result<Option<crate::common::RowToRead>> {
-        todo!()
+    fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
+        if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
+            let row_to_read = RowToRead {
+                key: kv_bs.slice(0..meta.key_size as usize).into(),
+                value: kv_bs.slice(meta.key_size as usize..).into(),
+                row_location: RowLocation {
+                    storage_id: self.storage_id,
+                    row_offset: self.write_offset as u64,
+                },
+                timestamp: meta.timestamp,
+            };
+            self.write_offset += self.formatter.row_header_size() + kv_bs.len();
+            return Ok(Some(row_to_read));
+        }
+        Ok(None)
     }
 
     fn seek_to_end(&mut self) -> Result<()> {
-        todo!()
+        loop {
+            if self.read_next_row()?.is_none() {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use common::{
-        create_file,
-        formatter::{initialize_new_file, FILE_HEADER_SIZE},
-        fs::FileType,
-    };
+    use common::{create_file, formatter::FILE_HEADER_SIZE, fs::FileType};
+    use log::info;
 
     use super::*;
 
@@ -210,56 +293,77 @@ mod tests {
         assert_eq!(v2, *storage.read_value(row_location2.row_offset).unwrap());
     }
 
-    // #[test]
-    // fn test_write_overflow() {
-    //     let mut storage = get_file_storage(2);
+    #[test]
+    fn test_write_overflow() {
+        let mut storage = get_file_storage(2);
 
-    //     let k1: Vec<u8> = "key1".into();
-    //     let v1: Vec<u8> = "value1".into();
-    //     let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-    //     storage.write_row(&row_to_write).expect_err("overflow");
-    // }
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        storage.write_row(&row_to_write).expect_err("overflow");
+    }
 
-    // #[test]
-    // fn test_file_storage_read_next_row() {
-    //     let mut storage = get_file_storage(1024);
+    #[test]
+    fn test_expand_file_size() {
+        let mut storage = get_file_storage(2048);
+        let init_size = storage.data_file.metadata().unwrap().len();
 
-    //     let k1: Vec<u8> = "key1".into();
-    //     let v1: Vec<u8> = "value1".into();
-    //     let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-    //     storage.write_row(&row_to_write).unwrap();
+        let mut size = 0;
+        for i in 0..100 {
+            if size >= 1800 {
+                break;
+            }
 
-    //     let k2: Vec<u8> = "key2".into();
-    //     let v2: Vec<u8> = "value2".into();
-    //     let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
-    //     storage.write_row(&row_to_write).unwrap();
+            let k1: Vec<u8> = format!("key{}", i).into();
+            let v1: Vec<u8> = format!("value{}", i).into();
+            let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+            storage.write_row(&row_to_write).unwrap();
+            size += storage.formatter.row_size(&row_to_write);
+        }
 
-    //     let mut storage = storage.transit_to_readonly().unwrap();
+        assert!(storage.data_file.metadata().unwrap().len() > init_size);
+    }
 
-    //     let r = storage.read_next_row().unwrap().unwrap();
+    #[test]
+    fn test_mmap_storage_read_next_row() {
+        let mut storage = get_file_storage(1024);
 
-    //     assert_eq!(k1, r.key);
-    //     assert_eq!(v1, r.value);
-    //     let r = storage.read_next_row().unwrap().unwrap();
-    //     assert_eq!(k2, r.key);
-    //     assert_eq!(v2, r.value);
-    // }
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        storage.write_row(&row_to_write).unwrap();
 
-    // #[test]
-    // fn test_transit_storage_to_read_only() {
-    //     let mut storage = get_file_storage(1024);
+        let k2: Vec<u8> = "key2".into();
+        let v2: Vec<u8> = "value2".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
+        storage.write_row(&row_to_write).unwrap();
 
-    //     let k1: Vec<u8> = "key1".into();
-    //     let v1: Vec<u8> = "value1".into();
-    //     let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-    //     storage.write_row(&row_to_write).unwrap();
-    //     let mut storage = storage.transit_to_readonly().unwrap();
+        let mut storage = storage.transit_to_readonly().unwrap();
 
-    //     let k1: Vec<u8> = "key1".into();
-    //     let v1: Vec<u8> = "value1".into();
-    //     let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-    //     storage
-    //         .write_row(&row_to_write)
-    //         .expect_err("no write permission");
-    // }
+        let r = storage.read_next_row().unwrap().unwrap();
+
+        assert_eq!(k1, r.key);
+        assert_eq!(v1, r.value);
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k2, r.key);
+        assert_eq!(v2, r.value);
+    }
+
+    #[test]
+    fn test_transit_storage_to_read_only() {
+        let mut storage = get_file_storage(1024);
+
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        storage.write_row(&row_to_write).unwrap();
+        let mut storage = storage.transit_to_readonly().unwrap();
+
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        storage
+            .write_row(&row_to_write)
+            .expect_err("no write permission");
+    }
 }
