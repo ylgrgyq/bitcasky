@@ -1,7 +1,7 @@
 pub mod file_data_storage;
 pub mod mmap_data_storage;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{
     fs::{File, Metadata},
     ops::Deref,
@@ -65,6 +65,8 @@ pub trait DataStorageReader {
 
     /// Read next value from this storage
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
+
+    fn seek_to_end(&mut self) -> Result<()>;
 }
 #[derive(Debug)]
 enum DataStorageImpl {
@@ -157,7 +159,7 @@ impl DataStorage {
         let meta = data_file.file.metadata()?;
         let formatter = get_formatter_from_file(&mut data_file.file)?;
         if !meta.permissions().readonly() {
-            let storage = DataStorage::open_by_file(
+            let mut storage = DataStorage::open_by_file(
                 &path,
                 storage_id,
                 data_file.file,
@@ -165,13 +167,10 @@ impl DataStorage {
                 FILE_HEADER_SIZE as u64,
                 formatter,
                 options,
-            );
-            let iter = storage.iter();
-            // Todo need to optimise this
-            for _ in iter {
-                debug!("loop iter");
-            }
-            return storage;
+            )?;
+
+            storage.seek_to_end()?;
+            return Ok(storage);
         }
 
         let offset = meta.len();
@@ -298,6 +297,12 @@ impl DataStorageReader for DataStorage {
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.read_next_row(),
+        }
+    }
+
+    fn seek_to_end(&mut self) -> Result<()> {
+        match &mut self.storage_impl {
+            DataStorageImpl::FileStorage(s) => s.seek_to_end(),
         }
     }
 }

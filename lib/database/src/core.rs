@@ -104,7 +104,6 @@ impl Database {
             options.storage_options,
         )?;
 
-        info!("database wirting storage {}", writing_storage.storage_id());
         let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
             m.insert(s.storage_id(), Mutex::new(s));
             m
@@ -239,15 +238,12 @@ impl Database {
     }
 
     pub fn reload_data_files(&self, data_storage_ids: Vec<StorageId>) -> DatabaseResult<()> {
-        info!("before prepare load");
         let (writing, stables) = prepare_load_storages(
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
             self.options.storage_options,
         )?;
-
-        info!("after prepare load");
 
         {
             let mut writing_storage_ref = self.writing_storage.lock();
@@ -612,13 +608,11 @@ fn prepare_load_storages<P: AsRef<Path>>(
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, storage_options)?;
     let writing_storage = if storages.last().map_or(Ok(true), |s| s.is_readonly())? {
-        info!("branch 1");
         let writing_storage_id = storage_id_generator.generate_next_id();
         let storage = DataStorage::new(&database_dir, writing_storage_id, storage_options)?;
         debug!(target: "Database", "create writing file with id: {}", writing_storage_id);
         storage
     } else {
-        info!("branch 2");
         let storage = storages.pop().unwrap();
         debug!(target: "Database", "reuse writing file with id: {}", storage.storage_id());
         storage

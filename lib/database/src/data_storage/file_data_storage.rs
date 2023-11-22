@@ -55,19 +55,31 @@ impl FileDataStorage {
         })
     }
 
-    fn do_read_row(&mut self) -> Result<(RowMeta, Bytes)> {
+    fn do_read_row(&mut self, offset: u64) -> Result<Option<(RowMeta, Bytes)>> {
+        let header_size = self.formatter.row_header_size() as u64;
+        if offset + header_size >= self.capacity {
+            return Ok(None);
+        }
+
         let mut header_buf = vec![0; self.formatter.row_header_size()];
         self.data_file.read_exact(&mut header_buf)?;
         let header_bs = Bytes::from(header_buf);
 
         let header = self.formatter.decode_row_header(header_bs);
+        if header.meta.key_size == 0 {
+            return Ok(None);
+        }
+
+        if offset + header_size + header.meta.key_size + header.meta.value_size > self.capacity {
+            return Ok(None);
+        }
 
         let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
         self.data_file.read_exact(&mut kv_buf)?;
         let kv_bs = Bytes::from(kv_buf);
 
         self.formatter.validate_key_value(&header, &kv_bs)?;
-        Ok((header.meta, kv_bs))
+        Ok(Some((header.meta, kv_bs)))
     }
 
     fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
@@ -88,6 +100,9 @@ impl DataStorageWriter for FileDataStorage {
             .write_all(&data_to_write)
             .map_err(|e| DataStorageError::WriteRowFailed(self.storage_id, e.to_string()))?;
         self.write_offset += data_to_write.len() as u64;
+        if self.write_offset > self.capacity {
+            self.capacity = self.write_offset;
+        }
 
         Ok(RowLocation {
             storage_id: self.storage_id,
@@ -124,33 +139,58 @@ impl DataStorageWriter for FileDataStorage {
 
 impl DataStorageReader for FileDataStorage {
     fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
-        self.data_file.seek(SeekFrom::Start(row_offset))?;
+        self.data_file
+            .seek(SeekFrom::Start(row_offset))
+            .map_err(|e| {
+                DataStorageError::ReadRowFailed(
+                    self.storage_id,
+                    format!("seek to: {} failed, error: {}", row_offset, e.to_string()),
+                )
+            })?;
 
-        let (meta, kv_bs) = self.do_read_row()?;
-
-        Ok(TimedValue {
-            value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
-            timestamp: meta.timestamp,
-        })
+        if let Some((meta, kv_bs)) = self
+            .do_read_row(row_offset)
+            .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
+        {
+            return Ok(TimedValue {
+                value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
+                timestamp: meta.timestamp,
+            });
+        }
+        Err(DataStorageError::ReadRowFailed(
+            self.storage_id,
+            format!("no value found at offset: {}", row_offset),
+        ))
     }
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         let value_offset = self.data_file.stream_position()?;
-        if value_offset >= self.capacity {
-            return Ok(None);
+
+        if let Some((meta, kv_bs)) = self.do_read_row(value_offset)? {
+            self.write_offset =
+                value_offset + self.formatter.row_header_size() as u64 + kv_bs.len() as u64;
+            return Ok(Some(RowToRead {
+                key: kv_bs.slice(0..meta.key_size as usize).into(),
+                value: kv_bs.slice(meta.key_size as usize..).into(),
+                row_location: RowLocation {
+                    storage_id: self.storage_id,
+                    row_offset: value_offset,
+                },
+                timestamp: meta.timestamp,
+            }));
         }
+        Ok(None)
+    }
 
-        let (meta, kv_bs) = self.do_read_row()?;
-
-        Ok(Some(RowToRead {
-            key: kv_bs.slice(0..meta.key_size as usize).into(),
-            value: kv_bs.slice(meta.key_size as usize..).into(),
-            row_location: RowLocation {
-                storage_id: self.storage_id,
-                row_offset: value_offset,
-            },
-            timestamp: meta.timestamp,
-        }))
+    fn seek_to_end(&mut self) -> Result<()> {
+        loop {
+            let offset = self.data_file.stream_position().unwrap();
+            if self.read_next_row()?.is_none() {
+                self.data_file.seek(SeekFrom::Start(offset)).unwrap();
+                break;
+            }
+        }
+        Ok(())
     }
 }
 
