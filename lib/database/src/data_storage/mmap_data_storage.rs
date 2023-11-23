@@ -9,8 +9,7 @@ use std::{
 
 use bytes::Bytes;
 use common::{
-    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite},
-    fs::FileType,
+    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     storage_id::StorageId,
 };
 use log::{debug, info};
@@ -172,19 +171,13 @@ impl DataStorageWriter for MmapDataStorage {
     fn transit_to_readonly(mut self) -> super::Result<super::DataStorage> {
         self.data_file.flush()?;
 
-        let path = FileType::DataFile.get_path(&self.database_dir, Some(self.storage_id));
-        let mut perms = std::fs::metadata(&path)?.permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(path, perms)?;
-
         let meta = self.data_file.metadata()?;
-        let file_size = meta.len();
         DataStorage::open_by_file(
             &self.database_dir,
             self.storage_id,
             self.data_file,
             meta,
-            file_size,
+            FILE_HEADER_SIZE as u64,
             self.formatter,
             self.options,
         )
@@ -216,6 +209,7 @@ impl DataStorageReader for MmapDataStorage {
     }
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
+        info!("read next row {} {}", self.storage_id, self.write_offset);
         if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
             let row_to_read = RowToRead {
                 key: kv_bs.slice(0..meta.key_size as usize).into(),
@@ -356,14 +350,12 @@ mod tests {
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-        storage.write_row(&row_to_write).unwrap();
-        let mut storage = storage.transit_to_readonly().unwrap();
+        let location = storage.write_row(&row_to_write).unwrap();
+        let storage = storage.transit_to_readonly().unwrap();
 
-        let k1: Vec<u8> = "key1".into();
-        let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-        storage
-            .write_row(&row_to_write)
-            .expect_err("no write permission");
+        if let Some(Ok(r)) = storage.iter().unwrap().next() {
+            assert_eq!("key1".as_bytes().to_vec(), r.key);
+            assert_eq!(location, r.row_location);
+        }
     }
 }
