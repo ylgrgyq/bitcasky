@@ -607,16 +607,17 @@ fn prepare_load_storages<P: AsRef<Path>>(
     storage_options: DataStorageOptions,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, storage_options)?;
-    let writing_storage = if storages.last().map_or(Ok(true), |s| s.is_readonly())? {
+    let mut writing_storage;
+    if storages.is_empty() {
         let writing_storage_id = storage_id_generator.generate_next_id();
         let storage = DataStorage::new(&database_dir, writing_storage_id, storage_options)?;
         debug!(target: "Database", "create writing file with id: {}", writing_storage_id);
-        storage
+        writing_storage = storage;
     } else {
-        let storage = storages.pop().unwrap();
-        debug!(target: "Database", "reuse writing file with id: {}", storage.storage_id());
-        storage
-    };
+        writing_storage = storages.pop().unwrap();
+        writing_storage.seek_to_end()?;
+        debug!(target: "Database", "reuse writing file with id: {}", writing_storage.storage_id());
+    }
 
     Ok((writing_storage, storages))
 }

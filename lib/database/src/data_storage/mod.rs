@@ -1,7 +1,7 @@
 pub mod file_data_storage;
 pub mod mmap_data_storage;
 
-use log::{debug, error};
+use log::{debug, error, info};
 use std::{
     fs::{File, Metadata},
     ops::Deref,
@@ -108,7 +108,6 @@ pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
-    readonly: bool,
     options: DataStorageOptions,
     dirty: bool,
 }
@@ -159,28 +158,13 @@ impl DataStorage {
         );
         let meta = data_file.file.metadata()?;
         let formatter = get_formatter_from_file(&mut data_file.file)?;
-        if !meta.permissions().readonly() {
-            let mut storage = DataStorage::open_by_file(
-                &path,
-                storage_id,
-                data_file.file,
-                meta,
-                FILE_HEADER_SIZE as u64,
-                formatter,
-                options,
-            )?;
 
-            storage.seek_to_end()?;
-            return Ok(storage);
-        }
-
-        let offset = meta.len();
         DataStorage::open_by_file(
             &path,
             storage_id,
             data_file.file,
             meta,
-            offset,
+            FILE_HEADER_SIZE as u64,
             formatter,
             options,
         )
@@ -188,10 +172,6 @@ impl DataStorage {
 
     pub fn storage_id(&self) -> StorageId {
         self.storage_id
-    }
-
-    pub fn is_readonly(&self) -> Result<bool> {
-        Ok(self.readonly)
     }
 
     pub fn is_dirty(&mut self) -> bool {
@@ -211,14 +191,13 @@ impl DataStorage {
         let formatter = formatter::get_formatter_from_file(&mut data_file.file)
             .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?;
         let meta = data_file.file.metadata()?;
-        let offset = meta.len();
         Ok(StorageIter {
             storage: DataStorage::open_by_file(
                 &self.database_dir,
                 self.storage_id,
                 data_file.file,
                 meta,
-                offset,
+                FILE_HEADER_SIZE as u64,
                 formatter,
                 self.options,
             )?,
@@ -247,7 +226,6 @@ impl DataStorage {
             )?),
             storage_id,
             database_dir: database_dir.clone(),
-            readonly: meta.permissions().readonly(),
             options,
             dirty: false,
         })
@@ -256,9 +234,6 @@ impl DataStorage {
 
 impl DataStorageWriter for DataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
-        if self.readonly {
-            return Err(DataStorageError::PermissionDenied(self.storage_id));
-        }
         let r = match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s.write_row(row),
             DataStorageImpl::MmapStorage(s) => s.write_row(row),

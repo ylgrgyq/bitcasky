@@ -209,7 +209,6 @@ impl DataStorageReader for MmapDataStorage {
     }
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
-        info!("read next row {} {}", self.storage_id, self.write_offset);
         if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
             let row_to_read = RowToRead {
                 key: kv_bs.slice(0..meta.key_size as usize).into(),
