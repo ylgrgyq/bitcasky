@@ -1,7 +1,7 @@
 pub mod file_data_storage;
 pub mod mmap_data_storage;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{
     fs::{File, Metadata},
     ops::Deref,
