@@ -13,6 +13,10 @@ use thiserror::Error;
 mod formatter_v1;
 pub use self::formatter_v1::FormatterV1;
 
+const MAGIC: &[u8; 3] = b"btk";
+const FORMATTER_V1_VERSION: u8 = 0;
+pub const FILE_HEADER_SIZE: usize = 4;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct RowMeta {
     pub timestamp: u64,
@@ -121,6 +125,14 @@ pub enum BitcaskFormatter {
     V1(FormatterV1),
 }
 
+impl BitcaskFormatter {
+    pub fn version(&self) -> u8 {
+        match self {
+            BitcaskFormatter::V1(_) => FORMATTER_V1_VERSION,
+        }
+    }
+}
+
 impl Formatter for BitcaskFormatter {
     fn row_header_size(&self) -> usize {
         match self {
@@ -189,20 +201,21 @@ impl Formatter for BitcaskFormatter {
     }
 }
 
-const MAGIC: &[u8; 3] = b"btk";
-const DEFAULT_FORMATTER_VERSION: u8 = 0;
-pub const FILE_HEADER_SIZE: usize = 4;
+impl Default for BitcaskFormatter {
+    fn default() -> Self {
+        BitcaskFormatter::V1(FormatterV1::default())
+    }
+}
 
-pub fn initialize_new_file(file: &mut File) -> std::io::Result<BitcaskFormatter> {
+pub fn initialize_new_file(file: &mut File, version: u8) -> std::io::Result<()> {
     let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
 
     bs.extend_from_slice(MAGIC);
-    bs.put_u8(DEFAULT_FORMATTER_VERSION);
+    bs.put_u8(version);
 
     file.write_all(&bs.freeze())?;
     file.flush()?;
-
-    Ok(BitcaskFormatter::V1(FormatterV1::default()))
+    Ok(())
 }
 
 pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
@@ -216,7 +229,7 @@ pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
     }
 
     let formatter_version = file_header[3];
-    if formatter_version == DEFAULT_FORMATTER_VERSION {
+    if formatter_version == FORMATTER_V1_VERSION {
         return Ok(BitcaskFormatter::V1(FormatterV1::default()));
     }
 
@@ -237,7 +250,8 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
-        let init_formatter = initialize_new_file(&mut file).unwrap();
+        let init_formatter = BitcaskFormatter::V1(FormatterV1::default());
+        initialize_new_file(&mut file, init_formatter.version()).unwrap();
 
         let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
             .unwrap()

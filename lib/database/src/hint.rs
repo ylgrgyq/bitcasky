@@ -9,7 +9,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 
 use common::{
     formatter::{
@@ -41,7 +41,8 @@ pub struct HintFile {
 impl HintFile {
     pub fn create(database_dir: &Path, storage_id: StorageId) -> DatabaseResult<Self> {
         let mut file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
-        let formatter = initialize_new_file(&mut file)?;
+        let formatter = BitcaskFormatter::default();
+        initialize_new_file(&mut file, formatter.version())?;
         debug!(
             target: DEFAULT_LOG_TARGET,
             "create hint file with id: {}", storage_id
@@ -187,13 +188,6 @@ impl HintWriter {
         storage_options: DataStorageOptions,
     ) -> DatabaseResult<()> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
-        if stable_file_opt.is_empty() {
-            info!(
-                target: DEFAULT_LOG_TARGET,
-                "skip write hint for empty data file with id: {}", &data_storage_id
-            );
-            return Ok(());
-        }
 
         let data_itr = stable_file_opt.iter()?;
 
@@ -318,9 +312,9 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            DataStorageOptions {
-                max_file_size: 1024,
-            },
+            DataStorageOptions::default()
+                .max_data_file_size(1024)
+                .init_data_file_capacity(100),
         )
         .unwrap();
         let key = vec![1, 2, 3];
@@ -328,14 +322,14 @@ mod tests {
         let pos = writing_file
             .write_row(&RowToWrite::new(&key, val.to_vec()))
             .unwrap();
-        writing_file.transit_to_readonly().unwrap();
+        writing_file.flush().unwrap();
 
         {
             let writer = HintWriter::start(
                 &dir,
-                DataStorageOptions {
-                    max_file_size: 1024,
-                },
+                DataStorageOptions::default()
+                    .max_data_file_size(1024)
+                    .init_data_file_capacity(100),
             );
             writer.async_write_hint_file(storage_id);
         }

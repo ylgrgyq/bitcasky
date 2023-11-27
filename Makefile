@@ -14,10 +14,10 @@ build-all-test:
 	cargo build --lib --tests --all-features
 
 run-all-unit-test: 
-	cargo test --lib --all-features
+	cargo test --lib --all-features --workspace
 
 run-all-doc-test:
-	cargo test --all-features --doc
+	cargo test --all-features --doc --workspace
 
 install-clippy:
 	rustup component add clippy --toolchain $(RUSTV)

@@ -17,7 +17,7 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
         DataStorageOptions::default()
             .max_data_file_size(usize::MAX)
             .init_data_file_capacity(100)
-            .storage_type(database::data_storage::DataSotrageType::File),
+            .storage_type(database::data_storage::DataSotrageType::Mmap),
     )
     .unwrap()
 }
@@ -174,7 +174,8 @@ fn sequential_read_row_benchmark(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default();
-    targets = write_row_benchmark, sync_write_row_benchmark, rand_read_row_benchmark, sequential_read_row_benchmark
+    // targets = write_row_benchmark, sync_write_row_benchmark, rand_read_row_benchmark, sequential_read_row_benchmark
+    targets = sequential_read_row_benchmark
 }
 
 criterion_main!(benches);
