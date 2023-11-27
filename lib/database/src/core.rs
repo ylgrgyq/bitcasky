@@ -348,13 +348,11 @@ impl Database {
             next_storage_id,
             self.options.storage_options,
         )?;
-        let old_file = mem::replace(&mut **writing_file_ref, next_writing_file);
-
-        let stable_storage = old_file.transit_to_readonly()?;
-
-        let storage_id = stable_storage.storage_id();
+        let mut old_storage = mem::replace(&mut **writing_file_ref, next_writing_file);
+        old_storage.flush()?;
+        let storage_id = old_storage.storage_id();
         self.stable_storages
-            .insert(storage_id, Mutex::new(stable_storage));
+            .insert(storage_id, Mutex::new(old_storage));
         if let Some(w) = self.hint_file_writer.as_ref() {
             w.async_write_hint_file(storage_id);
         }
@@ -626,7 +624,7 @@ fn prepare_load_storages<P: AsRef<Path>>(
 pub mod database_tests_utils {
     use bitcask_tests::common::TestingKV;
 
-    use crate::{DataStorageOptions, RowLocation, TimedValue};
+    use crate::{data_storage::DataSotrageType, DataStorageOptions, RowLocation, TimedValue};
 
     use super::{DataBaseOptions, Database};
 
@@ -634,6 +632,7 @@ pub mod database_tests_utils {
         storage_options: DataStorageOptions {
             max_data_file_size: 1024,
             init_data_file_capacity: 100,
+            storage_type: DataSotrageType::Mmap,
         },
         sync_interval_sec: 60,
     };
@@ -694,8 +693,11 @@ pub mod database_tests_utils {
 #[cfg(test)]
 mod tests {
 
-    use crate::database_tests_utils::{
-        assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
+    use crate::{
+        data_storage::DataSotrageType,
+        database_tests_utils::{
+            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
+        },
     };
 
     use super::*;
@@ -787,6 +789,7 @@ mod tests {
                 storage_options: DataStorageOptions {
                     max_data_file_size: 104,
                     init_data_file_capacity: 100,
+                    storage_type: DataSotrageType::Mmap,
                 },
                 sync_interval_sec: 60,
             },

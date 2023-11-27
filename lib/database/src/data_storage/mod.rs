@@ -35,8 +35,8 @@ pub enum DataStorageError {
     ReadRowFailed(StorageId, String),
     #[error("Flush writing storage with id: {0} failed. error: {1}")]
     FlushStorageFailed(StorageId, String),
-    #[error("Transit writing storage with id: {0} to readonly failed. error: {1}")]
-    TransitToReadOnlyFailed(StorageId, String),
+    #[error("Rewind storage with id: {0} failed. error: {1}")]
+    RewindFailed(StorageId, String),
     #[error("Storage with id: {0} overflow, need replace with a new one")]
     StorageOverflow(StorageId),
     #[error("No permission to write storage with id: {0}")]
@@ -54,7 +54,7 @@ pub type Result<T> = std::result::Result<T, DataStorageError>;
 pub trait DataStorageWriter {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation>;
 
-    fn transit_to_readonly(self) -> Result<DataStorage>;
+    fn rewind(&mut self) -> Result<()>;
 
     fn flush(&mut self) -> Result<()>;
 }
@@ -68,6 +68,13 @@ pub trait DataStorageReader {
 
     fn seek_to_end(&mut self) -> Result<()>;
 }
+
+#[derive(Debug, Clone, Copy)]
+pub enum DataSotrageType {
+    File,
+    Mmap,
+}
+
 #[derive(Debug)]
 enum DataStorageImpl {
     FileStorage(FileDataStorage),
@@ -78,6 +85,7 @@ enum DataStorageImpl {
 pub struct DataStorageOptions {
     pub max_data_file_size: usize,
     pub init_data_file_capacity: usize,
+    pub storage_type: DataSotrageType,
 }
 
 impl Default for DataStorageOptions {
@@ -85,6 +93,7 @@ impl Default for DataStorageOptions {
         Self {
             max_data_file_size: 128 * 1024 * 1024,
             init_data_file_capacity: 1024 * 1024,
+            storage_type: DataSotrageType::Mmap,
         }
     }
 }
@@ -99,6 +108,11 @@ impl DataStorageOptions {
     pub fn init_data_file_capacity(mut self, capacity: usize) -> DataStorageOptions {
         assert!(capacity > 0);
         self.init_data_file_capacity = capacity;
+        self
+    }
+
+    pub fn storage_type(mut self, storage_type: DataSotrageType) -> DataStorageOptions {
+        self.storage_type = storage_type;
         self
     }
 }
@@ -214,8 +228,17 @@ impl DataStorage {
         options: DataStorageOptions,
     ) -> Result<Self> {
         let capacity = meta.len();
-        Ok(DataStorage {
-            storage_impl: DataStorageImpl::MmapStorage(MmapDataStorage::new(
+        let storage_impl = match options.storage_type {
+            DataSotrageType::File => DataStorageImpl::FileStorage(FileDataStorage::new(
+                database_dir,
+                storage_id,
+                data_file,
+                write_offset,
+                capacity,
+                formatter,
+                options,
+            )?),
+            DataSotrageType::Mmap => DataStorageImpl::MmapStorage(MmapDataStorage::new(
                 database_dir,
                 storage_id,
                 data_file,
@@ -224,6 +247,9 @@ impl DataStorage {
                 formatter,
                 options,
             )?),
+        };
+        Ok(DataStorage {
+            storage_impl,
             storage_id,
             database_dir: database_dir.clone(),
             options,
@@ -242,19 +268,17 @@ impl DataStorageWriter for DataStorage {
         Ok(r)
     }
 
-    fn transit_to_readonly(self) -> Result<DataStorage> {
-        match self.storage_impl {
+    fn rewind(&mut self) -> Result<()> {
+        match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => {
                 let storage_id = s.storage_id;
-                s.transit_to_readonly().map_err(|e| {
-                    DataStorageError::TransitToReadOnlyFailed(storage_id, e.to_string())
-                })
+                s.rewind()
+                    .map_err(|e| DataStorageError::RewindFailed(storage_id, e.to_string()))
             }
             DataStorageImpl::MmapStorage(s) => {
                 let storage_id = s.storage_id;
-                s.transit_to_readonly().map_err(|e| {
-                    DataStorageError::TransitToReadOnlyFailed(storage_id, e.to_string())
-                })
+                s.rewind()
+                    .map_err(|e| DataStorageError::RewindFailed(storage_id, e.to_string()))
             }
         }
     }

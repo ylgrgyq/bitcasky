@@ -12,7 +12,7 @@ use common::{
     formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     storage_id::StorageId,
 };
-use log::{debug, info};
+use log::debug;
 use memmap2::{MmapMut, MmapOptions};
 
 use crate::{
@@ -168,19 +168,10 @@ impl DataStorageWriter for MmapDataStorage {
         })
     }
 
-    fn transit_to_readonly(mut self) -> super::Result<super::DataStorage> {
+    fn rewind(&mut self) -> super::Result<()> {
         self.data_file.flush()?;
-
-        let meta = self.data_file.metadata()?;
-        DataStorage::open_by_file(
-            &self.database_dir,
-            self.storage_id,
-            self.data_file,
-            meta,
-            FILE_HEADER_SIZE as u64,
-            self.formatter,
-            self.options,
-        )
+        self.write_offset = FILE_HEADER_SIZE;
+        Ok(())
     }
 
     fn flush(&mut self) -> super::Result<()> {
@@ -238,7 +229,8 @@ impl DataStorageReader for MmapDataStorage {
 #[cfg(test)]
 mod tests {
     use common::{create_file, formatter::FILE_HEADER_SIZE, fs::FileType};
-    use log::info;
+
+    use crate::data_storage::DataSotrageType;
 
     use super::*;
 
@@ -251,10 +243,10 @@ mod tests {
         let formatter = BitcaskFormatter::default();
         let file =
             create_file(&dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
-        let options = DataStorageOptions {
-            max_data_file_size: max_size,
-            init_data_file_capacity: max_size,
-        };
+        let options = DataStorageOptions::default()
+            .max_data_file_size(max_size)
+            .init_data_file_capacity(max_size)
+            .storage_type(DataSotrageType::Mmap);
         let meta = file.metadata().unwrap();
         MmapDataStorage::new(
             &dir,
@@ -331,7 +323,7 @@ mod tests {
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
         storage.write_row(&row_to_write).unwrap();
 
-        let mut storage = storage.transit_to_readonly().unwrap();
+        storage.rewind().unwrap();
 
         let r = storage.read_next_row().unwrap().unwrap();
 
@@ -343,18 +335,20 @@ mod tests {
     }
 
     #[test]
-    fn test_transit_storage_to_read_only() {
+    fn test_rewind() {
         let mut storage = get_file_storage(1024);
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
         let location = storage.write_row(&row_to_write).unwrap();
-        let storage = storage.transit_to_readonly().unwrap();
+        storage.rewind().unwrap();
 
-        if let Some(Ok(r)) = storage.iter().unwrap().next() {
+        if let Some(r) = storage.read_next_row().unwrap() {
             assert_eq!("key1".as_bytes().to_vec(), r.key);
             assert_eq!(location, r.row_location);
+        } else {
+            assert!(false);
         }
     }
 }

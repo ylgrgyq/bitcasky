@@ -106,10 +106,9 @@ impl BitcaskOptions {
 
     fn get_database_options(&self) -> DataBaseOptions {
         DataBaseOptions {
-            storage_options: DataStorageOptions {
-                max_data_file_size: self.max_data_file_size,
-                init_data_file_capacity: self.init_data_file_capacity,
-            },
+            storage_options: DataStorageOptions::default()
+                .max_data_file_size(self.max_data_file_size)
+                .init_data_file_capacity(self.init_data_file_capacity),
             sync_interval_sec: self.sync_interval.as_secs(),
         }
     }

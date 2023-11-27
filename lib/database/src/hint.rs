@@ -275,7 +275,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::data_storage::DataStorageWriter;
+    use crate::data_storage::{DataSotrageType, DataStorageWriter};
     use common::formatter::RowToWrite;
 
     use super::*;
@@ -312,10 +312,10 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            DataStorageOptions {
-                max_data_file_size: 1024,
-                init_data_file_capacity: 100,
-            },
+            DataStorageOptions::default()
+                .max_data_file_size(1024)
+                .init_data_file_capacity(100)
+                .storage_type(DataSotrageType::Mmap),
         )
         .unwrap();
         let key = vec![1, 2, 3];
@@ -323,15 +323,14 @@ mod tests {
         let pos = writing_file
             .write_row(&RowToWrite::new(&key, val.to_vec()))
             .unwrap();
-        writing_file.transit_to_readonly().unwrap();
+        writing_file.flush().unwrap();
 
         {
             let writer = HintWriter::start(
                 &dir,
-                DataStorageOptions {
-                    max_data_file_size: 1024,
-                    init_data_file_capacity: 100,
-                },
+                DataStorageOptions::default()
+                    .max_data_file_size(1024)
+                    .init_data_file_capacity(100),
             );
             writer.async_write_hint_file(storage_id);
         }

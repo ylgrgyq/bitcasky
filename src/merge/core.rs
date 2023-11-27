@@ -360,7 +360,7 @@ mod tests {
         formatter::{initialize_new_file, BitcaskFormatter},
         fs::FileType,
     };
-    use database::{DataStorageOptions, RowLocation};
+    use database::{data_storage::DataSotrageType, DataStorageOptions, RowLocation};
 
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
@@ -370,6 +370,7 @@ mod tests {
         storage_options: DataStorageOptions {
             max_data_file_size: 1024,
             init_data_file_capacity: 100,
+            storage_type: DataSotrageType::Mmap,
         },
         sync_interval_sec: 60,
     };

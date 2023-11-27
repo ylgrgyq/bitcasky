@@ -14,10 +14,10 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
     DataStorage::new(
         dir,
         100,
-        DataStorageOptions {
-            max_data_file_size: usize::MAX,
-            init_data_file_capacity: 100,
-        },
+        DataStorageOptions::default()
+            .max_data_file_size(usize::MAX)
+            .init_data_file_capacity(100)
+            .storage_type(database::data_storage::DataSotrageType::Mmap),
     )
     .unwrap()
 }
@@ -105,7 +105,7 @@ fn rand_read_row_benchmark(c: &mut Criterion) {
         let row = RowToWrite::new(input.key_ref(), input.value());
         offsets.push(data_storage.write_row(&row).unwrap().row_offset);
     }
-    data_storage = data_storage.transit_to_readonly().unwrap();
+    data_storage.flush().unwrap();
 
     offsets.shuffle(&mut thread_rng());
 
@@ -149,7 +149,7 @@ fn sequential_read_row_benchmark(c: &mut Criterion) {
             .unwrap();
     }
 
-    data_storage = data_storage.transit_to_readonly().unwrap();
+    data_storage.flush().unwrap();
 
     let mut counter = 0;
     group.bench_function("sequential-read-row", |b| {

@@ -9,7 +9,6 @@ use std::{
 
 use common::{
     formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
-    fs::FileType,
     storage_id::StorageId,
 };
 
@@ -19,8 +18,7 @@ use crate::{
 };
 
 use super::{
-    DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, Result, RowLocation,
-    TimedValue,
+    DataStorageOptions, DataStorageReader, DataStorageWriter, Result, RowLocation, TimedValue,
 };
 
 #[derive(Debug)]
@@ -110,26 +108,13 @@ impl DataStorageWriter for FileDataStorage {
         })
     }
 
-    fn transit_to_readonly(mut self) -> Result<DataStorage> {
+    fn rewind(&mut self) -> Result<()> {
         self.data_file.flush()?;
 
-        let path = FileType::DataFile.get_path(&self.database_dir, Some(self.storage_id));
-        let mut perms = std::fs::metadata(&path)?.permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(path, perms)?;
         self.data_file
             .seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))?;
-        let meta = self.data_file.metadata()?;
-        let file_size = meta.len();
-        DataStorage::open_by_file(
-            &self.database_dir,
-            self.storage_id,
-            self.data_file,
-            meta,
-            file_size,
-            self.formatter,
-            self.options,
-        )
+
+        Ok(())
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -196,7 +181,12 @@ impl DataStorageReader for FileDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use common::{formatter::initialize_new_file, fs::create_file};
+    use common::{
+        formatter::initialize_new_file,
+        fs::{create_file, FileType},
+    };
+
+    use crate::data_storage::{DataSotrageType, DataStorage};
 
     use super::*;
 
@@ -208,10 +198,10 @@ mod tests {
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
         initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
-        let options = DataStorageOptions {
-            max_data_file_size: max_size,
-            init_data_file_capacity: max_size,
-        };
+        let options = DataStorageOptions::default()
+            .max_data_file_size(max_size)
+            .init_data_file_capacity(max_size)
+            .storage_type(DataSotrageType::File);
         DataStorage::open(&dir, 1, options).unwrap()
     }
 
@@ -257,7 +247,7 @@ mod tests {
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
         storage.write_row(&row_to_write).unwrap();
 
-        let mut storage = storage.transit_to_readonly().unwrap();
+        storage.rewind().unwrap();
 
         let r = storage.read_next_row().unwrap().unwrap();
 
@@ -269,20 +259,20 @@ mod tests {
     }
 
     #[test]
-    fn test_transit_storage_to_read_only() {
+    fn test_rewind() {
         let mut storage = get_file_storage(1024);
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-        storage.write_row(&row_to_write).unwrap();
-        let mut storage = storage.transit_to_readonly().unwrap();
+        let location = storage.write_row(&row_to_write).unwrap();
+        storage.rewind().unwrap();
 
-        let k1: Vec<u8> = "key1".into();
-        let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
-        // storage
-        //     .write_row(&row_to_write)
-        //     .expect_err("no write permission");
+        if let Some(r) = storage.read_next_row().unwrap() {
+            assert_eq!("key1".as_bytes().to_vec(), r.key);
+            assert_eq!(location, r.row_location);
+        } else {
+            assert!(false);
+        }
     }
 }
