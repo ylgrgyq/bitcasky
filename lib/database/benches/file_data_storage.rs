@@ -149,17 +149,20 @@ fn sequential_read_row_benchmark(c: &mut Criterion) {
             .unwrap();
     }
 
-    data_storage.flush().unwrap();
+    data_storage.rewind().unwrap();
 
     let mut counter = 0;
     group.bench_function("sequential-read-row", |b| {
         b.iter(|| {
-            let v = data_storage.read_next_row().unwrap().unwrap();
-            assert_eq!(input.value(), *v.value);
-            if counter % values == 0 {
-                data_storage.read_value(head_offset).unwrap();
+            if let Some(v) = data_storage.read_next_row().unwrap() {
+                assert_eq!(input.value(), *v.value);
+                if counter % values == 0 {
+                    data_storage.read_value(head_offset).unwrap();
+                }
+                counter += 1;
+            } else {
+                data_storage.rewind().unwrap();
             }
-            counter += 1;
         })
     });
 

@@ -8,6 +8,10 @@ edition = "2021"
 name = "file_data_storage"
 harness = false
 
+[[bench]]
+name = "mmap_data_storage"
+harness = false
+
 [lib]
 bench = false
 
