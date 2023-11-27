@@ -1,11 +1,4 @@
-use std::{
-    fs::File,
-    io::Write,
-    mem,
-    ops::Deref,
-    path::{Path, PathBuf},
-    ptr,
-};
+use std::{fs::File, io::Write, mem, ops::Deref, ptr};
 
 use bytes::Bytes;
 use common::{
@@ -20,11 +13,10 @@ use crate::{
     DataStorageError, DataStorageOptions, RowLocation, TimedValue,
 };
 
-use super::{DataStorage, DataStorageReader, DataStorageWriter, Result};
+use super::{DataStorageReader, DataStorageWriter, Result};
 
 #[derive(Debug)]
 pub struct MmapDataStorage {
-    database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
     write_offset: usize,
@@ -35,8 +27,7 @@ pub struct MmapDataStorage {
 }
 
 impl MmapDataStorage {
-    pub fn new<P: AsRef<Path>>(
-        database_dir: P,
+    pub fn new(
         storage_id: StorageId,
         data_file: File,
         write_offset: usize,
@@ -52,7 +43,6 @@ impl MmapDataStorage {
         };
 
         Ok(MmapDataStorage {
-            database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             storage_id,
             write_offset,
@@ -86,8 +76,7 @@ impl MmapDataStorage {
                     .offset(0)
                     .len(new_capacity)
                     .map_mut(&self.data_file)?
-            }
-            .into();
+            };
             mem::swap(&mut mmap, &mut self.map_view);
             self.capacity = new_capacity;
         }
@@ -111,9 +100,9 @@ impl MmapDataStorage {
     }
 
     /// Returns the number of padding bytes to add to a buffer to ensure 8-byte alignment.
-    fn padding(len: usize) -> usize {
-        4usize.wrapping_sub(len) & 7
-    }
+    // fn padding(len: usize) -> usize {
+    //     4usize.wrapping_sub(len) & 7
+    // }
 
     fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Bytes)>> {
         let header_size = self.formatter.row_header_size();
@@ -241,15 +230,13 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = BitcaskFormatter::default();
-        let file =
-            create_file(&dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
+        let file = create_file(dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
         let options = DataStorageOptions::default()
             .max_data_file_size(max_size)
             .init_data_file_capacity(max_size)
             .storage_type(DataSotrageType::Mmap);
         let meta = file.metadata().unwrap();
         MmapDataStorage::new(
-            &dir,
             1,
             file,
             FILE_HEADER_SIZE,
@@ -348,7 +335,7 @@ mod tests {
             assert_eq!("key1".as_bytes().to_vec(), r.key);
             assert_eq!(location, r.row_location);
         } else {
-            assert!(false);
+            unreachable!();
         }
     }
 }

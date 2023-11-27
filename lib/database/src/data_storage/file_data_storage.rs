@@ -4,7 +4,6 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
     ops::Deref,
-    path::{Path, PathBuf},
 };
 
 use common::{
@@ -23,7 +22,6 @@ use super::{
 
 #[derive(Debug)]
 pub struct FileDataStorage {
-    database_dir: PathBuf,
     data_file: File,
     pub storage_id: StorageId,
     offset: u64,
@@ -33,8 +31,7 @@ pub struct FileDataStorage {
 }
 
 impl FileDataStorage {
-    pub fn new<P: AsRef<Path>>(
-        database_dir: P,
+    pub fn new(
         storage_id: StorageId,
         data_file: File,
         write_offset: u64,
@@ -43,7 +40,6 @@ impl FileDataStorage {
         options: DataStorageOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
-            database_dir: database_dir.as_ref().to_path_buf(),
             data_file,
             storage_id,
             offset: write_offset,
@@ -272,7 +268,7 @@ mod tests {
             assert_eq!("key1".as_bytes().to_vec(), r.key);
             assert_eq!(location, r.row_location);
         } else {
-            assert!(false);
+            unreachable!();
         }
     }
 }

@@ -219,7 +219,7 @@ impl DataStorage {
     }
 
     fn open_by_file(
-        database_dir: &PathBuf,
+        database_dir: &Path,
         storage_id: StorageId,
         data_file: File,
         meta: Metadata,
@@ -230,7 +230,6 @@ impl DataStorage {
         let capacity = meta.len();
         let storage_impl = match options.storage_type {
             DataSotrageType::File => DataStorageImpl::FileStorage(FileDataStorage::new(
-                database_dir,
                 storage_id,
                 data_file,
                 write_offset,
@@ -239,7 +238,6 @@ impl DataStorage {
                 options,
             )?),
             DataSotrageType::Mmap => DataStorageImpl::MmapStorage(MmapDataStorage::new(
-                database_dir,
                 storage_id,
                 data_file,
                 write_offset as usize,
@@ -251,7 +249,7 @@ impl DataStorage {
         Ok(DataStorage {
             storage_impl,
             storage_id,
-            database_dir: database_dir.clone(),
+            database_dir: database_dir.to_path_buf(),
             options,
             dirty: false,
         })

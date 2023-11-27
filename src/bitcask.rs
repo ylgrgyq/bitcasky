@@ -16,7 +16,7 @@ use common::{
     storage_id::StorageIdGenerator,
     tombstone::is_tombstone,
 };
-use database::{deleted_value, DataBaseOptions, DataStorageOptions, Database, TimedValue};
+use database::{deleted_value, DataStorageOptions, Database, DatabaseOptions, TimedValue};
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
@@ -104,8 +104,8 @@ impl BitcaskOptions {
         None
     }
 
-    fn get_database_options(&self) -> DataBaseOptions {
-        DataBaseOptions {
+    fn get_database_options(&self) -> DatabaseOptions {
+        DatabaseOptions {
             storage_options: DataStorageOptions::default()
                 .max_data_file_size(self.max_data_file_size)
                 .init_data_file_capacity(self.init_data_file_capacity),

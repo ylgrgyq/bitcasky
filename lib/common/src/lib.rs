@@ -89,7 +89,7 @@ pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<()>
     // For all unix systems WAL can just use ftruncate directly
     #[cfg(unix)]
     {
-        rustix::fs::ftruncate(&file, required_capacity as u64)?;
+        rustix::fs::ftruncate(file, required_capacity as u64)?;
     }
     Ok(())
 }

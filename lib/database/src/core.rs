@@ -59,7 +59,7 @@ pub struct StorageIds {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DataBaseOptions {
+pub struct DatabaseOptions {
     pub storage_options: DataStorageOptions,
     /// How frequent can we flush data
     pub sync_interval_sec: u64,
@@ -71,7 +71,7 @@ pub struct Database {
     storage_id_generator: Arc<StorageIdGenerator>,
     writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
-    options: DataBaseOptions,
+    options: DatabaseOptions,
     hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
@@ -82,7 +82,7 @@ impl Database {
     pub fn open(
         directory: &Path,
         storage_id_generator: Arc<StorageIdGenerator>,
-        options: DataBaseOptions,
+        options: DatabaseOptions,
     ) -> DatabaseResult<Database> {
         let database_dir: PathBuf = directory.into();
 
@@ -622,20 +622,14 @@ fn prepare_load_storages<P: AsRef<Path>>(
 
 #[cfg(test)]
 pub mod database_tests_utils {
-    use bitcask_tests::common::TestingKV;
+    use std::sync::Arc;
 
-    use crate::{data_storage::DataSotrageType, DataStorageOptions, RowLocation, TimedValue};
+    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
+    use common::storage_id::StorageIdGenerator;
 
-    use super::{DataBaseOptions, Database};
+    use crate::{DataStorageOptions, RowLocation, TimedValue};
 
-    pub const DEFAULT_OPTIONS: DataBaseOptions = DataBaseOptions {
-        storage_options: DataStorageOptions {
-            max_data_file_size: 1024,
-            init_data_file_capacity: 100,
-            storage_type: DataSotrageType::Mmap,
-        },
-        sync_interval_sec: 60,
-    };
+    use super::{Database, DatabaseOptions};
 
     #[derive(Debug)]
     pub struct TestingRow {
@@ -646,6 +640,15 @@ pub mod database_tests_utils {
     impl TestingRow {
         pub fn new(kv: TestingKV, pos: RowLocation) -> Self {
             TestingRow { kv, pos }
+        }
+    }
+
+    fn get_database_options() -> DatabaseOptions {
+        DatabaseOptions {
+            storage_options: DataStorageOptions::default()
+                .max_data_file_size(1024)
+                .init_data_file_capacity(100),
+            sync_interval_sec: 60,
         }
     }
 
@@ -688,28 +691,12 @@ pub mod database_tests_utils {
             })
             .collect::<Vec<TestingRow>>()
     }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::{
-        data_storage::DataSotrageType,
-        database_tests_utils::{
-            assert_database_rows, assert_rows_value, write_kvs_to_db, TestingRow, DEFAULT_OPTIONS,
-        },
-    };
-
-    use super::*;
-
-    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use test_log::test;
 
     #[test]
     fn test_read_write_writing_file() {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let db = Database::open(&dir, storage_id_generator, DEFAULT_OPTIONS).unwrap();
+        let db = Database::open(&dir, storage_id_generator, get_database_options()).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -726,7 +713,8 @@ mod tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let db =
+            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -753,7 +741,8 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
-            let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -762,7 +751,8 @@ mod tests {
             assert_rows_value(&db, &rows);
         }
         {
-            let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k3", "hello world"),
                 TestingKV::new("k1", "value4"),
@@ -771,7 +761,8 @@ mod tests {
             assert_rows_value(&db, &rows);
         }
 
-        let db = Database::open(&dir, storage_id_generator.clone(), DEFAULT_OPTIONS).unwrap();
+        let db =
+            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
         assert_eq!(1, storage_id_generator.get_id());
         assert_eq!(0, db.stable_storages.len());
         assert_rows_value(&db, &rows);
@@ -785,12 +776,10 @@ mod tests {
         let db = Database::open(
             &dir,
             storage_id_generator,
-            DataBaseOptions {
-                storage_options: DataStorageOptions {
-                    max_data_file_size: 104,
-                    init_data_file_capacity: 100,
-                    storage_type: DataSotrageType::Mmap,
-                },
+            DatabaseOptions {
+                storage_options: DataStorageOptions::default()
+                    .max_data_file_size(104)
+                    .init_data_file_capacity(100),
                 sync_interval_sec: 60,
             },
         )

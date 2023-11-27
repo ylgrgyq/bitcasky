@@ -17,7 +17,7 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
         DataStorageOptions::default()
             .max_data_file_size(usize::MAX)
             .init_data_file_capacity(100)
-            .storage_type(database::data_storage::DataSotrageType::Mmap),
+            .storage_type(database::data_storage::DataSotrageType::File),
     )
     .unwrap()
 }

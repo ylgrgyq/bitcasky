@@ -275,7 +275,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::data_storage::{DataSotrageType, DataStorageWriter};
+    use crate::data_storage::DataStorageWriter;
     use common::formatter::RowToWrite;
 
     use super::*;
@@ -314,8 +314,7 @@ mod tests {
             storage_id,
             DataStorageOptions::default()
                 .max_data_file_size(1024)
-                .init_data_file_capacity(100)
-                .storage_type(DataSotrageType::Mmap),
+                .init_data_file_capacity(100),
         )
         .unwrap();
         let key = vec![1, 2, 3];
