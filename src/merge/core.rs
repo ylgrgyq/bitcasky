@@ -380,7 +380,7 @@ mod tests {
 
     fn get_database_options() -> DatabaseOptions {
         DatabaseOptions {
-            storage_options: DataStorageOptions::default()
+            storage: DataStorageOptions::default()
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
             sync_interval_sec: 60,

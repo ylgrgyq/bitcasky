@@ -60,9 +60,18 @@ pub struct StorageIds {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DatabaseOptions {
-    pub storage_options: DataStorageOptions,
+    pub storage: DataStorageOptions,
     /// How frequent can we flush data
     pub sync_interval_sec: u64,
+}
+
+impl Default for DatabaseOptions {
+    fn default() -> Self {
+        Self {
+            storage: DataStorageOptions::default(),
+            sync_interval_sec: 60,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -95,13 +104,13 @@ impl Database {
             storage_id_generator.update_id(*id);
         }
 
-        let hint_file_writer = Some(HintWriter::start(&database_dir, options.storage_options));
+        let hint_file_writer = Some(HintWriter::start(&database_dir, options.storage));
 
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
             &data_storage_ids,
             &storage_id_generator,
-            options.storage_options,
+            options.storage,
         )?;
 
         let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
@@ -186,11 +195,7 @@ impl Database {
             storage_ids.sort();
             storage_ids.reverse();
         }
-        DatabaseRecoverIter::new(
-            self.database_dir.clone(),
-            storage_ids,
-            self.options.storage_options,
-        )
+        DatabaseRecoverIter::new(self.database_dir.clone(), storage_ids, self.options.storage)
     }
 
     pub fn iter(&self) -> DatabaseResult<DatabaseIter> {
@@ -210,7 +215,7 @@ impl Database {
         let files: DatabaseResult<Vec<DataStorage>> = storage_ids
             .iter()
             .map(|f| {
-                DataStorage::open(&self.database_dir, *f, self.options.storage_options)
+                DataStorage::open(&self.database_dir, *f, self.options.storage)
                     .map_err(DatabaseError::StorageError)
             })
             .collect();
@@ -242,7 +247,7 @@ impl Database {
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
-            self.options.storage_options,
+            self.options.storage,
         )?;
 
         {
@@ -343,11 +348,8 @@ impl Database {
             return Ok(());
         }
         let next_storage_id = self.storage_id_generator.generate_next_id();
-        let next_writing_file = DataStorage::new(
-            &self.database_dir,
-            next_storage_id,
-            self.options.storage_options,
-        )?;
+        let next_writing_file =
+            DataStorage::new(&self.database_dir, next_storage_id, self.options.storage)?;
         let mut old_storage = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_storage.flush()?;
         let storage_id = old_storage.storage_id();
@@ -645,7 +647,7 @@ pub mod database_tests_utils {
 
     fn get_database_options() -> DatabaseOptions {
         DatabaseOptions {
-            storage_options: DataStorageOptions::default()
+            storage: DataStorageOptions::default()
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
             sync_interval_sec: 60,
@@ -777,7 +779,7 @@ pub mod database_tests_utils {
             &dir,
             storage_id_generator,
             DatabaseOptions {
-                storage_options: DataStorageOptions::default()
+                storage: DataStorageOptions::default()
                     .max_data_file_size(104)
                     .init_data_file_capacity(100),
                 sync_interval_sec: 60,
