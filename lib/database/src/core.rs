@@ -780,7 +780,7 @@ pub mod database_tests_utils {
             storage_id_generator,
             DatabaseOptions {
                 storage: DataStorageOptions::default()
-                    .max_data_file_size(110)
+                    .max_data_file_size(120)
                     .init_data_file_capacity(100),
                 sync_interval_sec: 60,
             },

@@ -99,7 +99,7 @@ pub type Result<T> = std::result::Result<T, FormatterError>;
 pub trait Formatter: std::marker::Send + 'static + Copy {
     fn row_header_size(&self) -> usize;
 
-    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
+    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
 
@@ -140,9 +140,9 @@ impl Formatter for BitcaskFormatter {
         }
     }
 
-    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
+    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.row_size(row),
+            BitcaskFormatter::V1(f) => f.net_row_size(row),
         }
     }
 
@@ -237,7 +237,7 @@ pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
     Err(FormatterError::UnknownFormatterVersion(formatter_version))
 }
 
-// Returns the number of padding bytes to add to a buffer to ensure 8-byte alignment.
+// Returns the number of padding bytes to add to a buffer to ensure 4-byte alignment.
 pub fn padding(len: usize) -> usize {
     4usize.wrapping_sub(len) & 7
 }

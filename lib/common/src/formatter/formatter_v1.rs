@@ -4,7 +4,8 @@ use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
 use super::{
-    Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta, RowToWrite,
+    padding, Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta,
+    RowToWrite,
 };
 
 const CRC_SIZE: usize = 4;
@@ -55,12 +56,13 @@ impl Formatter for FormatterV1 {
         DATA_FILE_KEY_OFFSET
     }
 
-    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
+    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
         self.row_header_size() + row.key.len() + row.value.len()
     }
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
-        let mut bs = BytesMut::with_capacity(self.row_size(row));
+        let net_size = self.net_row_size(row);
+        let mut bs = BytesMut::with_capacity(net_size);
 
         let crc = self.gen_crc(&row.meta, row.key, &row.value);
 
@@ -70,6 +72,7 @@ impl Formatter for FormatterV1 {
         bs.extend_from_slice(&row.meta.value_size.to_be_bytes());
         bs.extend_from_slice(row.key);
         bs.extend_from_slice(&row.value);
+        bs.resize(net_size + padding(net_size), 0);
         bs.freeze()
     }
 
@@ -196,8 +199,6 @@ mod tests {
     fn test_encode_decode_row() {
         let k = b"Hello".to_vec();
         let v = b"World".to_vec();
-        let k_len = k.len();
-        let v_len = v.len();
         let row = RowToWrite {
             meta: RowMeta {
                 timestamp: 12345,
@@ -211,7 +212,10 @@ mod tests {
         let formatter = FormatterV1 {};
         let bytes = formatter.encode_row(&row);
 
-        assert_eq!(v_len + k_len + formatter.row_header_size(), bytes.len());
+        assert_eq!(
+            formatter.net_row_size(&row) + padding(formatter.net_row_size(&row)),
+            bytes.len()
+        );
         assert_eq!(row.meta, formatter.decode_row_header(bytes).meta);
     }
 }

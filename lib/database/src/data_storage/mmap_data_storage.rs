@@ -2,7 +2,7 @@ use std::{fs::File, io::Write, mem, ops::Deref, ptr};
 
 use bytes::Bytes;
 use common::{
-    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     storage_id::StorageId,
 };
 use log::debug;
@@ -54,7 +54,8 @@ impl MmapDataStorage {
     }
 
     fn ensure_capacity<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<()> {
-        let row_size = self.formatter.row_size(row);
+        let mut row_size = self.formatter.net_row_size(row);
+        row_size += padding(row_size);
         let required_capacity = row_size + self.write_offset;
         if required_capacity > self.options.max_data_file_size {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
@@ -120,12 +121,12 @@ impl MmapDataStorage {
             return Ok(None);
         }
 
+        let net_size = self.formatter.row_header_size()
+            + header.meta.key_size as usize
+            + header.meta.value_size as usize;
+
         let kv_bs = Bytes::copy_from_slice(
-            &self.as_slice()[offset + self.formatter.row_header_size()
-                ..offset
-                    + self.formatter.row_header_size()
-                    + header.meta.key_size as usize
-                    + header.meta.value_size as usize],
+            &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size],
         );
 
         self.formatter.validate_key_value(&header, &kv_bs)?;
@@ -173,7 +174,11 @@ impl DataStorageReader for MmapDataStorage {
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
             return Ok(TimedValue {
-                value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
+                value: Value::VectorBytes(
+                    kv_bs
+                        .slice(meta.key_size as usize..(meta.key_size + meta.value_size) as usize)
+                        .into(),
+                ),
                 timestamp: meta.timestamp,
             });
         }
@@ -194,7 +199,8 @@ impl DataStorageReader for MmapDataStorage {
                 },
                 timestamp: meta.timestamp,
             };
-            self.write_offset += self.formatter.row_header_size() + kv_bs.len();
+            let net_size = self.formatter.row_header_size() + kv_bs.len();
+            self.write_offset += net_size + padding(net_size);
             return Ok(Some(row_to_read));
         }
         Ok(None)
@@ -285,7 +291,8 @@ mod tests {
             let v1: Vec<u8> = format!("value{}", i).into();
             let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
             storage.write_row(&row_to_write).unwrap();
-            size += storage.formatter.row_size(&row_to_write);
+            let net_size = storage.formatter.net_row_size(&row_to_write);
+            size += net_size + padding(net_size);
         }
 
         assert!(storage.data_file.metadata().unwrap().len() > init_size);

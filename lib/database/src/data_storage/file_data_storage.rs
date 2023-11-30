@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use log::info;
 
 use std::{
     fs::File,
@@ -7,7 +8,7 @@ use std::{
 };
 
 use common::{
-    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     storage_id::StorageId,
 };
 
@@ -64,21 +65,25 @@ impl FileDataStorage {
             return Ok(None);
         }
 
-        if offset + header_size + header.meta.key_size + header.meta.value_size > self.capacity {
+        let net_size = (header_size + header.meta.key_size + header.meta.value_size) as usize;
+        let padded = padding(net_size) + net_size;
+        if offset + padded as u64 > self.capacity {
             return Ok(None);
         }
 
-        let mut kv_buf = vec![0; (header.meta.key_size + header.meta.value_size) as usize];
+        let mut kv_buf = vec![0; padded - header_size as usize];
         self.data_file.read_exact(&mut kv_buf)?;
-        let kv_bs = Bytes::from(kv_buf);
+        let kv_bs = Bytes::from(
+            kv_buf[0..(header.meta.key_size + header.meta.value_size) as usize].to_vec(),
+        );
 
         self.formatter.validate_key_value(&header, &kv_bs)?;
         Ok(Some((header.meta, kv_bs)))
     }
 
     fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
-        let row_size = self.formatter.row_size(row);
-        (row_size + self.offset as usize) > self.options.max_data_file_size
+        let row_size = self.formatter.net_row_size(row);
+        (row_size + padding(row_size) + self.offset as usize) > self.options.max_data_file_size
     }
 }
 
@@ -146,13 +151,17 @@ impl DataStorageReader for FileDataStorage {
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         let value_offset = self.data_file.stream_position()?;
+        info!("read value {}", value_offset);
 
         if let Some((meta, kv_bs)) = self.do_read_row(value_offset)? {
-            self.offset =
-                value_offset + self.formatter.row_header_size() as u64 + kv_bs.len() as u64;
+            let net_size = self.formatter.row_header_size() + kv_bs.len();
+
+            self.offset = value_offset + padding(net_size) as u64 + net_size as u64;
             return Ok(Some(RowToRead {
                 key: kv_bs.slice(0..meta.key_size as usize).into(),
-                value: kv_bs.slice(meta.key_size as usize..).into(),
+                value: kv_bs
+                    .slice(meta.key_size as usize..(meta.key_size + meta.value_size) as usize)
+                    .into(),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
                     row_offset: value_offset,
