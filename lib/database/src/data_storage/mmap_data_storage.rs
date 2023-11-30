@@ -99,11 +99,6 @@ impl MmapDataStorage {
         }
     }
 
-    /// Returns the number of padding bytes to add to a buffer to ensure 8-byte alignment.
-    // fn padding(len: usize) -> usize {
-    //     4usize.wrapping_sub(len) & 7
-    // }
-
     fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Bytes)>> {
         let header_size = self.formatter.row_header_size();
         if offset + header_size >= self.capacity {

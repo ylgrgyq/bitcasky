@@ -128,6 +128,9 @@ mod tests {
             get_formatter_from_file(&mut reopen_file).unwrap()
         );
 
+        reopen_file
+            .seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))
+            .unwrap();
         let mut buf = vec![0; 4];
         reopen_file.read_exact(&mut buf).unwrap();
         assert_eq!(101, Bytes::from(buf).get_u32());

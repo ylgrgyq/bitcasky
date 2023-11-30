@@ -174,8 +174,7 @@ fn sequential_read_row_benchmark(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default();
-    // targets = write_row_benchmark, sync_write_row_benchmark, rand_read_row_benchmark, sequential_read_row_benchmark
-    targets = sequential_read_row_benchmark
+    targets = write_row_benchmark, sync_write_row_benchmark, rand_read_row_benchmark, sequential_read_row_benchmark
 }
 
 criterion_main!(benches);

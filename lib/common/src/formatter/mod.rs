@@ -15,7 +15,7 @@ pub use self::formatter_v1::FormatterV1;
 
 const MAGIC: &[u8; 3] = b"btk";
 const FORMATTER_V1_VERSION: u8 = 0;
-pub const FILE_HEADER_SIZE: usize = 4;
+pub const FILE_HEADER_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RowMeta {
@@ -208,10 +208,11 @@ impl Default for BitcaskFormatter {
 }
 
 pub fn initialize_new_file(file: &mut File, version: u8) -> std::io::Result<()> {
-    let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
+    let mut bs = BytesMut::with_capacity(FILE_HEADER_SIZE);
 
     bs.extend_from_slice(MAGIC);
     bs.put_u8(version);
+    bs.put_u32(0);
 
     file.write_all(&bs.freeze())?;
     file.flush()?;
@@ -219,7 +220,7 @@ pub fn initialize_new_file(file: &mut File, version: u8) -> std::io::Result<()> 
 }
 
 pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
-    let mut file_header = vec![0; MAGIC.len() + 1];
+    let mut file_header = vec![0; FILE_HEADER_SIZE];
 
     file.read_exact(&mut file_header)
         .map_err(|e| FormatterError::ReadFileHeaderFailed(e, "read file header failed".into()))?;
@@ -234,6 +235,11 @@ pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
     }
 
     Err(FormatterError::UnknownFormatterVersion(formatter_version))
+}
+
+// Returns the number of padding bytes to add to a buffer to ensure 8-byte alignment.
+pub fn padding(len: usize) -> usize {
+    4usize.wrapping_sub(len) & 7
 }
 
 #[cfg(test)]
