@@ -84,10 +84,10 @@ impl Formatter for FormatterV1 {
 
         let key_size = bs
             .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-            .get_u64();
+            .get_u64() as usize;
         let val_size = bs
             .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-            .get_u64();
+            .get_u64() as usize;
         RowHeader {
             crc: expected_crc,
             meta: RowMeta {
@@ -127,7 +127,7 @@ impl Formatter for FormatterV1 {
         let timestamp = header_bs.slice(0..TSTAMP_SIZE).get_u64();
         let key_size = header_bs
             .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
-            .get_u64();
+            .get_u64() as usize;
         let row_offset = header_bs
             .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
             .get_u64();
@@ -182,7 +182,7 @@ mod tests {
         let hint = RowHint {
             header: RowHintHeader {
                 timestamp: 12345,
-                key_size: k.len() as u64,
+                key_size: k.len(),
                 row_offset: 56789,
             },
             key: k,
@@ -202,8 +202,8 @@ mod tests {
         let row = RowToWrite {
             meta: RowMeta {
                 timestamp: 12345,
-                key_size: k.len() as u64,
-                value_size: v.len() as u64,
+                key_size: k.len(),
+                value_size: v.len(),
             },
             key: &k,
             value: v,

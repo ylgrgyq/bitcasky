@@ -128,7 +128,7 @@ impl Iterator for HintFileIterator {
             r => Some(r.map(|h| RecoveredRow {
                 row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
-                    row_offset: h.header.row_offset,
+                    row_offset: h.header.row_offset as u64,
                 },
                 timestamp: h.header.timestamp,
                 key: h.key,
@@ -203,7 +203,7 @@ impl HintWriter {
                             RowHint {
                                 header: RowHintHeader {
                                     timestamp: r.timestamp,
-                                    key_size: r.key.len() as u64,
+                                    key_size: r.key.len(),
                                     row_offset: r.row_location.row_offset,
                                 },
                                 key: r.key,
@@ -291,7 +291,7 @@ mod tests {
         let expect_row = RowHint {
             header: RowHintHeader {
                 timestamp: 12345,
-                key_size: key.len() as u64,
+                key_size: key.len(),
                 row_offset: 789,
             },
             key,
@@ -338,7 +338,7 @@ mod tests {
         let hint_row = hint_file.read_hint_row().unwrap();
 
         assert_eq!(key, hint_row.key);
-        assert_eq!(key.len() as u64, hint_row.header.key_size);
+        assert_eq!(key.len(), hint_row.header.key_size);
         assert_eq!(pos.row_offset, hint_row.header.row_offset);
     }
 }

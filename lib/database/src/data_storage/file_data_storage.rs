@@ -51,8 +51,8 @@ impl FileDataStorage {
     }
 
     fn do_read_row(&mut self, offset: u64) -> Result<Option<(RowMeta, Bytes)>> {
-        let header_size = self.formatter.row_header_size() as u64;
-        if offset + header_size >= self.capacity {
+        let header_size = self.formatter.row_header_size();
+        if offset + header_size as u64 >= self.capacity {
             return Ok(None);
         }
 
