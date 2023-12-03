@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use common::clock::BitcaskClock;
 use common::options::BitcaskOptions;
 use log::{debug, error};
 use parking_lot::RwLock;
@@ -33,7 +32,6 @@ pub struct Bitcask {
     options: BitcaskOptions,
     database: Database,
     merge_manager: MergeManager,
-    clock: BitcaskClock,
 }
 
 impl Bitcask {
@@ -60,7 +58,7 @@ impl Bitcask {
         );
         merge_manager.recover_merge()?;
 
-        let database = Database::open(directory, storage_id_generator, options.database)?;
+        let database = Database::open(directory, storage_id_generator, options)?;
         let keydir = RwLock::new(KeyDir::new(&database)?);
 
         debug!(target: "Bitcask", "Bitcask created. instanceId: {}", id);
@@ -71,7 +69,6 @@ impl Bitcask {
             database,
             options,
             merge_manager,
-            clock: BitcaskClock::default(),
         })
     }
 

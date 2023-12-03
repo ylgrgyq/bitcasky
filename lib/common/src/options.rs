@@ -129,6 +129,11 @@ impl BitcaskOptions {
         self
     }
 
+    pub fn storage_type(mut self, storage_type: DataSotrageType) -> BitcaskOptions {
+        self.database.storage.storage_type = storage_type;
+        self
+    }
+
     // How frequent can we sync data to file. 0 to stop auto sync. default: 1 min
     pub fn sync_interval(mut self, interval: Duration) -> BitcaskOptions {
         assert!(!interval.is_zero());

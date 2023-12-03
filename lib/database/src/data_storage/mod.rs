@@ -16,7 +16,7 @@ use common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::{DataSotrageType, DataStorageOptions},
+    options::{BitcaskOptions, DataSotrageType},
     storage_id::StorageId,
 };
 
@@ -81,7 +81,7 @@ pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
-    options: DataStorageOptions,
+    options: BitcaskOptions,
     dirty: bool,
 }
 
@@ -89,7 +89,7 @@ impl DataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let formatter = BitcaskFormatter::default();
@@ -98,7 +98,7 @@ impl DataStorage {
             FileType::DataFile,
             Some(storage_id),
             &formatter,
-            options.init_data_file_capacity,
+            options.database.storage.init_data_file_capacity,
         )?;
 
         debug!(
@@ -121,7 +121,7 @@ impl DataStorage {
     pub fn open<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = fs::open_file(&path, FileType::DataFile, Some(storage_id))?;
@@ -184,10 +184,10 @@ impl DataStorage {
         meta: Metadata,
         write_offset: usize,
         formatter: BitcaskFormatter,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let capacity = meta.len() as usize;
-        let storage_impl = match options.storage_type {
+        let storage_impl = match options.database.storage.storage_type {
             DataSotrageType::File => DataStorageImpl::FileStorage(FileDataStorage::new(
                 storage_id,
                 data_file,

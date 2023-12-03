@@ -9,7 +9,7 @@ use std::{
 
 use common::{
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
-    options::DataStorageOptions,
+    options::BitcaskOptions,
     storage_id::StorageId,
 };
 
@@ -26,7 +26,7 @@ pub struct FileDataStorage {
     pub storage_id: StorageId,
     offset: usize,
     capacity: usize,
-    options: DataStorageOptions,
+    options: BitcaskOptions,
     formatter: BitcaskFormatter,
 }
 
@@ -37,7 +37,7 @@ impl FileDataStorage {
         write_offset: usize,
         capacity: usize,
         formatter: BitcaskFormatter,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
             data_file,
@@ -80,7 +80,8 @@ impl FileDataStorage {
 
     fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         let row_size = self.formatter.net_row_size(row);
-        row_size + padding(row_size) + self.offset > self.options.max_data_file_size
+        row_size + padding(row_size) + self.offset
+            > self.options.database.storage.max_data_file_size
     }
 }
 
@@ -204,7 +205,7 @@ mod tests {
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
         initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
-        let options = DataStorageOptions::default()
+        let options = BitcaskOptions::default()
             .max_data_file_size(max_size)
             .init_data_file_capacity(max_size)
             .storage_type(DataSotrageType::File);

@@ -17,7 +17,7 @@ use common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::{DataStorageOptions, DatabaseOptions},
+    options::BitcaskOptions,
     storage_id::StorageId,
 };
 use memmap2::{MmapMut, MmapOptions};
@@ -193,7 +193,7 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path, options: DatabaseOptions) -> HintWriter {
+    pub fn start(database_dir: &Path, options: BitcaskOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
@@ -233,15 +233,15 @@ impl HintWriter {
     fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        options: DatabaseOptions,
+        options: BitcaskOptions,
     ) -> DatabaseResult<()> {
-        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.storage)?;
+        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options)?;
 
         let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(
             &hint_file_tmp_dir,
             data_storage_id,
-            options.init_hint_file_capacity,
+            options.database.init_hint_file_capacity,
         )?;
         m.values()
             .map(|r| hint_file.write_hint_row(r))
@@ -261,9 +261,9 @@ impl HintWriter {
     fn build_row_hint(
         database_dir: &Path,
         data_storage_id: StorageId,
-        storage_options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> DatabaseResult<HashMap<Vec<u8>, RowHint>> {
-        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, options)?;
 
         let data_itr = stable_file_opt.iter()?;
 
@@ -379,7 +379,7 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            DataStorageOptions::default()
+            BitcaskOptions::default()
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
         )
@@ -394,11 +394,9 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
-                DatabaseOptions::default().storage(
-                    DataStorageOptions::default()
-                        .max_data_file_size(1024)
-                        .init_data_file_capacity(100),
-                ),
+                BitcaskOptions::default()
+                    .max_data_file_size(1024)
+                    .init_data_file_capacity(100),
             );
             writer.async_write_hint_file(storage_id);
         }

@@ -3,7 +3,7 @@ use std::{fs::File, io::Write, mem, ops::Deref, ptr};
 use bytes::Bytes;
 use common::{
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
-    options::DataStorageOptions,
+    options::BitcaskOptions,
     storage_id::StorageId,
 };
 use log::debug;
@@ -22,7 +22,7 @@ pub struct MmapDataStorage {
     pub storage_id: StorageId,
     write_offset: usize,
     capacity: usize,
-    options: DataStorageOptions,
+    options: BitcaskOptions,
     formatter: BitcaskFormatter,
     map_view: MmapMut,
 }
@@ -34,7 +34,7 @@ impl MmapDataStorage {
         write_offset: usize,
         capacity: usize,
         formatter: BitcaskFormatter,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let mmap = unsafe {
             MmapOptions::new()
@@ -58,14 +58,17 @@ impl MmapDataStorage {
         let mut row_size = self.formatter.net_row_size(row);
         row_size += padding(row_size);
         let required_capacity = row_size + self.write_offset;
-        if required_capacity > self.options.max_data_file_size {
+        if required_capacity > self.options.database.storage.max_data_file_size {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
         }
 
         if required_capacity > self.capacity {
             let mut new_capacity =
                 std::cmp::max(required_capacity, self.capacity + self.capacity / 3);
-            new_capacity = std::cmp::min(new_capacity, self.options.max_data_file_size);
+            new_capacity = std::cmp::min(
+                new_capacity,
+                self.options.database.storage.max_data_file_size,
+            );
             debug!(
                 "data file with storage id: {:?}, resizing to {} bytes",
                 self.storage_id, new_capacity
@@ -230,7 +233,7 @@ mod tests {
         let storage_id = 1;
         let formatter = BitcaskFormatter::default();
         let file = create_file(dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
-        let options = DataStorageOptions::default()
+        let options = BitcaskOptions::default()
             .max_data_file_size(max_size)
             .init_data_file_capacity(max_size)
             .storage_type(DataSotrageType::Mmap);

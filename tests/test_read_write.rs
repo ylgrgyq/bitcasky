@@ -1,13 +1,10 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use bitcask::{bitcask::Bitcask, error::BitcaskError};
 use bitcask_tests::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
-use common::{
-    clock::BitcaskClock,
-    options::{BitcaskOptions, DataSotrageType, DataStorageOptions, DatabaseOptions},
-};
+use common::options::BitcaskOptions;
 use test_log::test;
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
@@ -22,22 +19,16 @@ fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
 }
 
 fn get_default_options() -> BitcaskOptions {
-    BitcaskOptions {
-        database: DatabaseOptions {
-            storage: DataStorageOptions {
-                max_data_file_size: 10 * 1024,
-                init_data_file_capacity: 100,
-                storage_type: DataSotrageType::Mmap,
-            },
-            init_hint_file_capacity: 1024,
-            sync_interval_sec: 1,
-        },
-        max_key_size: 64,
-        max_value_size: 1024,
-        clock: BitcaskClock::default(),
-    }
+    BitcaskOptions::default()
+        .max_data_file_size(10 * 1024)
+        .init_data_file_capacity(100)
+        .init_hint_file_capacity(1024)
+        .sync_interval(Duration::from_secs(1))
+        .max_key_size(64)
+        .max_value_size(1024)
 }
 
+#[test]
 fn test_open_db_twice() {
     let dir = get_temporary_directory_path();
     let _bc = Bitcask::open(&dir, get_default_options()).unwrap();
