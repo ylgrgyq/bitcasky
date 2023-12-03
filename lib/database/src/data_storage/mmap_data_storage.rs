@@ -176,7 +176,7 @@ impl DataStorageReader for MmapDataStorage {
                         .slice(meta.key_size..meta.key_size + meta.value_size)
                         .into(),
                 ),
-                timestamp: meta.timestamp,
+                expire_timestamp: meta.expire_timestamp,
             });
         }
         Err(DataStorageError::ReadRowFailed(
@@ -194,7 +194,7 @@ impl DataStorageReader for MmapDataStorage {
                     storage_id: self.storage_id,
                     row_offset: self.write_offset,
                 },
-                timestamp: meta.timestamp,
+                expire_timestamp: meta.expire_timestamp,
             };
             let net_size = self.formatter.row_header_size() + kv_bs.len();
             self.write_offset += net_size + padding(net_size);

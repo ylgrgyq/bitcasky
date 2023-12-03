@@ -164,7 +164,8 @@ impl Database {
         key: &Vec<u8>,
         value: TimedValue<V>,
     ) -> DatabaseResult<RowLocation> {
-        let row: RowToWrite<'_, TimedValue<V>> = RowToWrite::new(key, value);
+        let ts = value.expire_timestamp;
+        let row: RowToWrite<'_, TimedValue<V>> = RowToWrite::new_with_timestamp(key, value, ts);
         let mut writing_file_ref = self.writing_storage.lock();
 
         match writing_file_ref.write_row(&row) {
@@ -521,7 +522,7 @@ fn recovered_iter(
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
                     row_location: r.row_location,
-                    timestamp: r.timestamp,
+                    expire_timestamp: r.expire_timestamp,
                     key: r.key,
                     is_tombstone: tombstone::is_tombstone(&r.value),
                 })

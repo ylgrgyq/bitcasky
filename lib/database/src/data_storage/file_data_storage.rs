@@ -138,7 +138,7 @@ impl DataStorageReader for FileDataStorage {
         {
             return Ok(TimedValue {
                 value: Value::VectorBytes(kv_bs.slice(meta.key_size..).into()),
-                timestamp: meta.timestamp,
+                expire_timestamp: meta.expire_timestamp,
             });
         }
         Err(DataStorageError::ReadRowFailed(
@@ -164,7 +164,7 @@ impl DataStorageReader for FileDataStorage {
                     storage_id: self.storage_id,
                     row_offset: value_offset,
                 },
-                timestamp: meta.timestamp,
+                expire_timestamp: meta.expire_timestamp,
             }));
         }
         Ok(None)

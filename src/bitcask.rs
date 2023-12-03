@@ -2,7 +2,7 @@ use std::fs::File;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use log::{debug, error};
 use parking_lot::RwLock;
@@ -132,36 +132,27 @@ impl Bitcask {
 
     /// Stores the key and value in the database.
     pub fn put<V: Deref<Target = [u8]>>(&self, key: Vec<u8>, value: V) -> BitcaskResult<()> {
-        if key.len() > self.options.max_key_size {
+        self.do_put(key, TimedValue::immortal_value(value))
+    }
+
+    /// Stores the key, value in the database and set a expire time with this value.
+    pub fn put_with_ttl<V: Deref<Target = [u8]>>(
+        &self,
+        key: Vec<u8>,
+        value: V,
+        ttl: Duration,
+    ) -> BitcaskResult<()> {
+        if ttl.is_zero() {
             return Err(BitcaskError::InvalidParameter(
-                "key".into(),
-                "key size overflow".into(),
+                "ttl".into(),
+                "ttl cannot be zero".into(),
             ));
         }
-        if value.len() > self.options.max_value_size {
-            return Err(BitcaskError::InvalidParameter(
-                "value".into(),
-                "values size overflow".into(),
-            ));
-        }
 
-        self.database.check_db_error()?;
+        let expire_timestamp =
+            (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + ttl).as_millis() as u64;
 
-        let kd = self.keydir.write();
-        let ret = self
-            .database
-            .write(&key, TimedValue::immortal_value(value))
-            .map_err(|e| {
-                error!(target: "BitcaskPut", "put data failed with error: {}", &e);
-
-                self.database.mark_db_error(e.to_string());
-                e
-            })?;
-
-        debug!(target: "Bitcask", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
-            key, ret.storage_id, ret.row_offset);
-        kd.put(key, ret);
-        Ok(())
+        self.do_put(key, TimedValue::expirable_value(value, expire_timestamp))
     }
 
     /// Fetches value for a key
@@ -302,6 +293,40 @@ impl Bitcask {
             number_of_pending_hint_files: db_stats.number_of_pending_hint_files,
             number_of_keys: key_size,
         })
+    }
+
+    pub fn do_put<V: Deref<Target = [u8]>>(
+        &self,
+        key: Vec<u8>,
+        value: TimedValue<V>,
+    ) -> BitcaskResult<()> {
+        if key.len() > self.options.max_key_size {
+            return Err(BitcaskError::InvalidParameter(
+                "key".into(),
+                "key size overflow".into(),
+            ));
+        }
+        if value.len() > self.options.max_value_size {
+            return Err(BitcaskError::InvalidParameter(
+                "value".into(),
+                "values size overflow".into(),
+            ));
+        }
+
+        self.database.check_db_error()?;
+
+        let kd = self.keydir.write();
+        let ret = self.database.write(&key, value).map_err(|e| {
+            error!(target: "BitcaskPut", "put data failed with error: {}", &e);
+
+            self.database.mark_db_error(e.to_string());
+            e
+        })?;
+
+        debug!(target: "Bitcask", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
+            key, ret.storage_id, ret.row_offset);
+        kd.put(key, ret);
+        Ok(())
     }
 }
 

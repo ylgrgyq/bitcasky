@@ -1,4 +1,5 @@
 use common::formatter::FormatterError;
+use common::tombstone::is_tombstone;
 use common::{storage_id::StorageId, tombstone::TOMBSTONE_VALUE};
 use std::ops::Deref;
 use thiserror::Error;
@@ -29,7 +30,17 @@ impl Deref for Value {
 #[derive(Debug)]
 pub struct TimedValue<V: Deref<Target = [u8]>> {
     pub value: V,
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
+}
+
+impl<V: Deref<Target = [u8]>> TimedValue<V> {
+    pub fn is_valid(&self, now: u64) -> bool {
+        if is_tombstone(&self.value) {
+            return false;
+        }
+
+        self.expire_timestamp == 0 || self.expire_timestamp > now
+    }
 }
 
 impl<V: Deref<Target = [u8]>> Deref for TimedValue<V> {
@@ -48,12 +59,15 @@ impl<V: Deref<Target = [u8]>> TimedValue<V> {
     pub fn immortal_value(value: V) -> TimedValue<V> {
         TimedValue {
             value,
-            timestamp: 0,
+            expire_timestamp: 0,
         }
     }
 
-    pub fn has_time_value(value: V, timestamp: u64) -> TimedValue<V> {
-        TimedValue { value, timestamp }
+    pub fn expirable_value(value: V, expire_timestamp: u64) -> TimedValue<V> {
+        TimedValue {
+            value,
+            expire_timestamp,
+        }
     }
 }
 
@@ -62,12 +76,12 @@ pub struct RowToRead {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
     pub row_location: RowLocation,
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
 }
 
 pub struct RecoveredRow {
     pub row_location: RowLocation,
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
     pub key: Vec<u8>,
     pub is_tombstone: bool,
 }

@@ -32,7 +32,7 @@ impl FormatterV1 {
     fn gen_crc<V: Deref<Target = [u8]>>(&self, meta: &RowMeta, key: &[u8], value: &V) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
-        ck.update(&meta.timestamp.to_be_bytes());
+        ck.update(&meta.expire_timestamp.to_be_bytes());
         ck.update(&meta.key_size.to_be_bytes());
         ck.update(&value.len().to_be_bytes());
         ck.update(key);
@@ -43,7 +43,7 @@ impl FormatterV1 {
     fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &Bytes) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
-        ck.update(&meta.timestamp.to_be_bytes());
+        ck.update(&meta.expire_timestamp.to_be_bytes());
         ck.update(&meta.key_size.to_be_bytes());
         ck.update(&meta.value_size.to_be_bytes());
         ck.update(kv);
@@ -67,7 +67,7 @@ impl Formatter for FormatterV1 {
         let crc = self.gen_crc(&row.meta, row.key, &row.value);
 
         bs.extend_from_slice(&crc.to_be_bytes());
-        bs.extend_from_slice(&row.meta.timestamp.to_be_bytes());
+        bs.extend_from_slice(&row.meta.expire_timestamp.to_be_bytes());
         bs.extend_from_slice(&row.meta.key_size.to_be_bytes());
         bs.extend_from_slice(&row.meta.value_size.to_be_bytes());
         bs.extend_from_slice(row.key);
@@ -91,7 +91,7 @@ impl Formatter for FormatterV1 {
         RowHeader {
             crc: expected_crc,
             meta: RowMeta {
-                timestamp,
+                expire_timestamp: timestamp,
                 key_size,
                 value_size: val_size,
             },
@@ -112,7 +112,7 @@ impl Formatter for FormatterV1 {
     fn encode_row_hint(&self, hint: &super::RowHint) -> Bytes {
         let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + hint.key.len());
         let header = &hint.header;
-        bs.extend_from_slice(&header.timestamp.to_be_bytes());
+        bs.extend_from_slice(&header.expire_timestamp.to_be_bytes());
         bs.extend_from_slice(&header.key_size.to_be_bytes());
         bs.extend_from_slice(&header.row_offset.to_be_bytes());
         bs.extend_from_slice(&hint.key);
@@ -133,7 +133,7 @@ impl Formatter for FormatterV1 {
             .get_u64() as usize;
 
         RowHintHeader {
-            timestamp,
+            expire_timestamp: timestamp,
             key_size,
             row_offset,
         }
@@ -181,7 +181,7 @@ mod tests {
         let k_len = k.len();
         let hint = RowHint {
             header: RowHintHeader {
-                timestamp: 12345,
+                expire_timestamp: 12345,
                 key_size: k.len(),
                 row_offset: 56789,
             },
@@ -201,7 +201,7 @@ mod tests {
         let v = b"World".to_vec();
         let row = RowToWrite {
             meta: RowMeta {
-                timestamp: 12345,
+                expire_timestamp: 12345,
                 key_size: k.len(),
                 value_size: v.len(),
             },

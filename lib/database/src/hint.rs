@@ -179,7 +179,7 @@ impl Iterator for HintFileIterator {
                     storage_id: self.file.storage_id,
                     row_offset: r.header.row_offset,
                 },
-                timestamp: r.header.timestamp,
+                expire_timestamp: r.header.expire_timestamp,
                 key: r.key,
                 is_tombstone: false,
             })),
@@ -280,7 +280,7 @@ impl HintWriter {
                             r.key.clone(),
                             RowHint {
                                 header: RowHintHeader {
-                                    timestamp: r.timestamp,
+                                    expire_timestamp: r.expire_timestamp,
                                     key_size: r.key.len(),
                                     row_offset: r.row_location.row_offset,
                                 },
@@ -356,7 +356,7 @@ mod tests {
         let key = vec![1, 2, 3];
         let expect_row = RowHint {
             header: RowHintHeader {
-                timestamp: 12345,
+                expire_timestamp: 12345,
                 key_size: key.len(),
                 row_offset: 789,
             },

@@ -19,7 +19,7 @@ pub const FILE_HEADER_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RowMeta {
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
     pub key_size: usize,
     pub value_size: usize,
 }
@@ -44,7 +44,7 @@ pub struct MergeMeta {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RowHintHeader {
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
     pub key_size: usize,
     pub row_offset: usize,
 }
@@ -64,12 +64,16 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
         RowToWrite::new_with_timestamp(key, value, now)
     }
 
-    pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
+    pub fn new_with_timestamp(
+        key: &'a Vec<u8>,
+        value: V,
+        expire_timestamp: u64,
+    ) -> RowToWrite<'a, V> {
         let key_size = key.len();
         let value_size = value.len();
         RowToWrite {
             meta: RowMeta {
-                timestamp,
+                expire_timestamp,
                 key_size,
                 value_size,
             },

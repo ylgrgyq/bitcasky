@@ -197,10 +197,11 @@ impl MergeManager {
             let k = r.key();
             let v = database.read_value(r.value())?;
             if !is_tombstone(&v.value) {
-                let pos = merge_db.write(k, TimedValue::has_time_value(v.value, v.timestamp))?;
+                let pos =
+                    merge_db.write(k, TimedValue::expirable_value(v.value, v.expire_timestamp))?;
                 merged_key_dir.checked_put(k.clone(), pos);
-                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, timestamp: {}", 
-                    k, pos.storage_id, pos.row_offset, v.timestamp);
+                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, expire_timestamp: {}", 
+                    k, pos.storage_id, pos.row_offset, v.expire_timestamp);
                 write_key_count += 1;
             }
         }
