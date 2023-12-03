@@ -14,6 +14,7 @@ use common::{
         get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, MergeMeta,
     },
     fs::{self, FileType},
+    options::BitcaskOptions,
     storage_id::{StorageId, StorageIdGenerator},
 };
 use database::{Database, TimedValue};
@@ -21,7 +22,6 @@ use database::{Database, TimedValue};
 use crate::{
     error::{BitcaskError, BitcaskResult},
     keydir::KeyDir,
-    options::BitcaskOptions,
 };
 
 const MERGE_FILES_DIRECTORY: &str = "Merge";

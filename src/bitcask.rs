@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::clock::BitcaskClock;
+use common::options::BitcaskOptions;
 use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
@@ -12,7 +13,6 @@ use uuid::Uuid;
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
-use crate::options::BitcaskOptions;
 use common::{
     fs::{self},
     storage_id::StorageIdGenerator,

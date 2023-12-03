@@ -15,6 +15,7 @@ use parking_lot::{Mutex, MutexGuard};
 use common::{
     formatter::RowToWrite,
     fs::{self as SelfFs, FileType},
+    options::{DataStorageOptions, DatabaseOptions},
     storage_id::{StorageId, StorageIdGenerator},
 };
 
@@ -27,9 +28,7 @@ use log::{debug, error, info, trace, warn};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
-    data_storage::{
-        DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, StorageIter,
-    },
+    data_storage::{DataStorage, DataStorageReader, DataStorageWriter, StorageIter},
     DataStorageError,
 };
 use super::{
@@ -55,31 +54,6 @@ pub struct DatabaseStats {
 pub struct StorageIds {
     pub stable_storage_ids: Vec<StorageId>,
     pub writing_storage_id: StorageId,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DatabaseOptions {
-    pub storage: DataStorageOptions,
-    /// How frequent can we flush data
-    pub sync_interval_sec: u64,
-    pub init_hint_file_capacity: usize,
-}
-
-impl DatabaseOptions {
-    pub fn storage(mut self, storage: DataStorageOptions) -> Self {
-        self.storage = storage;
-        self
-    }
-}
-
-impl Default for DatabaseOptions {
-    fn default() -> Self {
-        Self {
-            storage: DataStorageOptions::default(),
-            init_hint_file_capacity: 1024 * 1024,
-            sync_interval_sec: 60,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -638,9 +612,9 @@ pub mod database_tests_utils {
     use std::sync::Arc;
 
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use common::storage_id::StorageIdGenerator;
+    use common::{options::DataStorageOptions, storage_id::StorageIdGenerator};
 
-    use crate::{DataStorageOptions, RowLocation, TimedValue};
+    use crate::{RowLocation, TimedValue};
 
     use super::{Database, DatabaseOptions};
 

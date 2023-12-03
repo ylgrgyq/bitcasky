@@ -3,6 +3,7 @@ use std::{fs::File, io::Write, mem, ops::Deref, ptr};
 use bytes::Bytes;
 use common::{
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    options::DataStorageOptions,
     storage_id::StorageId,
 };
 use log::debug;
@@ -10,7 +11,7 @@ use memmap2::{MmapMut, MmapOptions};
 
 use crate::{
     common::{RowToRead, Value},
-    DataStorageError, DataStorageOptions, RowLocation, TimedValue,
+    DataStorageError, RowLocation, TimedValue,
 };
 
 use super::{DataStorageReader, DataStorageWriter, Result};
@@ -215,9 +216,9 @@ impl DataStorageReader for MmapDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use common::{create_file, formatter::FILE_HEADER_SIZE, fs::FileType};
-
-    use crate::data_storage::DataSotrageType;
+    use common::{
+        create_file, formatter::FILE_HEADER_SIZE, fs::FileType, options::DataSotrageType,
+    };
 
     use super::*;
 

@@ -16,6 +16,7 @@ use common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
+    options::{DataSotrageType, DataStorageOptions},
     storage_id::StorageId,
 };
 
@@ -69,52 +70,10 @@ pub trait DataStorageReader {
     fn seek_to_end(&mut self) -> Result<()>;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum DataSotrageType {
-    File,
-    Mmap,
-}
-
 #[derive(Debug)]
 enum DataStorageImpl {
     FileStorage(FileDataStorage),
     MmapStorage(MmapDataStorage),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DataStorageOptions {
-    pub max_data_file_size: usize,
-    pub init_data_file_capacity: usize,
-    pub storage_type: DataSotrageType,
-}
-
-impl Default for DataStorageOptions {
-    fn default() -> Self {
-        Self {
-            max_data_file_size: 128 * 1024 * 1024,
-            init_data_file_capacity: 1024 * 1024,
-            storage_type: DataSotrageType::Mmap,
-        }
-    }
-}
-
-impl DataStorageOptions {
-    pub fn max_data_file_size(mut self, size: usize) -> DataStorageOptions {
-        assert!(size > 0);
-        self.max_data_file_size = size;
-        self
-    }
-
-    pub fn init_data_file_capacity(mut self, capacity: usize) -> DataStorageOptions {
-        assert!(capacity > 0);
-        self.init_data_file_capacity = capacity;
-        self
-    }
-
-    pub fn storage_type(mut self, storage_type: DataSotrageType) -> DataStorageOptions {
-        self.storage_type = storage_type;
-        self
-    }
 }
 
 #[derive(Debug)]

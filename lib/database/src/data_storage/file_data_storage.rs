@@ -9,6 +9,7 @@ use std::{
 
 use common::{
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    options::DataStorageOptions,
     storage_id::StorageId,
 };
 
@@ -17,9 +18,7 @@ use crate::{
     DataStorageError,
 };
 
-use super::{
-    DataStorageOptions, DataStorageReader, DataStorageWriter, Result, RowLocation, TimedValue,
-};
+use super::{DataStorageReader, DataStorageWriter, Result, RowLocation, TimedValue};
 
 #[derive(Debug)]
 pub struct FileDataStorage {
@@ -190,9 +189,10 @@ mod tests {
     use common::{
         formatter::initialize_new_file,
         fs::{create_file, FileType},
+        options::DataSotrageType,
     };
 
-    use crate::data_storage::{DataSotrageType, DataStorage};
+    use crate::data_storage::DataStorage;
 
     use super::*;
 

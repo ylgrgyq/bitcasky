@@ -1,7 +1,73 @@
 use std::time::Duration;
 
-use common::clock::{BitcaskClock, ClockImpl, DebugClock};
-use database::DatabaseOptions;
+use crate::clock::{BitcaskClock, ClockImpl, DebugClock};
+
+#[derive(Debug, Clone, Copy)]
+pub enum DataSotrageType {
+    File,
+    Mmap,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DataStorageOptions {
+    pub max_data_file_size: usize,
+    pub init_data_file_capacity: usize,
+    pub storage_type: DataSotrageType,
+}
+
+impl Default for DataStorageOptions {
+    fn default() -> Self {
+        Self {
+            max_data_file_size: 128 * 1024 * 1024,
+            init_data_file_capacity: 1024 * 1024,
+            storage_type: DataSotrageType::Mmap,
+        }
+    }
+}
+
+impl DataStorageOptions {
+    pub fn max_data_file_size(mut self, size: usize) -> DataStorageOptions {
+        assert!(size > 0);
+        self.max_data_file_size = size;
+        self
+    }
+
+    pub fn init_data_file_capacity(mut self, capacity: usize) -> DataStorageOptions {
+        assert!(capacity > 0);
+        self.init_data_file_capacity = capacity;
+        self
+    }
+
+    pub fn storage_type(mut self, storage_type: DataSotrageType) -> DataStorageOptions {
+        self.storage_type = storage_type;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DatabaseOptions {
+    pub storage: DataStorageOptions,
+    /// How frequent can we flush data
+    pub sync_interval_sec: u64,
+    pub init_hint_file_capacity: usize,
+}
+
+impl DatabaseOptions {
+    pub fn storage(mut self, storage: DataStorageOptions) -> Self {
+        self.storage = storage;
+        self
+    }
+}
+
+impl Default for DatabaseOptions {
+    fn default() -> Self {
+        Self {
+            storage: DataStorageOptions::default(),
+            init_hint_file_capacity: 1024 * 1024,
+            sync_interval_sec: 60,
+        }
+    }
+}
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]

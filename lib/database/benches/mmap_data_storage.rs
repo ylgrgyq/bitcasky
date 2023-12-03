@@ -1,10 +1,8 @@
 use std::vec;
 
 use bitcask_tests::common::RandomTestingDataGenerator;
-use common::formatter::RowToWrite;
-use database::data_storage::{
-    DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter,
-};
+use common::{formatter::RowToWrite, options::DataStorageOptions};
+use database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{seq::SliceRandom, thread_rng};
@@ -17,7 +15,7 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
         DataStorageOptions::default()
             .max_data_file_size(usize::MAX)
             .init_data_file_capacity(100)
-            .storage_type(database::data_storage::DataSotrageType::Mmap),
+            .storage_type(common::options::DataSotrageType::Mmap),
     )
     .unwrap()
 }

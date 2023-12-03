@@ -17,6 +17,7 @@ use common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
+    options::{DataStorageOptions, DatabaseOptions},
     storage_id::StorageId,
 };
 use memmap2::{MmapMut, MmapOptions};
@@ -24,11 +25,10 @@ use memmap2::{MmapMut, MmapOptions};
 use crate::{
     common::{DatabaseError, DatabaseResult},
     data_storage::{mmap_data_storage::MmapDataStorage, DataStorage},
-    DatabaseOptions,
 };
 use crossbeam_channel::{unbounded, Sender};
 
-use super::{common::RecoveredRow, data_storage::DataStorageOptions};
+use super::common::RecoveredRow;
 
 const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";

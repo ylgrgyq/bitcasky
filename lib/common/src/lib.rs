@@ -15,6 +15,7 @@ use crate::formatter::FILE_HEADER_SIZE;
 pub mod clock;
 pub mod formatter;
 pub mod fs;
+pub mod options;
 pub mod storage_id;
 pub mod tombstone;
 
