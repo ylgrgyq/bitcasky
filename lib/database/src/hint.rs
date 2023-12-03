@@ -81,7 +81,7 @@ impl HintFile {
         let header_bs = Bytes::from(header_buf);
         let header = self.formatter.decode_row_hint_header(header_bs);
 
-        let mut k_buf = vec![0; header.key_size as usize];
+        let mut k_buf = vec![0; header.key_size];
         self.file.read_exact(&mut k_buf)?;
         let key: Vec<u8> = Bytes::from(k_buf).into();
 
@@ -128,7 +128,7 @@ impl Iterator for HintFileIterator {
             r => Some(r.map(|h| RecoveredRow {
                 row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
-                    row_offset: h.header.row_offset as u64,
+                    row_offset: h.header.row_offset,
                 },
                 timestamp: h.header.timestamp,
                 key: h.key,

@@ -130,7 +130,7 @@ impl Formatter for FormatterV1 {
             .get_u64() as usize;
         let row_offset = header_bs
             .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
-            .get_u64();
+            .get_u64() as usize;
 
         RowHintHeader {
             timestamp,

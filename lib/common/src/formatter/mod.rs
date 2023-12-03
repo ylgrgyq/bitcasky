@@ -46,7 +46,7 @@ pub struct MergeMeta {
 pub struct RowHintHeader {
     pub timestamp: u64,
     pub key_size: usize,
-    pub row_offset: u64,
+    pub row_offset: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

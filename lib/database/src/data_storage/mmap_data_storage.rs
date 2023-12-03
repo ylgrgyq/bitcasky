@@ -115,15 +115,12 @@ impl MmapDataStorage {
             return Ok(None);
         }
 
-        if offset + header_size + header.meta.key_size as usize + header.meta.value_size as usize
-            > self.capacity
-        {
+        if offset + header_size + header.meta.key_size + header.meta.value_size > self.capacity {
             return Ok(None);
         }
 
-        let net_size = self.formatter.row_header_size()
-            + header.meta.key_size as usize
-            + header.meta.value_size as usize;
+        let net_size =
+            self.formatter.row_header_size() + header.meta.key_size + header.meta.value_size;
 
         let kv_bs = Bytes::copy_from_slice(
             &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size],
@@ -149,7 +146,7 @@ impl DataStorageWriter for MmapDataStorage {
 
         Ok(RowLocation {
             storage_id: self.storage_id,
-            row_offset: value_offset as u64,
+            row_offset: value_offset,
         })
     }
 
@@ -167,16 +164,16 @@ impl DataStorageWriter for MmapDataStorage {
 impl DataStorageReader for MmapDataStorage {
     fn read_value(
         &mut self,
-        row_offset: u64,
+        row_offset: usize,
     ) -> super::Result<crate::TimedValue<crate::common::Value>> {
         if let Some((meta, kv_bs)) = self
-            .do_read_row(row_offset as usize)
+            .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
             return Ok(TimedValue {
                 value: Value::VectorBytes(
                     kv_bs
-                        .slice(meta.key_size as usize..(meta.key_size + meta.value_size) as usize)
+                        .slice(meta.key_size..meta.key_size + meta.value_size)
                         .into(),
                 ),
                 timestamp: meta.timestamp,
@@ -191,11 +188,11 @@ impl DataStorageReader for MmapDataStorage {
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
         if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
             let row_to_read = RowToRead {
-                key: kv_bs.slice(0..meta.key_size as usize).into(),
-                value: kv_bs.slice(meta.key_size as usize..).into(),
+                key: kv_bs.slice(0..meta.key_size).into(),
+                value: kv_bs.slice(meta.key_size..).into(),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
-                    row_offset: self.write_offset as u64,
+                    row_offset: self.write_offset,
                 },
                 timestamp: meta.timestamp,
             };
