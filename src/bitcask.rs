@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use common::clock::BitcaskClock;
 use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
@@ -11,70 +12,12 @@ use uuid::Uuid;
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::keydir::KeyDir;
 use crate::merge::MergeManager;
+use crate::options::BitcaskOptions;
 use common::{
     fs::{self},
     storage_id::StorageIdGenerator,
-    tombstone::is_tombstone,
 };
-use database::{deleted_value, Database, DatabaseOptions, TimedValue};
-
-/// Bitcask optional options. Used on opening Bitcask instance.
-#[derive(Debug, Clone, Copy)]
-pub struct BitcaskOptions {
-    pub database: DatabaseOptions,
-    // maximum key size, default: 1 KB
-    pub max_key_size: usize,
-    // maximum value size, default: 100 KB
-    pub max_value_size: usize,
-}
-
-/// Default Bitcask Options
-impl Default for BitcaskOptions {
-    fn default() -> Self {
-        Self {
-            database: DatabaseOptions::default(),
-            max_key_size: 1024,
-            max_value_size: 100 * 1024,
-        }
-    }
-}
-
-impl BitcaskOptions {
-    // maximum data file size, default: 128 MB
-    pub fn max_data_file_size(mut self, size: usize) -> BitcaskOptions {
-        assert!(size > 0);
-        self.database.storage.max_data_file_size = size;
-        self
-    }
-
-    // data file initial capacity, default: 1 MB
-    pub fn init_data_file_capacity(mut self, capacity: usize) -> BitcaskOptions {
-        assert!(capacity > 0);
-        self.database.storage.init_data_file_capacity = capacity;
-        self
-    }
-
-    // maximum key size, default: 1 KB
-    pub fn max_key_size(mut self, size: usize) -> BitcaskOptions {
-        assert!(size > 0);
-        self.max_key_size = size;
-        self
-    }
-
-    // maximum value size, default: 100 KB
-    pub fn max_value_size(mut self, size: usize) -> BitcaskOptions {
-        assert!(size > 0);
-        self.max_value_size = size;
-        self
-    }
-
-    // How frequent can we sync data to file. 0 to stop auto sync. default: 1 min
-    pub fn sync_interval(mut self, interval: Duration) -> BitcaskOptions {
-        assert!(!interval.is_zero());
-        self.database.sync_interval_sec = interval.as_secs();
-        self
-    }
-}
+use database::{deleted_value, Database, TimedValue};
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct BitcaskStats {
@@ -90,6 +33,7 @@ pub struct Bitcask {
     options: BitcaskOptions,
     database: Database,
     merge_manager: MergeManager,
+    clock: BitcaskClock,
 }
 
 impl Bitcask {
@@ -112,7 +56,7 @@ impl Bitcask {
             id.to_string(),
             directory,
             storage_id_generator.clone(),
-            options.database,
+            options,
         );
         merge_manager.recover_merge()?;
 
@@ -127,6 +71,7 @@ impl Bitcask {
             database,
             options,
             merge_manager,
+            clock: BitcaskClock::default(),
         })
     }
 
@@ -164,7 +109,7 @@ impl Bitcask {
         match row_pos {
             Some(e) => {
                 let v = self.database.read_value(&e)?;
-                if is_tombstone(&v) {
+                if !v.is_valid() {
                     return Ok(None);
                 }
                 Ok(Some(v.value.to_vec()))

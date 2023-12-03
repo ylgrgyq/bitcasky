@@ -16,7 +16,6 @@ use common::{
     formatter::RowToWrite,
     fs::{self as SelfFs, FileType},
     storage_id::{StorageId, StorageIdGenerator},
-    tombstone,
 };
 
 use crate::{
@@ -523,7 +522,7 @@ fn recovered_iter(
                 row.map(|r| RecoveredRow {
                     row_location: r.row_location,
                     key: r.key,
-                    invalid: tombstone::is_tombstone(&r.value),
+                    invalid: !r.value.is_valid(),
                 })
                 .map_err(DatabaseError::StorageError)
             })

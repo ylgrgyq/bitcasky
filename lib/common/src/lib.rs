@@ -12,6 +12,7 @@ use storage_id::StorageId;
 
 use crate::formatter::FILE_HEADER_SIZE;
 
+pub mod clock;
 pub mod formatter;
 pub mod fs;
 pub mod storage_id;

@@ -18,7 +18,6 @@ use common::{
     },
     fs::{self, FileType},
     storage_id::StorageId,
-    tombstone,
 };
 use memmap2::{MmapMut, MmapOptions};
 
@@ -272,7 +271,7 @@ impl HintWriter {
         for row in data_itr {
             match row {
                 Ok(r) => {
-                    if tombstone::is_tombstone(&r.value) {
+                    if !r.value.is_valid() {
                         m.remove(&r.key);
                     } else {
                         m.insert(

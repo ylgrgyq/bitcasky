@@ -1,28 +1,12 @@
 use std::collections::HashSet;
 
-use bitcask::{
-    bitcask::{Bitcask, BitcaskOptions},
-    error::BitcaskError,
-};
+use bitcask::{bitcask::Bitcask, error::BitcaskError, options::BitcaskOptions};
 use bitcask_tests::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
+use common::clock::BitcaskClock;
 use database::{data_storage::DataSotrageType, DatabaseOptions};
 use test_log::test;
-
-const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-    database: DatabaseOptions {
-        storage: database::DataStorageOptions {
-            max_data_file_size: 10 * 1024,
-            init_data_file_capacity: 100,
-            storage_type: DataSotrageType::Mmap,
-        },
-        init_hint_file_capacity: 1024,
-        sync_interval_sec: 1,
-    },
-    max_key_size: 64,
-    max_value_size: 1024,
-};
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
     for op in ops.operations() {
@@ -35,11 +19,28 @@ fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
     }
 }
 
+fn get_default_options() -> BitcaskOptions {
+    BitcaskOptions {
+        database: DatabaseOptions {
+            storage: database::DataStorageOptions {
+                max_data_file_size: 10 * 1024,
+                init_data_file_capacity: 100,
+                storage_type: DataSotrageType::Mmap,
+            },
+            init_hint_file_capacity: 1024,
+            sync_interval_sec: 1,
+        },
+        max_key_size: 64,
+        max_value_size: 1024,
+        clock: BitcaskClock::default(),
+    }
+}
+
 #[test]
 fn test_open_db_twice() {
     let dir = get_temporary_directory_path();
-    let _bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
-    let bc2 = Bitcask::open(&dir, DEFAULT_OPTIONS);
+    let _bc = Bitcask::open(&dir, get_default_options()).unwrap();
+    let bc2 = Bitcask::open(&dir, get_default_options());
     assert!(bc2.is_err());
     assert!(matches!(
         bc2.err(),
@@ -50,7 +51,7 @@ fn test_open_db_twice() {
 #[test]
 fn test_read_write_writing_file() {
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();
     bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -70,7 +71,7 @@ fn test_random_put_and_delete() {
     );
     let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
@@ -91,7 +92,7 @@ fn test_random_put_delete_merge() {
     );
     let ops = gen.generate_testing_operations(10);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
@@ -109,10 +110,10 @@ fn test_recovery() {
     let ops = gen.generate_testing_operations(5000);
     let dir = get_temporary_directory_path();
     {
-        let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+        let bc = Bitcask::open(&dir, get_default_options()).unwrap();
         execute_testing_operations(&bc, &ops);
     }
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     for op in ops.squash() {
         assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
     }
@@ -121,7 +122,7 @@ fn test_recovery() {
 #[test]
 fn test_delete() {
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();
     bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -140,7 +141,7 @@ fn test_delete() {
 #[test]
 fn test_delete_not_exists_key() {
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
 
     bc.delete(&"k1".into()).unwrap();
     assert_eq!(bc.get(&"k1".into()).unwrap(), None);
@@ -157,7 +158,7 @@ fn test_foreach_keys() {
     let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
     let ops = gen.generate_testing_operations(100);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     execute_testing_operations(&bc, &ops);
 
     let mut expected_set: HashSet<Vec<u8>> = HashSet::new();
@@ -178,7 +179,7 @@ fn test_fold_keys() {
     let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
     let ops = gen.generate_testing_operations(100);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     execute_testing_operations(&bc, &ops);
 
     let mut expected_set: HashSet<Vec<u8>> = HashSet::new();
@@ -205,7 +206,7 @@ fn test_foreach() {
     let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
     let ops = gen.generate_testing_operations(100);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     execute_testing_operations(&bc, &ops);
 
     let expected_pair = ops
@@ -228,7 +229,7 @@ fn test_fold() {
     let mut gen = RandomTestingDataGenerator::new(64, 512, vec![TestingOperator::PUT]);
     let ops = gen.generate_testing_operations(100);
     let dir = get_temporary_directory_path();
-    let bc = Bitcask::open(&dir, DEFAULT_OPTIONS).unwrap();
+    let bc = Bitcask::open(&dir, get_default_options()).unwrap();
     execute_testing_operations(&bc, &ops);
 
     let expected_pair = ops

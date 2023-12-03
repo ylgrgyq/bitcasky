@@ -1,4 +1,4 @@
-use bitcask::bitcask::{Bitcask, BitcaskOptions};
+use bitcask::{bitcask::Bitcask, options::BitcaskOptions};
 use bitcask_tests::common::get_temporary_directory_path;
 use test_log::test;
 

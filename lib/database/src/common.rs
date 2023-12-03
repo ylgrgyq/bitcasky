@@ -34,12 +34,13 @@ pub struct TimedValue<V: Deref<Target = [u8]>> {
 }
 
 impl<V: Deref<Target = [u8]>> TimedValue<V> {
-    pub fn is_valid(&self, now: u64) -> bool {
+    pub fn is_valid(&self) -> bool {
         if is_tombstone(&self.value) {
             return false;
         }
 
-        self.expire_timestamp == 0 || self.expire_timestamp > now
+        // self.expire_timestamp == 0 || self.expire_timestamp > now
+        true
     }
 }
 
