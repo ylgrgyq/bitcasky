@@ -215,7 +215,7 @@ impl Bitcask {
         let _kd = self.keydir.read();
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
-                f(&row.key, &row.value);
+                f(&row.key, &row.value.value);
             } else {
                 return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
             }
@@ -234,7 +234,7 @@ impl Bitcask {
         let mut acc = init;
         for row_ret in self.database.iter()? {
             if let Ok(row) = row_ret {
-                acc = f(&row.key, &row.value, acc)?;
+                acc = f(&row.key, &row.value.value, acc)?;
             } else {
                 return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
             }

@@ -74,16 +74,14 @@ impl<V: Deref<Target = [u8]>> TimedValue<V> {
 #[derive(Debug)]
 pub struct RowToRead {
     pub key: Vec<u8>,
-    pub value: Vec<u8>,
     pub row_location: RowLocation,
-    pub expire_timestamp: u64,
+    pub value: TimedValue<Vec<u8>>,
 }
 
 pub struct RecoveredRow {
     pub row_location: RowLocation,
-    pub expire_timestamp: u64,
     pub key: Vec<u8>,
-    pub is_tombstone: bool,
+    pub invalid: bool,
 }
 
 #[derive(Error, Debug)]

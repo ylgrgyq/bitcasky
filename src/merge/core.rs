@@ -399,7 +399,7 @@ mod tests {
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
             assert_eq!(expect_row.kv.key(), actual_row.key);
-            assert_eq!(expect_row.kv.value(), actual_row.value);
+            assert_eq!(expect_row.kv.value(), actual_row.value.value);
             assert_eq!(expect_row.pos, actual_row.row_location);
             i += 1;
         }

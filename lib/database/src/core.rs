@@ -522,9 +522,8 @@ fn recovered_iter(
             iter.map(|row| {
                 row.map(|r| RecoveredRow {
                     row_location: r.row_location,
-                    expire_timestamp: r.expire_timestamp,
                     key: r.key,
-                    is_tombstone: tombstone::is_tombstone(&r.value),
+                    invalid: tombstone::is_tombstone(&r.value),
                 })
                 .map_err(DatabaseError::StorageError)
             })
@@ -681,7 +680,7 @@ pub mod database_tests_utils {
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
             assert_eq!(expect_row.kv.key(), actual_row.key);
-            assert_eq!(expect_row.kv.value(), actual_row.value);
+            assert_eq!(expect_row.kv.value(), actual_row.value.value);
             assert_eq!(expect_row.pos, actual_row.row_location);
             i += 1;
         }

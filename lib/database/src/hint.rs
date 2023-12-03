@@ -179,9 +179,8 @@ impl Iterator for HintFileIterator {
                     storage_id: self.file.storage_id,
                     row_offset: r.header.row_offset,
                 },
-                expire_timestamp: r.header.expire_timestamp,
+                invalid: false,
                 key: r.key,
-                is_tombstone: false,
             })),
             _ => None,
         }
@@ -280,7 +279,7 @@ impl HintWriter {
                             r.key.clone(),
                             RowHint {
                                 header: RowHintHeader {
-                                    expire_timestamp: r.expire_timestamp,
+                                    expire_timestamp: r.value.expire_timestamp,
                                     key_size: r.key.len(),
                                     row_offset: r.row_location.row_offset,
                                 },

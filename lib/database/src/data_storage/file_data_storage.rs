@@ -157,14 +157,16 @@ impl DataStorageReader for FileDataStorage {
             self.offset = value_offset + padding(net_size) + net_size;
             return Ok(Some(RowToRead {
                 key: kv_bs.slice(0..meta.key_size).into(),
-                value: kv_bs
-                    .slice(meta.key_size..(meta.key_size + meta.value_size))
-                    .into(),
+                value: TimedValue::expirable_value(
+                    kv_bs
+                        .slice(meta.key_size..(meta.key_size + meta.value_size))
+                        .into(),
+                    meta.expire_timestamp,
+                ),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
                     row_offset: value_offset,
                 },
-                expire_timestamp: meta.expire_timestamp,
             }));
         }
         Ok(None)
@@ -255,10 +257,10 @@ mod tests {
         let r = storage.read_next_row().unwrap().unwrap();
 
         assert_eq!(k1, r.key);
-        assert_eq!(v1, r.value);
+        assert_eq!(v1, r.value.value);
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k2, r.key);
-        assert_eq!(v2, r.value);
+        assert_eq!(v2, r.value.value);
     }
 
     #[test]

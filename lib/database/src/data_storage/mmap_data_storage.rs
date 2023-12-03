@@ -189,12 +189,14 @@ impl DataStorageReader for MmapDataStorage {
         if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
             let row_to_read = RowToRead {
                 key: kv_bs.slice(0..meta.key_size).into(),
-                value: kv_bs.slice(meta.key_size..).into(),
+                value: TimedValue::expirable_value(
+                    kv_bs.slice(meta.key_size..).into(),
+                    meta.expire_timestamp,
+                ),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
                     row_offset: self.write_offset,
                 },
-                expire_timestamp: meta.expire_timestamp,
             };
             let net_size = self.formatter.row_header_size() + kv_bs.len();
             self.write_offset += net_size + padding(net_size);
@@ -314,10 +316,10 @@ mod tests {
         let r = storage.read_next_row().unwrap().unwrap();
 
         assert_eq!(k1, r.key);
-        assert_eq!(v1, r.value);
+        assert_eq!(v1, r.value.value);
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k2, r.key);
-        assert_eq!(v2, r.value);
+        assert_eq!(v2, r.value.value);
     }
 
     #[test]
