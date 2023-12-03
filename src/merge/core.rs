@@ -384,6 +384,7 @@ mod tests {
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
             sync_interval_sec: 60,
+            init_hint_file_capacity: 1024,
         }
     }
 

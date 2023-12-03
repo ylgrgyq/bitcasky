@@ -17,6 +17,7 @@ const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
             init_data_file_capacity: 100,
             storage_type: DataSotrageType::Mmap,
         },
+        init_hint_file_capacity: 1024,
         sync_interval_sec: 1,
     },
     max_key_size: 64,

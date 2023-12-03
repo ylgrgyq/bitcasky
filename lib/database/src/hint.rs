@@ -12,10 +12,8 @@ use bytes::Bytes;
 use log::{debug, error, warn};
 
 use common::{
-    formatter::{
-        get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, RowHint,
-        RowHintHeader,
-    },
+    create_file,
+    formatter::{get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader},
     fs::{self, FileType},
     storage_id::StorageId,
     tombstone,
@@ -24,6 +22,7 @@ use common::{
 use crate::{
     common::{DatabaseError, DatabaseResult},
     data_storage::DataStorage,
+    DatabaseOptions,
 };
 use crossbeam_channel::{unbounded, Sender};
 
@@ -39,10 +38,19 @@ pub struct HintFile {
 }
 
 impl HintFile {
-    pub fn create(database_dir: &Path, storage_id: StorageId) -> DatabaseResult<Self> {
-        let mut file = fs::create_file(database_dir, FileType::HintFile, Some(storage_id))?;
+    pub fn create(
+        database_dir: &Path,
+        storage_id: StorageId,
+        init_hint_file_capacity: usize,
+    ) -> DatabaseResult<Self> {
         let formatter = BitcaskFormatter::default();
-        initialize_new_file(&mut file, formatter.version())?;
+        let file = create_file(
+            database_dir,
+            FileType::HintFile,
+            Some(storage_id),
+            &formatter,
+            init_hint_file_capacity,
+        )?;
         debug!(
             target: DEFAULT_LOG_TARGET,
             "create hint file with id: {}", storage_id
@@ -145,13 +153,13 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path, storage_options: DataStorageOptions) -> HintWriter {
+    pub fn start(database_dir: &Path, options: DatabaseOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
-                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, storage_options) {
+                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, options) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -185,8 +193,33 @@ impl HintWriter {
     fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        storage_options: DataStorageOptions,
+        options: DatabaseOptions,
     ) -> DatabaseResult<()> {
+        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.storage)?;
+
+        let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
+        let mut hint_file = HintFile::create(
+            &hint_file_tmp_dir,
+            data_storage_id,
+            options.init_hint_file_capacity,
+        )?;
+        m.values()
+            .map(|r| hint_file.write_hint_row(r))
+            .collect::<DatabaseResult<Vec<_>>>()?;
+        fs::move_file(
+            FileType::HintFile,
+            Some(data_storage_id),
+            &hint_file_tmp_dir,
+            database_dir,
+        )?;
+        Ok(())
+    }
+
+    fn build_row_hint(
+        database_dir: &Path,
+        data_storage_id: StorageId,
+        storage_options: DataStorageOptions,
+    ) -> DatabaseResult<HashMap<Vec<u8>, RowHint>> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
 
         let data_itr = stable_file_opt.iter()?;
@@ -214,19 +247,7 @@ impl HintWriter {
                 Err(e) => return Err(DatabaseError::StorageError(e)),
             }
         }
-
-        let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
-        let mut hint_file = HintFile::create(&hint_file_tmp_dir, data_storage_id)?;
-        m.values()
-            .map(|r| hint_file.write_hint_row(r))
-            .collect::<DatabaseResult<Vec<_>>>()?;
-        fs::move_file(
-            FileType::HintFile,
-            Some(data_storage_id),
-            &hint_file_tmp_dir,
-            database_dir,
-        )?;
-        Ok(())
+        Ok(m)
     }
 }
 
@@ -297,7 +318,7 @@ mod tests {
             key,
         };
         {
-            let mut hint_file = HintFile::create(&dir, storage_id).unwrap();
+            let mut hint_file = HintFile::create(&dir, storage_id, 1024).unwrap();
             hint_file.write_hint_row(&expect_row).unwrap();
         }
         let mut hint_file = HintFile::open(&dir, storage_id).unwrap();
@@ -327,9 +348,11 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
-                DataStorageOptions::default()
-                    .max_data_file_size(1024)
-                    .init_data_file_capacity(100),
+                DatabaseOptions::default().storage(
+                    DataStorageOptions::default()
+                        .max_data_file_size(1024)
+                        .init_data_file_capacity(100),
+                ),
             );
             writer.async_write_hint_file(storage_id);
         }

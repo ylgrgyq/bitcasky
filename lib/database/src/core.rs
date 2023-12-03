@@ -63,12 +63,21 @@ pub struct DatabaseOptions {
     pub storage: DataStorageOptions,
     /// How frequent can we flush data
     pub sync_interval_sec: u64,
+    pub init_hint_file_capacity: usize,
+}
+
+impl DatabaseOptions {
+    pub fn storage(mut self, storage: DataStorageOptions) -> Self {
+        self.storage = storage;
+        self
+    }
 }
 
 impl Default for DatabaseOptions {
     fn default() -> Self {
         Self {
             storage: DataStorageOptions::default(),
+            init_hint_file_capacity: 1024 * 1024,
             sync_interval_sec: 60,
         }
     }
@@ -104,7 +113,7 @@ impl Database {
             storage_id_generator.update_id(*id);
         }
 
-        let hint_file_writer = Some(HintWriter::start(&database_dir, options.storage));
+        let hint_file_writer = Some(HintWriter::start(&database_dir, options));
 
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
@@ -651,6 +660,7 @@ pub mod database_tests_utils {
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
             sync_interval_sec: 60,
+            init_hint_file_capacity: 1024,
         }
     }
 
@@ -783,6 +793,7 @@ pub mod database_tests_utils {
                     .max_data_file_size(120)
                     .init_data_file_capacity(100),
                 sync_interval_sec: 60,
+                init_hint_file_capacity: 1024,
             },
         )
         .unwrap();
