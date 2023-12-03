@@ -106,6 +106,18 @@ pub fn move_file(
     Ok(())
 }
 
+pub fn truncate_file(file: &mut File, capacity: usize) -> std::io::Result<()> {
+    // fs4 provides some cross-platform bindings which help for Windows.
+    #[cfg(not(unix))]
+    file.allocate(capacity as u64)?;
+    // For all unix systems we can just use ftruncate directly
+    #[cfg(unix)]
+    {
+        rustix::fs::ftruncate(file, capacity as u64)?;
+    }
+    Ok(())
+}
+
 pub fn change_storage_id(
     base_dir: &Path,
     file_type: FileType,

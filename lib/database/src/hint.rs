@@ -1,11 +1,10 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{Read, Write},
+    io::Write,
     mem::ManuallyDrop,
     path::{Path, PathBuf},
     thread::{self, JoinHandle},
-    vec,
 };
 
 use bytes::Bytes;
@@ -13,15 +12,19 @@ use log::{debug, error, warn};
 
 use common::{
     create_file,
-    formatter::{get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader},
+    formatter::{
+        get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
+        FILE_HEADER_SIZE,
+    },
     fs::{self, FileType},
     storage_id::StorageId,
     tombstone,
 };
+use memmap2::{MmapMut, MmapOptions};
 
 use crate::{
     common::{DatabaseError, DatabaseResult},
-    data_storage::DataStorage,
+    data_storage::{mmap_data_storage::MmapDataStorage, DataStorage},
     DatabaseOptions,
 };
 use crossbeam_channel::{unbounded, Sender};
@@ -35,6 +38,9 @@ pub struct HintFile {
     storage_id: StorageId,
     file: File,
     formatter: BitcaskFormatter,
+    map_view: MmapMut,
+    offset: usize,
+    capacity: usize,
 }
 
 impl HintFile {
@@ -55,11 +61,7 @@ impl HintFile {
             target: DEFAULT_LOG_TARGET,
             "create hint file with id: {}", storage_id
         );
-        Ok(HintFile {
-            storage_id,
-            file,
-            formatter,
-        })
+        Self::new(file, storage_id, formatter)
     }
 
     pub fn open_iterator(
@@ -76,27 +78,44 @@ impl HintFile {
 
     pub fn write_hint_row(&mut self, hint: &RowHint) -> DatabaseResult<()> {
         let data_to_write = self.formatter.encode_row_hint(hint);
-        self.file.write_all(&data_to_write)?;
-        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}", 
-            hint.key, hint.header);
+
+        let value_offset = self.offset;
+        MmapDataStorage::copy_memory(&data_to_write, &mut self.as_mut_slice()[value_offset..]);
+        self.offset += data_to_write.len();
+
+        debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}, offset: {}", 
+            hint.key, hint.header, value_offset);
         Ok(())
     }
 
-    pub fn read_hint_row(&mut self) -> DatabaseResult<RowHint> {
-        let mut header_buf = vec![0; self.formatter.row_hint_header_size()];
-        self.file.read_exact(&mut header_buf)?;
+    pub fn read_hint_row(&mut self) -> DatabaseResult<Option<RowHint>> {
+        if self.offset + self.formatter.row_hint_header_size() >= self.capacity {
+            return Ok(None);
+        }
 
-        let header_bs = Bytes::from(header_buf);
+        let mut offset = self.offset;
+        let header_bs = Bytes::copy_from_slice(
+            &self.as_slice()[offset..offset + self.formatter.row_hint_header_size()],
+        );
+
+        offset += self.formatter.row_hint_header_size();
+
         let header = self.formatter.decode_row_hint_header(header_bs);
 
-        let mut k_buf = vec![0; header.key_size];
-        self.file.read_exact(&mut k_buf)?;
-        let key: Vec<u8> = Bytes::from(k_buf).into();
+        let key: Vec<u8> =
+            Bytes::copy_from_slice(&self.as_slice()[offset..(offset + header.key_size)]).into();
 
-        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, header: {:?}", 
-            key, header);
+        debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, header: {:?}, offset: {}", 
+            key, header, self.offset);
 
-        Ok(RowHint { header, key })
+        self.offset += self.formatter.row_hint_header_size() + header.key_size;
+
+        Ok(Some(RowHint { header, key }))
+    }
+
+    pub fn finish_write(&mut self) -> DatabaseResult<()> {
+        fs::truncate_file(&mut self.file, self.offset)?;
+        Ok(())
     }
 
     fn open(database_dir: &Path, storage_id: StorageId) -> DatabaseResult<Self> {
@@ -104,11 +123,32 @@ impl HintFile {
         let formatter = get_formatter_from_file(&mut file.file).map_err(|e| {
             DatabaseError::HintFileCorrupted(e, storage_id, database_dir.display().to_string())
         })?;
+        Self::new(file.file, storage_id, formatter)
+    }
+
+    fn new(
+        file: File,
+        storage_id: StorageId,
+        formatter: BitcaskFormatter,
+    ) -> DatabaseResult<HintFile> {
+        let capacity = file.metadata()?.len() as usize;
+        let mmap = unsafe { MmapOptions::new().offset(0).len(capacity).map_mut(&file)? };
         Ok(HintFile {
             storage_id,
-            file: file.file,
+            file: file,
             formatter,
+            offset: FILE_HEADER_SIZE,
+            map_view: mmap,
+            capacity,
         })
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.map_view[0..self.capacity]
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.map_view[0..self.capacity]
     }
 }
 
@@ -133,15 +173,17 @@ impl Iterator for HintFileIterator {
                 std::io::ErrorKind::UnexpectedEof => None,
                 _ => Some(Err(DatabaseError::IoError(e))),
             },
-            r => Some(r.map(|h| RecoveredRow {
+            Err(e) => Some(Err(e)),
+            Ok(Some(r)) => Some(Ok(RecoveredRow {
                 row_location: super::RowLocation {
                     storage_id: self.file.storage_id,
-                    row_offset: h.header.row_offset,
+                    row_offset: r.header.row_offset,
                 },
-                timestamp: h.header.timestamp,
-                key: h.key,
+                timestamp: r.header.timestamp,
+                key: r.key,
                 is_tombstone: false,
             })),
+            _ => None,
         }
     }
 }
@@ -206,6 +248,9 @@ impl HintWriter {
         m.values()
             .map(|r| hint_file.write_hint_row(r))
             .collect::<DatabaseResult<Vec<_>>>()?;
+
+        hint_file.finish_write()?;
+
         fs::move_file(
             FileType::HintFile,
             Some(data_storage_id),
@@ -322,8 +367,11 @@ mod tests {
             hint_file.write_hint_row(&expect_row).unwrap();
         }
         let mut hint_file = HintFile::open(&dir, storage_id).unwrap();
-        let actual_row = hint_file.read_hint_row().unwrap();
-        assert_eq!(expect_row, actual_row);
+        if let Some(actual_row) = hint_file.read_hint_row().unwrap() {
+            assert_eq!(expect_row, actual_row);
+        } else {
+            unreachable!();
+        }
     }
 
     #[test]
@@ -358,10 +406,12 @@ mod tests {
         }
 
         let mut hint_file = HintFile::open(&dir, storage_id).unwrap();
-        let hint_row = hint_file.read_hint_row().unwrap();
-
-        assert_eq!(key, hint_row.key);
-        assert_eq!(key.len(), hint_row.header.key_size);
-        assert_eq!(pos.row_offset, hint_row.header.row_offset);
+        if let Some(hint_row) = hint_file.read_hint_row().unwrap() {
+            assert_eq!(key, hint_row.key);
+            assert_eq!(key.len(), hint_row.header.key_size);
+            assert_eq!(pos.row_offset, hint_row.header.row_offset);
+        } else {
+            unreachable!();
+        }
     }
 }
