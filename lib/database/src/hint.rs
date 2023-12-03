@@ -135,7 +135,7 @@ impl HintFile {
         let mmap = unsafe { MmapOptions::new().offset(0).len(capacity).map_mut(&file)? };
         Ok(HintFile {
             storage_id,
-            file: file,
+            file,
             formatter,
             offset: FILE_HEADER_SIZE,
             map_view: mmap,
