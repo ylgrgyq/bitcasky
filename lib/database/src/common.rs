@@ -42,6 +42,14 @@ impl<V: Deref<Target = [u8]>> TimedValue<V> {
         // self.expire_timestamp == 0 || self.expire_timestamp > now
         true
     }
+
+    pub fn validate(self) -> Option<TimedValue<V>> {
+        if self.is_valid() {
+            Some(self)
+        } else {
+            None
+        }
+    }
 }
 
 impl<V: Deref<Target = [u8]>> Deref for TimedValue<V> {

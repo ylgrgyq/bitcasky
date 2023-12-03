@@ -195,13 +195,12 @@ impl MergeManager {
         let mut write_key_count = 0;
         for r in key_dir_to_write.iter() {
             let k = r.key();
-            let v = database.read_value(r.value())?;
-            if v.is_valid() {
+            if let Some(v) = database.read_value(r.value())? {
                 let pos =
                     merge_db.write(k, TimedValue::expirable_value(v.value, v.expire_timestamp))?;
                 merged_key_dir.checked_put(k.clone(), pos);
                 debug!(target: "Bitcask", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, expire_timestamp: {}", 
-                    k, pos.storage_id, pos.row_offset, v.expire_timestamp);
+                k, pos.storage_id, pos.row_offset, v.expire_timestamp);
                 write_key_count += 1;
             }
         }
@@ -361,7 +360,7 @@ mod tests {
         formatter::{initialize_new_file, BitcaskFormatter},
         fs::FileType,
     };
-    use database::{DataStorageOptions, RowLocation};
+    use database::RowLocation;
 
     use super::*;
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
@@ -389,7 +388,7 @@ mod tests {
 
     pub fn assert_row_value(db: &Database, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
-        assert_eq!(*expect.kv.value(), *actual.value);
+        assert_eq!(*expect.kv.value(), *actual.unwrap().value);
     }
 
     pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {

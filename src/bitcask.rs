@@ -108,11 +108,10 @@ impl Bitcask {
 
         match row_pos {
             Some(e) => {
-                let v = self.database.read_value(&e)?;
-                if !v.is_valid() {
-                    return Ok(None);
+                if let Some(v) = self.database.read_value(&e)? {
+                    return Ok(Some(v.value.to_vec()));
                 }
-                Ok(Some(v.value.to_vec()))
+                Ok(None)
             }
             None => Ok(None),
         }

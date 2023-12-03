@@ -61,7 +61,7 @@ pub trait DataStorageWriter {
 
 pub trait DataStorageReader {
     /// Read value from this storage at row_offset
-    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>>;
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>>;
 
     /// Read next value from this storage
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
@@ -294,7 +294,7 @@ impl DataStorageWriter for DataStorage {
 }
 
 impl DataStorageReader for DataStorage {
-    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
                 .read_value(row_offset)

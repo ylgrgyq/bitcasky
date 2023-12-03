@@ -115,7 +115,7 @@ fn rand_read_row_benchmark(c: &mut Criterion) {
             let v = data_storage
                 .read_value(*offsets.get(counter % offsets.len()).unwrap())
                 .unwrap();
-            assert_eq!(input.value(), *v.value);
+            assert_eq!(input.value(), *v.unwrap().value);
             counter += 1;
         })
     });

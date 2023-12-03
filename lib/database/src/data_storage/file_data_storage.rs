@@ -122,7 +122,7 @@ impl DataStorageWriter for FileDataStorage {
 }
 
 impl DataStorageReader for FileDataStorage {
-    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>> {
         self.data_file
             .seek(SeekFrom::Start(row_offset as u64))
             .map_err(|e| {
@@ -139,7 +139,8 @@ impl DataStorageReader for FileDataStorage {
             return Ok(TimedValue {
                 value: Value::VectorBytes(kv_bs.slice(meta.key_size..).into()),
                 expire_timestamp: meta.expire_timestamp,
-            });
+            }
+            .validate());
         }
         Err(DataStorageError::ReadRowFailed(
             self.storage_id,
@@ -224,8 +225,20 @@ mod tests {
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
-        assert_eq!(v1, *storage.read_value(row_location1.row_offset).unwrap());
-        assert_eq!(v2, *storage.read_value(row_location2.row_offset).unwrap());
+        assert_eq!(
+            v1,
+            *storage
+                .read_value(row_location1.row_offset)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            v2,
+            *storage
+                .read_value(row_location2.row_offset)
+                .unwrap()
+                .unwrap()
+        );
     }
 
     #[test]

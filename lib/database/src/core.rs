@@ -237,7 +237,10 @@ impl Database {
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_location: &RowLocation) -> DatabaseResult<TimedValue<Value>> {
+    pub fn read_value(
+        &self,
+        row_location: &RowLocation,
+    ) -> DatabaseResult<Option<TimedValue<Value>>> {
         {
             let mut writing_file_ref = self.writing_storage.lock();
             if row_location.storage_id == writing_file_ref.storage_id() {
@@ -671,7 +674,7 @@ pub mod database_tests_utils {
 
     pub fn assert_row_value(db: &Database, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
-        assert_eq!(*expect.kv.value(), *actual.value);
+        assert_eq!(*expect.kv.value(), *actual.unwrap().value);
     }
 
     pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
