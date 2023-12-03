@@ -51,14 +51,7 @@ pub fn create_file<P: AsRef<Path>>(
             .create(true)
             .open(&tmp_file_path)?;
 
-        // fs4 provides some cross-platform bindings which help for Windows.
-        #[cfg(not(unix))]
-        file.allocate(capacity as u64)?;
-        // For all unix systems we can just use ftruncate directly
-        #[cfg(unix)]
-        {
-            rustix::fs::ftruncate(&file, capacity as u64)?;
-        }
+        fs::truncate_file(&mut file, capacity)?;
 
         formatter::initialize_new_file(&mut file, formatter.version())?;
 
@@ -128,6 +121,9 @@ mod tests {
             get_formatter_from_file(&mut reopen_file).unwrap()
         );
 
+        reopen_file
+            .seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))
+            .unwrap();
         let mut buf = vec![0; 4];
         reopen_file.read_exact(&mut buf).unwrap();
         assert_eq!(101, Bytes::from(buf).get_u32());

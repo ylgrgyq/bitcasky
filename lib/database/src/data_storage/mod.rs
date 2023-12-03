@@ -61,7 +61,7 @@ pub trait DataStorageWriter {
 
 pub trait DataStorageReader {
     /// Read value from this storage at row_offset
-    fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>>;
+    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>>;
 
     /// Read next value from this storage
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
@@ -153,7 +153,7 @@ impl DataStorage {
             storage_id,
             data_file,
             meta,
-            FILE_HEADER_SIZE as u64,
+            FILE_HEADER_SIZE,
             formatter,
             options,
         )
@@ -178,7 +178,7 @@ impl DataStorage {
             storage_id,
             data_file.file,
             meta,
-            FILE_HEADER_SIZE as u64,
+            FILE_HEADER_SIZE,
             formatter,
             options,
         )
@@ -211,7 +211,7 @@ impl DataStorage {
                 self.storage_id,
                 data_file.file,
                 meta,
-                FILE_HEADER_SIZE as u64,
+                FILE_HEADER_SIZE,
                 formatter,
                 self.options,
             )?,
@@ -223,11 +223,11 @@ impl DataStorage {
         storage_id: StorageId,
         data_file: File,
         meta: Metadata,
-        write_offset: u64,
+        write_offset: usize,
         formatter: BitcaskFormatter,
         options: DataStorageOptions,
     ) -> Result<Self> {
-        let capacity = meta.len();
+        let capacity = meta.len() as usize;
         let storage_impl = match options.storage_type {
             DataSotrageType::File => DataStorageImpl::FileStorage(FileDataStorage::new(
                 storage_id,
@@ -240,8 +240,8 @@ impl DataStorage {
             DataSotrageType::Mmap => DataStorageImpl::MmapStorage(MmapDataStorage::new(
                 storage_id,
                 data_file,
-                write_offset as usize,
-                capacity as usize,
+                write_offset,
+                capacity,
                 formatter,
                 options,
             )?),
@@ -294,7 +294,7 @@ impl DataStorageWriter for DataStorage {
 }
 
 impl DataStorageReader for DataStorage {
-    fn read_value(&mut self, row_offset: u64) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
                 .read_value(row_offset)

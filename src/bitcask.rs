@@ -16,101 +16,63 @@ use common::{
     storage_id::StorageIdGenerator,
     tombstone::is_tombstone,
 };
-use database::{deleted_value, DataStorageOptions, Database, DatabaseOptions, TimedValue};
+use database::{deleted_value, Database, DatabaseOptions, TimedValue};
 
 /// Bitcask optional options. Used on opening Bitcask instance.
 #[derive(Debug, Clone, Copy)]
 pub struct BitcaskOptions {
-    // maximum data file size, default: 128 MB
-    pub max_data_file_size: usize,
-    // data file initial capacity, default: 1 MB
-    pub init_data_file_capacity: usize,
+    pub database: DatabaseOptions,
     // maximum key size, default: 1 KB
     pub max_key_size: usize,
     // maximum value size, default: 100 KB
     pub max_value_size: usize,
-    // How frequent can we sync data to file. 0 to stop auto sync. default: 1 min
-    pub sync_interval: Duration,
 }
 
 /// Default Bitcask Options
 impl Default for BitcaskOptions {
     fn default() -> Self {
         Self {
-            max_data_file_size: 128 * 1024 * 1024,
-            init_data_file_capacity: 1024 * 1024,
+            database: DatabaseOptions::default(),
             max_key_size: 1024,
             max_value_size: 100 * 1024,
-            sync_interval: Duration::from_secs(60),
         }
     }
 }
 
 impl BitcaskOptions {
+    // maximum data file size, default: 128 MB
     pub fn max_data_file_size(mut self, size: usize) -> BitcaskOptions {
         assert!(size > 0);
-        self.max_data_file_size = size;
+        self.database.storage.max_data_file_size = size;
         self
     }
 
+    // data file initial capacity, default: 1 MB
     pub fn init_data_file_capacity(mut self, capacity: usize) -> BitcaskOptions {
         assert!(capacity > 0);
-        self.init_data_file_capacity = capacity;
+        self.database.storage.init_data_file_capacity = capacity;
         self
     }
 
+    // maximum key size, default: 1 KB
     pub fn max_key_size(mut self, size: usize) -> BitcaskOptions {
         assert!(size > 0);
         self.max_key_size = size;
         self
     }
 
+    // maximum value size, default: 100 KB
     pub fn max_value_size(mut self, size: usize) -> BitcaskOptions {
         assert!(size > 0);
         self.max_value_size = size;
         self
     }
 
+    // How frequent can we sync data to file. 0 to stop auto sync. default: 1 min
     pub fn sync_interval(mut self, interval: Duration) -> BitcaskOptions {
-        self.sync_interval = interval;
+        assert!(!interval.is_zero());
+        self.database.sync_interval_sec = interval.as_secs();
         self
-    }
-
-    fn validate(&self) -> Option<BitcaskError> {
-        if self.max_data_file_size == 0 {
-            return Some(BitcaskError::InvalidParameter(
-                "max_file_size".into(),
-                "need a positive value".into(),
-            ));
-        }
-        if self.init_data_file_capacity == 0 {
-            return Some(BitcaskError::InvalidParameter(
-                "max_file_size".into(),
-                "need a positive value".into(),
-            ));
-        }
-        if self.max_key_size == 0 {
-            return Some(BitcaskError::InvalidParameter(
-                "max_key_size".into(),
-                "need a positive value".into(),
-            ));
-        }
-        if self.max_value_size == 0 {
-            return Some(BitcaskError::InvalidParameter(
-                "max_value_size".into(),
-                "need a positive value".into(),
-            ));
-        }
-        None
-    }
-
-    fn get_database_options(&self) -> DatabaseOptions {
-        DatabaseOptions {
-            storage_options: DataStorageOptions::default()
-                .max_data_file_size(self.max_data_file_size)
-                .init_data_file_capacity(self.init_data_file_capacity),
-            sync_interval_sec: self.sync_interval.as_secs(),
-        }
     }
 }
 
@@ -133,10 +95,6 @@ pub struct Bitcask {
 impl Bitcask {
     /// Open opens the database at the given path with optional options.
     pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
-        let valid_opt = options.validate();
-        if let Some(e) = valid_opt {
-            return Err(e);
-        }
         let directory_lock_file = match fs::lock_directory(directory)? {
             Some(f) => f,
             None => {
@@ -154,15 +112,11 @@ impl Bitcask {
             id.to_string(),
             directory,
             storage_id_generator.clone(),
-            options.get_database_options(),
+            options.database,
         );
         merge_manager.recover_merge()?;
 
-        let database = Database::open(
-            directory,
-            storage_id_generator,
-            options.get_database_options(),
-        )?;
+        let database = Database::open(directory, storage_id_generator, options.database)?;
         let keydir = RwLock::new(KeyDir::new(&database)?);
 
         debug!(target: "Bitcask", "Bitcask created. instanceId: {}", id);

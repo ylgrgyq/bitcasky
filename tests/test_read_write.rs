@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::collections::HashSet;
 
 use bitcask::{
     bitcask::{Bitcask, BitcaskOptions},
@@ -7,14 +7,21 @@ use bitcask::{
 use bitcask_tests::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
+use database::{data_storage::DataSotrageType, DatabaseOptions};
 use test_log::test;
 
 const DEFAULT_OPTIONS: BitcaskOptions = BitcaskOptions {
-    max_data_file_size: 10 * 1024,
+    database: DatabaseOptions {
+        storage: database::DataStorageOptions {
+            max_data_file_size: 10 * 1024,
+            init_data_file_capacity: 100,
+            storage_type: DataSotrageType::Mmap,
+        },
+        init_hint_file_capacity: 1024,
+        sync_interval_sec: 1,
+    },
     max_key_size: 64,
     max_value_size: 1024,
-    sync_interval: Duration::from_secs(1),
-    init_data_file_capacity: 100,
 };
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {

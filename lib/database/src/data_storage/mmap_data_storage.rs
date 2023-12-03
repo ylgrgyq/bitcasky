@@ -2,7 +2,7 @@ use std::{fs::File, io::Write, mem, ops::Deref, ptr};
 
 use bytes::Bytes;
 use common::{
-    formatter::{BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     storage_id::StorageId,
 };
 use log::debug;
@@ -54,7 +54,8 @@ impl MmapDataStorage {
     }
 
     fn ensure_capacity<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<()> {
-        let row_size = self.formatter.row_size(row);
+        let mut row_size = self.formatter.net_row_size(row);
+        row_size += padding(row_size);
         let required_capacity = row_size + self.write_offset;
         if required_capacity > self.options.max_data_file_size {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
@@ -99,11 +100,6 @@ impl MmapDataStorage {
         }
     }
 
-    /// Returns the number of padding bytes to add to a buffer to ensure 8-byte alignment.
-    // fn padding(len: usize) -> usize {
-    //     4usize.wrapping_sub(len) & 7
-    // }
-
     fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Bytes)>> {
         let header_size = self.formatter.row_header_size();
         if offset + header_size >= self.capacity {
@@ -119,18 +115,15 @@ impl MmapDataStorage {
             return Ok(None);
         }
 
-        if offset + header_size + header.meta.key_size as usize + header.meta.value_size as usize
-            > self.capacity
-        {
+        if offset + header_size + header.meta.key_size + header.meta.value_size > self.capacity {
             return Ok(None);
         }
 
+        let net_size =
+            self.formatter.row_header_size() + header.meta.key_size + header.meta.value_size;
+
         let kv_bs = Bytes::copy_from_slice(
-            &self.as_slice()[offset + self.formatter.row_header_size()
-                ..offset
-                    + self.formatter.row_header_size()
-                    + header.meta.key_size as usize
-                    + header.meta.value_size as usize],
+            &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size],
         );
 
         self.formatter.validate_key_value(&header, &kv_bs)?;
@@ -153,7 +146,7 @@ impl DataStorageWriter for MmapDataStorage {
 
         Ok(RowLocation {
             storage_id: self.storage_id,
-            row_offset: value_offset as u64,
+            row_offset: value_offset,
         })
     }
 
@@ -171,14 +164,18 @@ impl DataStorageWriter for MmapDataStorage {
 impl DataStorageReader for MmapDataStorage {
     fn read_value(
         &mut self,
-        row_offset: u64,
+        row_offset: usize,
     ) -> super::Result<crate::TimedValue<crate::common::Value>> {
         if let Some((meta, kv_bs)) = self
-            .do_read_row(row_offset as usize)
+            .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
             return Ok(TimedValue {
-                value: Value::VectorBytes(kv_bs.slice(meta.key_size as usize..).into()),
+                value: Value::VectorBytes(
+                    kv_bs
+                        .slice(meta.key_size..meta.key_size + meta.value_size)
+                        .into(),
+                ),
                 timestamp: meta.timestamp,
             });
         }
@@ -191,15 +188,16 @@ impl DataStorageReader for MmapDataStorage {
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
         if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
             let row_to_read = RowToRead {
-                key: kv_bs.slice(0..meta.key_size as usize).into(),
-                value: kv_bs.slice(meta.key_size as usize..).into(),
+                key: kv_bs.slice(0..meta.key_size).into(),
+                value: kv_bs.slice(meta.key_size..).into(),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
-                    row_offset: self.write_offset as u64,
+                    row_offset: self.write_offset,
                 },
                 timestamp: meta.timestamp,
             };
-            self.write_offset += self.formatter.row_header_size() + kv_bs.len();
+            let net_size = self.formatter.row_header_size() + kv_bs.len();
+            self.write_offset += net_size + padding(net_size);
             return Ok(Some(row_to_read));
         }
         Ok(None)
@@ -290,7 +288,8 @@ mod tests {
             let v1: Vec<u8> = format!("value{}", i).into();
             let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
             storage.write_row(&row_to_write).unwrap();
-            size += storage.formatter.row_size(&row_to_write);
+            let net_size = storage.formatter.net_row_size(&row_to_write);
+            size += net_size + padding(net_size);
         }
 
         assert!(storage.data_file.metadata().unwrap().len() > init_size);

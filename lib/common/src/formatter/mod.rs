@@ -15,13 +15,13 @@ pub use self::formatter_v1::FormatterV1;
 
 const MAGIC: &[u8; 3] = b"btk";
 const FORMATTER_V1_VERSION: u8 = 0;
-pub const FILE_HEADER_SIZE: usize = 4;
+pub const FILE_HEADER_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RowMeta {
     pub timestamp: u64,
-    pub key_size: u64,
-    pub value_size: u64,
+    pub key_size: usize,
+    pub value_size: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -45,8 +45,8 @@ pub struct MergeMeta {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RowHintHeader {
     pub timestamp: u64,
-    pub key_size: u64,
-    pub row_offset: u64,
+    pub key_size: usize,
+    pub row_offset: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -65,8 +65,8 @@ impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     }
 
     pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
-        let key_size = key.len() as u64;
-        let value_size = value.len() as u64;
+        let key_size = key.len();
+        let value_size = value.len();
         RowToWrite {
             meta: RowMeta {
                 timestamp,
@@ -99,7 +99,7 @@ pub type Result<T> = std::result::Result<T, FormatterError>;
 pub trait Formatter: std::marker::Send + 'static + Copy {
     fn row_header_size(&self) -> usize;
 
-    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
+    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
 
     fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
 
@@ -140,9 +140,9 @@ impl Formatter for BitcaskFormatter {
         }
     }
 
-    fn row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
+    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.row_size(row),
+            BitcaskFormatter::V1(f) => f.net_row_size(row),
         }
     }
 
@@ -208,10 +208,11 @@ impl Default for BitcaskFormatter {
 }
 
 pub fn initialize_new_file(file: &mut File, version: u8) -> std::io::Result<()> {
-    let mut bs = BytesMut::with_capacity(MAGIC.len() + 1);
+    let mut bs = BytesMut::with_capacity(FILE_HEADER_SIZE);
 
     bs.extend_from_slice(MAGIC);
     bs.put_u8(version);
+    bs.put_u32(0);
 
     file.write_all(&bs.freeze())?;
     file.flush()?;
@@ -219,7 +220,7 @@ pub fn initialize_new_file(file: &mut File, version: u8) -> std::io::Result<()> 
 }
 
 pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
-    let mut file_header = vec![0; MAGIC.len() + 1];
+    let mut file_header = vec![0; FILE_HEADER_SIZE];
 
     file.read_exact(&mut file_header)
         .map_err(|e| FormatterError::ReadFileHeaderFailed(e, "read file header failed".into()))?;
@@ -234,6 +235,11 @@ pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
     }
 
     Err(FormatterError::UnknownFormatterVersion(formatter_version))
+}
+
+// Returns the number of padding bytes to add to a buffer to ensure 4-byte alignment.
+pub fn padding(len: usize) -> usize {
+    4usize.wrapping_sub(len) & 7
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ use crate::DataStorageError;
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RowLocation {
     pub storage_id: StorageId,
-    pub row_offset: u64,
+    pub row_offset: usize,
 }
 
 #[derive(Debug)]
