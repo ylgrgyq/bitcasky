@@ -57,11 +57,7 @@ pub struct RowHint {
 
 impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
-        RowToWrite::new_with_timestamp(key, value, now)
+        RowToWrite::new_with_timestamp(key, value, 0)
     }
 
     pub fn new_with_timestamp(

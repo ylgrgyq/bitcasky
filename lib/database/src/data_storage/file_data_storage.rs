@@ -8,6 +8,7 @@ use std::{
 };
 
 use common::{
+    clock::Clock,
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     options::BitcaskOptions,
     storage_id::StorageId,
@@ -140,7 +141,7 @@ impl DataStorageReader for FileDataStorage {
                 value: Value::VectorBytes(kv_bs.slice(meta.key_size..).into()),
                 expire_timestamp: meta.expire_timestamp,
             }
-            .validate());
+            .validate(self.options.clock.now()));
         }
         Err(DataStorageError::ReadRowFailed(
             self.storage_id,

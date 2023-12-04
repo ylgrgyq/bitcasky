@@ -2,6 +2,7 @@ use std::{fs::File, io::Write, mem, ops::Deref, ptr};
 
 use bytes::Bytes;
 use common::{
+    clock::Clock,
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     options::BitcaskOptions,
     storage_id::StorageId,
@@ -179,7 +180,7 @@ impl DataStorageReader for MmapDataStorage {
                 ),
                 expire_timestamp: meta.expire_timestamp,
             }
-            .validate());
+            .validate(self.options.clock.now()));
         }
         Err(DataStorageError::ReadRowFailed(
             self.storage_id,

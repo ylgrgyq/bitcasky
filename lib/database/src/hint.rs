@@ -11,6 +11,7 @@ use bytes::Bytes;
 use log::{debug, error, warn};
 
 use common::{
+    clock::Clock,
     create_file,
     formatter::{
         get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
@@ -271,7 +272,7 @@ impl HintWriter {
         for row in data_itr {
             match row {
                 Ok(r) => {
-                    if !r.value.is_valid() {
+                    if !r.value.is_valid(options.clock.now()) {
                         m.remove(&r.key);
                     } else {
                         m.insert(

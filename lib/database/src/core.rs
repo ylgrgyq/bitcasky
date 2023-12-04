@@ -13,6 +13,7 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
 use common::{
+    clock::Clock,
     formatter::RowToWrite,
     fs::{self as SelfFs, FileType},
     options::BitcaskOptions,
@@ -493,13 +494,14 @@ fn recovered_iter(
         Ok(Box::new(HintFile::open_iterator(database_dir, storage_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", storage_id);
+        let clock = options.clock.clone();
         let stable_file = DataStorage::open(database_dir, storage_id, options)?;
-        let i = stable_file.iter().map(|iter| {
-            iter.map(|row| {
+        let i = stable_file.iter().map(move |iter| {
+            iter.map(move |row| {
                 row.map(|r| RecoveredRow {
                     row_location: r.row_location,
                     key: r.key,
-                    invalid: !r.value.is_valid(),
+                    invalid: !r.value.is_valid(clock.now()),
                 })
                 .map_err(DatabaseError::StorageError)
             })
