@@ -137,11 +137,15 @@ impl DataStorageReader for FileDataStorage {
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
+            if meta.expire_timestamp != 0 && meta.expire_timestamp <= self.options.clock.now() {
+                return Ok(None);
+            }
+
             return Ok(TimedValue {
                 value: Value::VectorBytes(kv_bs.slice(meta.key_size..).into()),
                 expire_timestamp: meta.expire_timestamp,
             }
-            .validate(self.options.clock.now()));
+            .validate());
         }
         Err(DataStorageError::ReadRowFailed(
             self.storage_id,

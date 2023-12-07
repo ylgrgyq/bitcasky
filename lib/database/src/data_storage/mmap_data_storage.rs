@@ -172,7 +172,9 @@ impl DataStorageReader for MmapDataStorage {
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
-            // 这里是不是提前校验，过期了就不要读数据了
+            if meta.expire_timestamp != 0 && meta.expire_timestamp <= self.options.clock.now() {
+                return Ok(None);
+            }
 
             return Ok(TimedValue {
                 value: Value::VectorBytes(
@@ -182,7 +184,7 @@ impl DataStorageReader for MmapDataStorage {
                 ),
                 expire_timestamp: meta.expire_timestamp,
             }
-            .validate(self.options.clock.now()));
+            .validate());
         }
         Err(DataStorageError::ReadRowFailed(
             self.storage_id,
