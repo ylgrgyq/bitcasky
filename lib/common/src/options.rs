@@ -70,7 +70,7 @@ impl Default for DatabaseOptions {
 }
 
 /// Bitcask optional options. Used on opening Bitcask instance.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BitcaskOptions {
     pub database: DatabaseOptions,
     // maximum key size, default: 1 KB

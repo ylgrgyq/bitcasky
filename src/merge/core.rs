@@ -189,7 +189,7 @@ impl MergeManager {
         let merge_db = Database::open(
             merge_file_dir,
             self.storage_id_generator.clone(),
-            self.options,
+            self.options.clone(),
         )?;
 
         let mut write_key_count = 0;
@@ -505,8 +505,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -525,8 +524,7 @@ mod tests {
             get_options(),
         );
         merge_manager.recover_merge().unwrap();
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+        let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
         assert_eq!(1, storage_id_generator.get_id());
         assert_eq!(0, db.get_storage_ids().stable_storage_ids.len());
         assert_rows_value(&db, &rows);
@@ -539,8 +537,7 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -550,12 +547,8 @@ mod tests {
         let merge_file_dir = create_merge_file_dir(&dir).unwrap();
         {
             // write something to data file in merge dir
-            let db = Database::open(
-                &merge_file_dir,
-                storage_id_generator.clone(),
-                get_options(),
-            )
-            .unwrap();
+            let db = Database::open(&merge_file_dir, storage_id_generator.clone(), get_options())
+                .unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -574,8 +567,7 @@ mod tests {
             get_options(),
         );
         merge_manager.recover_merge().unwrap();
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+        let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
         assert_eq!(3, storage_id_generator.get_id());
         assert_eq!(0, db.get_storage_ids().stable_storage_ids.len());
         assert_rows_value(&db, &rows);
@@ -588,8 +580,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -611,12 +602,8 @@ mod tests {
         let mut rows: Vec<TestingRow> = vec![];
         {
             // write something to data file in merge dir
-            let db = Database::open(
-                &merge_file_dir,
-                storage_id_generator.clone(),
-                get_options(),
-            )
-            .unwrap();
+            let db = Database::open(&merge_file_dir, storage_id_generator.clone(), get_options())
+                .unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value3"),
                 TestingKV::new("k2", "value4"),
@@ -632,8 +619,7 @@ mod tests {
             get_options(),
         );
         merge_manager.recover_merge().unwrap();
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+        let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
         assert_eq!(3, storage_id_generator.get_id());
         assert_eq!(0, db.get_storage_ids().stable_storage_ids.len());
         assert_rows_value(&db, &rows);
@@ -647,8 +633,7 @@ mod tests {
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let mut rows: Vec<TestingRow> = vec![];
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+            let db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
@@ -662,12 +647,8 @@ mod tests {
         write_merge_meta(&merge_file_dir, merge_meta).unwrap();
         {
             // write something to data file in merge dir
-            let db = Database::open(
-                &merge_file_dir,
-                storage_id_generator.clone(),
-                get_options(),
-            )
-            .unwrap();
+            let db = Database::open(&merge_file_dir, storage_id_generator.clone(), get_options())
+                .unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value3"),
                 TestingKV::new("k2", "value4"),
@@ -682,12 +663,8 @@ mod tests {
         perms.set_readonly(true);
         std::fs::set_permissions(&merge_file_dir, perms).unwrap();
 
-        let merge_manager = MergeManager::new(
-            INSTANCE_ID,
-            &dir,
-            storage_id_generator,
-            get_options(),
-        );
+        let merge_manager =
+            MergeManager::new(INSTANCE_ID, &dir, storage_id_generator, get_options());
         let ret = merge_manager.recover_merge();
         assert!(ret.is_err());
     }
@@ -697,8 +674,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let old_db =
-            Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
+        let old_db = Database::open(&dir, storage_id_generator.clone(), get_options()).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -706,12 +682,8 @@ mod tests {
         rows.append(&mut write_kvs_to_db(&old_db, kvs));
         {
             let merge_path = create_merge_file_dir(&dir).unwrap();
-            let db = Database::open(
-                &merge_path,
-                storage_id_generator.clone(),
-                get_options(),
-            )
-            .unwrap();
+            let db =
+                Database::open(&merge_path, storage_id_generator.clone(), get_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k3", "hello world"),
                 TestingKV::new("k1", "value4"),

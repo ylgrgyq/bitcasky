@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    ops::{Deref, DerefMut},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -24,13 +25,19 @@ pub struct DebugClock {
     time: u64,
 }
 
+impl DebugClock {
+    pub fn new(time: u64) -> DebugClock {
+        DebugClock { time }
+    }
+}
+
 impl Clock for DebugClock {
     fn now(&self) -> u64 {
         self.time
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum ClockImpl {
     System(SystemClock),
     Debug(DebugClock),
@@ -45,7 +52,7 @@ impl Clock for ClockImpl {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BitcaskClock {
     pub clock: ClockImpl,
 }
@@ -53,6 +60,20 @@ pub struct BitcaskClock {
 impl Clock for BitcaskClock {
     fn now(&self) -> u64 {
         self.clock.now()
+    }
+}
+
+impl Deref for BitcaskClock {
+    type Target = ClockImpl;
+
+    fn deref(&self) -> &Self::Target {
+        &self.clock
+    }
+}
+
+impl DerefMut for BitcaskClock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.clock
     }
 }
 

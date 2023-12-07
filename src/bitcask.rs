@@ -54,11 +54,11 @@ impl Bitcask {
             id.to_string(),
             directory,
             storage_id_generator.clone(),
-            options,
+            options.clone(),
         );
         merge_manager.recover_merge()?;
 
-        let database = Database::open(directory, storage_id_generator, options)?;
+        let database = Database::open(directory, storage_id_generator, options.clone())?;
         let keydir = RwLock::new(KeyDir::new(&database)?);
 
         debug!(target: "Bitcask", "Bitcask created. instanceId: {}", id);

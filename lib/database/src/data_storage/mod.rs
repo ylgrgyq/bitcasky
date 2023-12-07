@@ -172,7 +172,7 @@ impl DataStorage {
                 meta,
                 FILE_HEADER_SIZE,
                 formatter,
-                self.options,
+                self.options.clone(),
             )?,
         })
     }
@@ -194,7 +194,7 @@ impl DataStorage {
                 write_offset,
                 capacity,
                 formatter,
-                options,
+                options.clone(),
             )?),
             DataSotrageType::Mmap => DataStorageImpl::MmapStorage(MmapDataStorage::new(
                 storage_id,
@@ -202,7 +202,7 @@ impl DataStorage {
                 write_offset,
                 capacity,
                 formatter,
-                options,
+                options.clone(),
             )?),
         };
         Ok(DataStorage {

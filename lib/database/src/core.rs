@@ -87,13 +87,13 @@ impl Database {
             storage_id_generator.update_id(*id);
         }
 
-        let hint_file_writer = Some(HintWriter::start(&database_dir, options));
+        let hint_file_writer = Some(HintWriter::start(&database_dir, options.clone()));
 
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
             &data_storage_ids,
             &storage_id_generator,
-            options,
+            options.clone(),
         )?;
 
         let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
@@ -107,7 +107,7 @@ impl Database {
             storage_id_generator,
             database_dir,
             stable_storages,
-            options,
+            options: options.clone(),
             hint_file_writer,
             sync_worker: None,
             is_error: Mutex::new(None),
@@ -179,7 +179,7 @@ impl Database {
             storage_ids.sort();
             storage_ids.reverse();
         }
-        DatabaseRecoverIter::new(self.database_dir.clone(), storage_ids, self.options)
+        DatabaseRecoverIter::new(self.database_dir.clone(), storage_ids, self.options.clone())
     }
 
     pub fn iter(&self) -> DatabaseResult<DatabaseIter> {
@@ -199,7 +199,7 @@ impl Database {
         let files: DatabaseResult<Vec<DataStorage>> = storage_ids
             .iter()
             .map(|f| {
-                DataStorage::open(&self.database_dir, *f, self.options)
+                DataStorage::open(&self.database_dir, *f, self.options.clone())
                     .map_err(DatabaseError::StorageError)
             })
             .collect();
@@ -234,7 +234,7 @@ impl Database {
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
-            self.options,
+            self.options.clone(),
         )?;
 
         {
@@ -336,7 +336,7 @@ impl Database {
         }
         let next_storage_id = self.storage_id_generator.generate_next_id();
         let next_writing_file =
-            DataStorage::new(&self.database_dir, next_storage_id, self.options)?;
+            DataStorage::new(&self.database_dir, next_storage_id, self.options.clone())?;
         let mut old_storage = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_storage.flush()?;
         let storage_id = old_storage.storage_id();
@@ -525,7 +525,7 @@ impl DatabaseRecoverIter {
     ) -> DatabaseResult<Self> {
         if let Some(id) = iters.pop() {
             let iter: Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>> =
-                recovered_iter(&database_dir, id, options)?;
+                recovered_iter(&database_dir, id, options.clone())?;
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_storage_ids: iters,
@@ -553,7 +553,7 @@ impl Iterator for DatabaseRecoverIter {
                 Some(iter) => match iter.next() {
                     None => {
                         if let Some(id) = self.data_storage_ids.pop() {
-                            match recovered_iter(&self.database_dir, id, self.options) {
+                            match recovered_iter(&self.database_dir, id, self.options.clone()) {
                                 Ok(iter) => {
                                     self.current_iter.replace(Some(iter));
                                 }
@@ -581,7 +581,7 @@ fn open_storages<P: AsRef<Path>>(
 
     Ok(storage_ids
         .iter()
-        .map(|id| DataStorage::open(&database_dir, *id, options))
+        .map(|id| DataStorage::open(&database_dir, *id, options.clone()))
         .collect::<crate::data_storage::Result<Vec<DataStorage>>>()?)
 }
 
@@ -591,7 +591,7 @@ fn prepare_load_storages<P: AsRef<Path>>(
     storage_id_generator: &StorageIdGenerator,
     options: BitcaskOptions,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
-    let mut storages = open_storages(&database_dir, data_storage_ids, options)?;
+    let mut storages = open_storages(&database_dir, data_storage_ids, options.clone())?;
     let mut writing_storage;
     if storages.is_empty() {
         let writing_storage_id = storage_id_generator.generate_next_id();

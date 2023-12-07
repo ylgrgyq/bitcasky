@@ -172,6 +172,8 @@ impl DataStorageReader for MmapDataStorage {
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
+            // 这里是不是提前校验，过期了就不要读数据了
+
             return Ok(TimedValue {
                 value: Value::VectorBytes(
                     kv_bs
@@ -221,7 +223,8 @@ impl DataStorageReader for MmapDataStorage {
 #[cfg(test)]
 mod tests {
     use common::{
-        create_file, formatter::FILE_HEADER_SIZE, fs::FileType, options::DataSotrageType,
+        clock::DebugClock, create_file, formatter::FILE_HEADER_SIZE, fs::FileType,
+        options::DataSotrageType,
     };
 
     use super::*;
@@ -229,15 +232,18 @@ mod tests {
     use bitcask_tests::common::get_temporary_directory_path;
     use test_log::test;
 
-    fn get_file_storage(max_size: usize) -> MmapDataStorage {
+    fn get_options(max_size: usize) -> BitcaskOptions {
+        BitcaskOptions::default()
+            .max_data_file_size(max_size)
+            .init_data_file_capacity(max_size)
+            .storage_type(DataSotrageType::Mmap)
+    }
+
+    fn get_file_storage(options: BitcaskOptions) -> MmapDataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = BitcaskFormatter::default();
         let file = create_file(dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
-        let options = BitcaskOptions::default()
-            .max_data_file_size(max_size)
-            .init_data_file_capacity(max_size)
-            .storage_type(DataSotrageType::Mmap);
         let meta = file.metadata().unwrap();
         MmapDataStorage::new(
             1,
@@ -251,8 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn test_read_write_mmap_storage() {
-        let mut storage = get_file_storage(1024);
+    fn test_read_write_immotal_value() {
+        let mut storage = get_file_storage(get_options(1024));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
@@ -281,8 +287,68 @@ mod tests {
     }
 
     #[test]
+    fn test_read_write_expired_value() {
+        let clock = DebugClock::new(1000);
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> =
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), 100);
+        let row_location1 = storage.write_row(&row_to_write).unwrap();
+
+        let k2: Vec<u8> = "key2".into();
+        let v2: Vec<u8> = "value2".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> =
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), 100);
+        let row_location2 = storage.write_row(&row_to_write).unwrap();
+
+        assert!(storage
+            .read_value(row_location1.row_offset)
+            .unwrap()
+            .is_none());
+        assert!(storage
+            .read_value(row_location2.row_offset)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn test_read_write_not_expired_value() {
+        let clock = DebugClock::new(1000);
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> =
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), 2000);
+        let row_location1 = storage.write_row(&row_to_write).unwrap();
+
+        let k2: Vec<u8> = "key2".into();
+        let v2: Vec<u8> = "value2".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> =
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), 2000);
+        let row_location2 = storage.write_row(&row_to_write).unwrap();
+
+        assert_eq!(
+            v1,
+            *storage
+                .read_value(row_location1.row_offset)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            v2,
+            *storage
+                .read_value(row_location2.row_offset)
+                .unwrap()
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn test_write_overflow() {
-        let mut storage = get_file_storage(2);
+        let mut storage = get_file_storage(get_options(2));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
@@ -292,7 +358,7 @@ mod tests {
 
     #[test]
     fn test_expand_file_size() {
-        let mut storage = get_file_storage(2048);
+        let mut storage = get_file_storage(get_options(2048));
         let init_size = storage.data_file.metadata().unwrap().len();
 
         let mut size = 0;
@@ -313,8 +379,8 @@ mod tests {
     }
 
     #[test]
-    fn test_mmap_storage_read_next_row() {
-        let mut storage = get_file_storage(1024);
+    fn test_read_next_immortal_row() {
+        let mut storage = get_file_storage(get_options(1024));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
@@ -338,8 +404,38 @@ mod tests {
     }
 
     #[test]
+    fn test_read_next_expired_row() {
+        let clock = DebugClock::new(1000);
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+
+        let k1: Vec<u8> = "key1".into();
+        let v1: Vec<u8> = "value1".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> =
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), 1001);
+        storage.write_row(&row_to_write).unwrap();
+
+        let k2: Vec<u8> = "key2".into();
+        let v2: Vec<u8> = "value2".into();
+        let row_to_write: RowToWrite<'_, Vec<u8>> =
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), 100);
+        storage.write_row(&row_to_write).unwrap();
+
+        storage.rewind().unwrap();
+
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k1, r.key);
+        assert_eq!(v1, r.value.value);
+        assert_eq!(1001, r.value.expire_timestamp);
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k2, r.key);
+        assert_eq!(v2, r.value.value);
+        assert_eq!(100, r.value.expire_timestamp);
+        assert!(storage.read_next_row().unwrap().is_none());
+    }
+
+    #[test]
     fn test_rewind() {
-        let mut storage = get_file_storage(1024);
+        let mut storage = get_file_storage(get_options(1024));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();

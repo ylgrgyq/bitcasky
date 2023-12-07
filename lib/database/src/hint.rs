@@ -200,7 +200,7 @@ impl HintWriter {
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
-                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, options) {
+                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, options.clone()) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -236,7 +236,7 @@ impl HintWriter {
         data_storage_id: StorageId,
         options: BitcaskOptions,
     ) -> DatabaseResult<()> {
-        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options)?;
+        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.clone())?;
 
         let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(
@@ -264,7 +264,7 @@ impl HintWriter {
         data_storage_id: StorageId,
         options: BitcaskOptions,
     ) -> DatabaseResult<HashMap<Vec<u8>, RowHint>> {
-        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, options)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, options.clone())?;
 
         let data_itr = stable_file_opt.iter()?;
 
