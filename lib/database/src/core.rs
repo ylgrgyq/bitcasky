@@ -612,7 +612,7 @@ pub mod database_tests_utils {
     use std::{sync::Arc, time::Duration};
 
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use common::{options::BitcaskOptions, storage_id::StorageIdGenerator};
+    use common::{clock::DebugClock, options::BitcaskOptions, storage_id::StorageIdGenerator};
 
     use crate::{RowLocation, TimedValue};
 
@@ -661,11 +661,18 @@ pub mod database_tests_utils {
         assert_eq!(expect_rows.len(), i);
     }
 
-    pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
+    pub fn write_kvs_to_db(
+        db: &Database,
+        kvs: Vec<TestingKV>,
+        expired_timestamp: u64,
+    ) -> Vec<TestingRow> {
         kvs.into_iter()
             .map(|kv| {
                 let pos = db
-                    .write(&kv.key(), TimedValue::immortal_value(kv.value()))
+                    .write(
+                        &kv.key(),
+                        TimedValue::expirable_value(kv.value(), expired_timestamp),
+                    )
                     .unwrap();
                 TestingRow::new(
                     kv,
@@ -689,11 +696,45 @@ pub mod database_tests_utils {
             TestingKV::new("k3", "value3"),
             TestingKV::new("k1", "value4"),
         ];
-        let rows = write_kvs_to_db(&db, kvs);
+        let rows = write_kvs_to_db(&db, kvs, 0);
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
 
+    #[test]
+    // fn test_read_write_expired_value_in_writing_file() {
+    //     let dir = get_temporary_directory_path();
+    //     let storage_id_generator = Arc::new(StorageIdGenerator::default());
+    //     let clock = DebugClock::new(1000);
+    //     let db = Database::open(
+    //         &dir,
+    //         storage_id_generator,
+    //         get_database_options().debug_clock(clock),
+    //     )
+    //     .unwrap();
+    //     let kvs = vec![
+    //         TestingKV::new("k1", "value1"),
+    //         TestingKV::new("k2", "value2"),
+    //         TestingKV::new("k3", "value3"),
+    //         TestingKV::new("k1", "value4"),
+    //     ];
+    //     let rows = write_kvs_to_db(&db, kvs, 100);
+    //     for row in &rows {
+    //         let actual = db.read_value(&row.pos).unwrap();
+    //         assert!(actual.is_none());
+    //     }
+    //     let mut i = 0;
+    //     for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
+    //         let expect_row = rows.get(i).unwrap();
+    //         assert_eq!(expect_row.kv.key(), actual_row.key);
+    //         assert_eq!(expect_row.kv.value(), actual_row.value.value);
+    //         assert_eq!(expect_row.pos, actual_row.row_location);
+    //         assert_eq!(100, actual_row.value.expire_timestamp);
+    //         i += 1;
+    //     }
+    //     assert_eq!(rows.len(), i);
+    //     assert_database_rows(&db, &rows);
+    // }
     #[test]
     fn test_read_write_with_stable_files() {
         let dir = get_temporary_directory_path();
@@ -705,14 +746,14 @@ pub mod database_tests_utils {
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
         ];
-        rows.append(&mut write_kvs_to_db(&db, kvs));
+        rows.append(&mut write_kvs_to_db(&db, kvs, 0));
         db.flush_writing_file().unwrap();
 
         let kvs = vec![
             TestingKV::new("k3", "hello world"),
             TestingKV::new("k1", "value4"),
         ];
-        rows.append(&mut write_kvs_to_db(&db, kvs));
+        rows.append(&mut write_kvs_to_db(&db, kvs, 0));
         db.flush_writing_file().unwrap();
 
         assert_eq!(3, storage_id_generator.get_id());
@@ -733,7 +774,7 @@ pub mod database_tests_utils {
                 TestingKV::new("k1", "value1"),
                 TestingKV::new("k2", "value2"),
             ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
+            rows.append(&mut write_kvs_to_db(&db, kvs, 0));
             assert_rows_value(&db, &rows);
         }
         {
@@ -743,7 +784,7 @@ pub mod database_tests_utils {
                 TestingKV::new("k3", "hello world"),
                 TestingKV::new("k1", "value4"),
             ];
-            rows.append(&mut write_kvs_to_db(&db, kvs));
+            rows.append(&mut write_kvs_to_db(&db, kvs, 0));
             assert_rows_value(&db, &rows);
         }
 
@@ -774,7 +815,7 @@ pub mod database_tests_utils {
             TestingKV::new("k1", "value4_value4_value4"),
         ];
         assert_eq!(0, db.stable_storages.len());
-        let rows = write_kvs_to_db(&db, kvs);
+        let rows = write_kvs_to_db(&db, kvs, 0);
         assert_rows_value(&db, &rows);
         assert_eq!(1, db.stable_storages.len());
         assert_database_rows(&db, &rows);
