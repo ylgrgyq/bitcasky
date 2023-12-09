@@ -123,6 +123,12 @@ fn test_recover_expirable_value() {
             Duration::from_nanos(1),
         )
         .unwrap();
+        bc.put_with_ttl(
+            "notEpireK5".into(),
+            "value5".as_bytes(),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
     }
 
     {
@@ -152,4 +158,8 @@ fn test_recover_expirable_value() {
     );
     assert!(bc.get(&"imortalToExpireK3".into()).unwrap().is_none());
     assert!(bc.get(&"expireK4".into()).unwrap().is_none());
+    assert_eq!(
+        bc.get(&"notEpireK5".into()).unwrap().unwrap(),
+        "value5".as_bytes()
+    );
 }
