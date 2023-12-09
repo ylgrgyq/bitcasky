@@ -16,6 +16,7 @@ use common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
+    options::{BitcaskOptions, DataSotrageType},
     storage_id::StorageId,
 };
 
@@ -61,18 +62,12 @@ pub trait DataStorageWriter {
 
 pub trait DataStorageReader {
     /// Read value from this storage at row_offset
-    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>>;
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>>;
 
     /// Read next value from this storage
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 
     fn seek_to_end(&mut self) -> Result<()>;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum DataSotrageType {
-    File,
-    Mmap,
 }
 
 #[derive(Debug)]
@@ -81,48 +76,12 @@ enum DataStorageImpl {
     MmapStorage(MmapDataStorage),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct DataStorageOptions {
-    pub max_data_file_size: usize,
-    pub init_data_file_capacity: usize,
-    pub storage_type: DataSotrageType,
-}
-
-impl Default for DataStorageOptions {
-    fn default() -> Self {
-        Self {
-            max_data_file_size: 128 * 1024 * 1024,
-            init_data_file_capacity: 1024 * 1024,
-            storage_type: DataSotrageType::Mmap,
-        }
-    }
-}
-
-impl DataStorageOptions {
-    pub fn max_data_file_size(mut self, size: usize) -> DataStorageOptions {
-        assert!(size > 0);
-        self.max_data_file_size = size;
-        self
-    }
-
-    pub fn init_data_file_capacity(mut self, capacity: usize) -> DataStorageOptions {
-        assert!(capacity > 0);
-        self.init_data_file_capacity = capacity;
-        self
-    }
-
-    pub fn storage_type(mut self, storage_type: DataSotrageType) -> DataStorageOptions {
-        self.storage_type = storage_type;
-        self
-    }
-}
-
 #[derive(Debug)]
 pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
-    options: DataStorageOptions,
+    options: BitcaskOptions,
     dirty: bool,
 }
 
@@ -130,7 +89,7 @@ impl DataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let formatter = BitcaskFormatter::default();
@@ -139,7 +98,7 @@ impl DataStorage {
             FileType::DataFile,
             Some(storage_id),
             &formatter,
-            options.init_data_file_capacity,
+            options.database.storage.init_data_file_capacity,
         )?;
 
         debug!(
@@ -162,7 +121,7 @@ impl DataStorage {
     pub fn open<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = fs::open_file(&path, FileType::DataFile, Some(storage_id))?;
@@ -213,7 +172,7 @@ impl DataStorage {
                 meta,
                 FILE_HEADER_SIZE,
                 formatter,
-                self.options,
+                self.options.clone(),
             )?,
         })
     }
@@ -225,17 +184,17 @@ impl DataStorage {
         meta: Metadata,
         write_offset: usize,
         formatter: BitcaskFormatter,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         let capacity = meta.len() as usize;
-        let storage_impl = match options.storage_type {
+        let storage_impl = match options.database.storage.storage_type {
             DataSotrageType::File => DataStorageImpl::FileStorage(FileDataStorage::new(
                 storage_id,
                 data_file,
                 write_offset,
                 capacity,
                 formatter,
-                options,
+                options.clone(),
             )?),
             DataSotrageType::Mmap => DataStorageImpl::MmapStorage(MmapDataStorage::new(
                 storage_id,
@@ -243,7 +202,7 @@ impl DataStorage {
                 write_offset,
                 capacity,
                 formatter,
-                options,
+                options.clone(),
             )?),
         };
         Ok(DataStorage {
@@ -294,7 +253,7 @@ impl DataStorageWriter for DataStorage {
 }
 
 impl DataStorageReader for DataStorage {
-    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>> {
         match &mut self.storage_impl {
             DataStorageImpl::FileStorage(s) => s
                 .read_value(row_offset)

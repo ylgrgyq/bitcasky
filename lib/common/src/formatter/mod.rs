@@ -2,7 +2,6 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     ops::Deref,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crate::storage_id::StorageId;
@@ -19,7 +18,7 @@ pub const FILE_HEADER_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RowMeta {
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
     pub key_size: usize,
     pub value_size: usize,
 }
@@ -44,7 +43,7 @@ pub struct MergeMeta {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RowHintHeader {
-    pub timestamp: u64,
+    pub expire_timestamp: u64,
     pub key_size: usize,
     pub row_offset: usize,
 }
@@ -57,19 +56,19 @@ pub struct RowHint {
 
 impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
     pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_millis() as u64;
-        RowToWrite::new_with_timestamp(key, value, now)
+        RowToWrite::new_with_timestamp(key, value, 0)
     }
 
-    pub fn new_with_timestamp(key: &'a Vec<u8>, value: V, timestamp: u64) -> RowToWrite<'a, V> {
+    pub fn new_with_timestamp(
+        key: &'a Vec<u8>,
+        value: V,
+        expire_timestamp: u64,
+    ) -> RowToWrite<'a, V> {
         let key_size = key.len();
         let value_size = value.len();
         RowToWrite {
             meta: RowMeta {
-                timestamp,
+                expire_timestamp,
                 key_size,
                 value_size,
             },

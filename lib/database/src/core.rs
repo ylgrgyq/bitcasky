@@ -13,10 +13,11 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
 use common::{
+    clock::Clock,
     formatter::RowToWrite,
     fs::{self as SelfFs, FileType},
+    options::BitcaskOptions,
     storage_id::{StorageId, StorageIdGenerator},
-    tombstone,
 };
 
 use crate::{
@@ -28,9 +29,7 @@ use log::{debug, error, info, trace, warn};
 
 use super::{
     common::{RecoveredRow, TimedValue, Value},
-    data_storage::{
-        DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter, StorageIter,
-    },
+    data_storage::{DataStorage, DataStorageReader, DataStorageWriter, StorageIter},
     DataStorageError,
 };
 use super::{
@@ -58,38 +57,13 @@ pub struct StorageIds {
     pub writing_storage_id: StorageId,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct DatabaseOptions {
-    pub storage: DataStorageOptions,
-    /// How frequent can we flush data
-    pub sync_interval_sec: u64,
-    pub init_hint_file_capacity: usize,
-}
-
-impl DatabaseOptions {
-    pub fn storage(mut self, storage: DataStorageOptions) -> Self {
-        self.storage = storage;
-        self
-    }
-}
-
-impl Default for DatabaseOptions {
-    fn default() -> Self {
-        Self {
-            storage: DataStorageOptions::default(),
-            init_hint_file_capacity: 1024 * 1024,
-            sync_interval_sec: 60,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct Database {
     pub database_dir: PathBuf,
     storage_id_generator: Arc<StorageIdGenerator>,
     writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
-    options: DatabaseOptions,
+    options: BitcaskOptions,
     hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
@@ -100,7 +74,7 @@ impl Database {
     pub fn open(
         directory: &Path,
         storage_id_generator: Arc<StorageIdGenerator>,
-        options: DatabaseOptions,
+        options: BitcaskOptions,
     ) -> DatabaseResult<Database> {
         let database_dir: PathBuf = directory.into();
 
@@ -113,13 +87,13 @@ impl Database {
             storage_id_generator.update_id(*id);
         }
 
-        let hint_file_writer = Some(HintWriter::start(&database_dir, options));
+        let hint_file_writer = Some(HintWriter::start(&database_dir, options.clone()));
 
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
             &data_storage_ids,
             &storage_id_generator,
-            options.storage,
+            options.clone(),
         )?;
 
         let stable_storages = storages.into_iter().fold(DashMap::new(), |m, s| {
@@ -133,16 +107,16 @@ impl Database {
             storage_id_generator,
             database_dir,
             stable_storages,
-            options,
+            options: options.clone(),
             hint_file_writer,
             sync_worker: None,
             is_error: Mutex::new(None),
         };
 
-        if options.sync_interval_sec > 0 {
+        if options.database.sync_interval_sec > 0 {
             db.sync_worker = Some(SyncWorker::start_sync_worker(
                 db.writing_storage.clone(),
-                options.sync_interval_sec,
+                options.database.sync_interval_sec,
             ));
         }
 
@@ -164,7 +138,8 @@ impl Database {
         key: &Vec<u8>,
         value: TimedValue<V>,
     ) -> DatabaseResult<RowLocation> {
-        let row: RowToWrite<'_, TimedValue<V>> = RowToWrite::new(key, value);
+        let ts = value.expire_timestamp;
+        let row: RowToWrite<'_, TimedValue<V>> = RowToWrite::new_with_timestamp(key, value, ts);
         let mut writing_file_ref = self.writing_storage.lock();
 
         match writing_file_ref.write_row(&row) {
@@ -204,7 +179,7 @@ impl Database {
             storage_ids.sort();
             storage_ids.reverse();
         }
-        DatabaseRecoverIter::new(self.database_dir.clone(), storage_ids, self.options.storage)
+        DatabaseRecoverIter::new(self.database_dir.clone(), storage_ids, self.options.clone())
     }
 
     pub fn iter(&self) -> DatabaseResult<DatabaseIter> {
@@ -224,7 +199,7 @@ impl Database {
         let files: DatabaseResult<Vec<DataStorage>> = storage_ids
             .iter()
             .map(|f| {
-                DataStorage::open(&self.database_dir, *f, self.options.storage)
+                DataStorage::open(&self.database_dir, *f, self.options.clone())
                     .map_err(DatabaseError::StorageError)
             })
             .collect();
@@ -237,7 +212,10 @@ impl Database {
         Ok(DatabaseIter::new(iters?))
     }
 
-    pub fn read_value(&self, row_location: &RowLocation) -> DatabaseResult<TimedValue<Value>> {
+    pub fn read_value(
+        &self,
+        row_location: &RowLocation,
+    ) -> DatabaseResult<Option<TimedValue<Value>>> {
         {
             let mut writing_file_ref = self.writing_storage.lock();
             if row_location.storage_id == writing_file_ref.storage_id() {
@@ -256,7 +234,7 @@ impl Database {
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
-            self.options.storage,
+            self.options.clone(),
         )?;
 
         {
@@ -358,7 +336,7 @@ impl Database {
         }
         let next_storage_id = self.storage_id_generator.generate_next_id();
         let next_writing_file =
-            DataStorage::new(&self.database_dir, next_storage_id, self.options.storage)?;
+            DataStorage::new(&self.database_dir, next_storage_id, self.options.clone())?;
         let mut old_storage = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_storage.flush()?;
         let storage_id = old_storage.storage_id();
@@ -506,7 +484,7 @@ impl Iterator for DatabaseIter {
 fn recovered_iter(
     database_dir: &Path,
     storage_id: StorageId,
-    storage_options: DataStorageOptions,
+    options: BitcaskOptions,
 ) -> DatabaseResult<Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>>> {
     if FileType::HintFile
         .get_path(database_dir, Some(storage_id))
@@ -516,14 +494,14 @@ fn recovered_iter(
         Ok(Box::new(HintFile::open_iterator(database_dir, storage_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", storage_id);
-        let stable_file = DataStorage::open(database_dir, storage_id, storage_options)?;
-        let i = stable_file.iter().map(|iter| {
-            iter.map(|row| {
+        let clock = options.clock.clone();
+        let stable_file = DataStorage::open(database_dir, storage_id, options)?;
+        let i = stable_file.iter().map(move |iter| {
+            iter.map(move |row| {
                 row.map(|r| RecoveredRow {
                     row_location: r.row_location,
-                    timestamp: r.timestamp,
                     key: r.key,
-                    is_tombstone: tombstone::is_tombstone(&r.value),
+                    invalid: !r.value.is_valid(clock.now()),
                 })
                 .map_err(DatabaseError::StorageError)
             })
@@ -536,32 +514,30 @@ pub struct DatabaseRecoverIter {
     current_iter: Cell<Option<Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>>>>,
     data_storage_ids: Vec<StorageId>,
     database_dir: PathBuf,
-
-    storage_options: DataStorageOptions,
+    options: BitcaskOptions,
 }
 
 impl DatabaseRecoverIter {
     fn new(
         database_dir: PathBuf,
         mut iters: Vec<StorageId>,
-
-        storage_options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> DatabaseResult<Self> {
         if let Some(id) = iters.pop() {
             let iter: Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>> =
-                recovered_iter(&database_dir, id, storage_options)?;
+                recovered_iter(&database_dir, id, options.clone())?;
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_storage_ids: iters,
                 current_iter: Cell::new(Some(iter)),
-                storage_options,
+                options,
             })
         } else {
             Ok(DatabaseRecoverIter {
                 database_dir,
                 data_storage_ids: iters,
                 current_iter: Cell::new(None),
-                storage_options,
+                options,
             })
         }
     }
@@ -577,7 +553,7 @@ impl Iterator for DatabaseRecoverIter {
                 Some(iter) => match iter.next() {
                     None => {
                         if let Some(id) = self.data_storage_ids.pop() {
-                            match recovered_iter(&self.database_dir, id, self.storage_options) {
+                            match recovered_iter(&self.database_dir, id, self.options.clone()) {
                                 Ok(iter) => {
                                     self.current_iter.replace(Some(iter));
                                 }
@@ -598,14 +574,14 @@ impl Iterator for DatabaseRecoverIter {
 fn open_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
-    storage_options: DataStorageOptions,
+    options: BitcaskOptions,
 ) -> DatabaseResult<Vec<DataStorage>> {
     let mut storage_ids = data_storage_ids.to_owned();
     storage_ids.sort();
 
     Ok(storage_ids
         .iter()
-        .map(|id| DataStorage::open(&database_dir, *id, storage_options))
+        .map(|id| DataStorage::open(&database_dir, *id, options.clone()))
         .collect::<crate::data_storage::Result<Vec<DataStorage>>>()?)
 }
 
@@ -613,13 +589,13 @@ fn prepare_load_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
     storage_id_generator: &StorageIdGenerator,
-    storage_options: DataStorageOptions,
+    options: BitcaskOptions,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
-    let mut storages = open_storages(&database_dir, data_storage_ids, storage_options)?;
+    let mut storages = open_storages(&database_dir, data_storage_ids, options.clone())?;
     let mut writing_storage;
     if storages.is_empty() {
         let writing_storage_id = storage_id_generator.generate_next_id();
-        let storage = DataStorage::new(&database_dir, writing_storage_id, storage_options)?;
+        let storage = DataStorage::new(&database_dir, writing_storage_id, options)?;
         debug!(target: "Database", "create writing file with id: {}", writing_storage_id);
         writing_storage = storage;
     } else {
@@ -632,15 +608,16 @@ fn prepare_load_storages<P: AsRef<Path>>(
 }
 
 #[cfg(test)]
-pub mod database_tests_utils {
-    use std::sync::Arc;
+pub mod database_tests {
+    use std::{sync::Arc, time::Duration};
 
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use common::storage_id::StorageIdGenerator;
+    use common::{clock::DebugClock, options::BitcaskOptions, storage_id::StorageIdGenerator};
+    use test_log::test;
 
-    use crate::{DataStorageOptions, RowLocation, TimedValue};
+    use crate::{RowLocation, TimedValue};
 
-    use super::{Database, DatabaseOptions};
+    use super::Database;
 
     #[derive(Debug)]
     pub struct TestingRow {
@@ -654,14 +631,12 @@ pub mod database_tests_utils {
         }
     }
 
-    fn get_database_options() -> DatabaseOptions {
-        DatabaseOptions {
-            storage: DataStorageOptions::default()
-                .max_data_file_size(1024)
-                .init_data_file_capacity(100),
-            sync_interval_sec: 60,
-            init_hint_file_capacity: 1024,
-        }
+    fn get_database_options() -> BitcaskOptions {
+        BitcaskOptions::default()
+            .max_data_file_size(1024)
+            .init_data_file_capacity(100)
+            .sync_interval(Duration::from_secs(60))
+            .init_hint_file_capacity(1024)
     }
 
     pub fn assert_rows_value(db: &Database, expect: &Vec<TestingRow>) {
@@ -672,7 +647,11 @@ pub mod database_tests_utils {
 
     pub fn assert_row_value(db: &Database, expect: &TestingRow) {
         let actual = db.read_value(&expect.pos).unwrap();
-        assert_eq!(*expect.kv.value(), *actual.value);
+        if expect.kv.expire_timestamp() > 0 {
+            assert!(actual.is_none());
+        } else {
+            assert_eq!(*expect.kv.value(), *actual.unwrap().value);
+        }
     }
 
     pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
@@ -680,7 +659,16 @@ pub mod database_tests_utils {
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
             assert_eq!(expect_row.kv.key(), actual_row.key);
-            assert_eq!(expect_row.kv.value(), actual_row.value);
+            assert_eq!(
+                expect_row.kv.expire_timestamp(),
+                actual_row.value.expire_timestamp
+            );
+            if expect_row.kv.expire_timestamp() > 0 {
+                assert!(actual_row.value.value.is_empty());
+            } else {
+                assert_eq!(expect_row.kv.value(), actual_row.value.value);
+            }
+
             assert_eq!(expect_row.pos, actual_row.row_location);
             i += 1;
         }
@@ -691,7 +679,10 @@ pub mod database_tests_utils {
         kvs.into_iter()
             .map(|kv| {
                 let pos = db
-                    .write(&kv.key(), TimedValue::immortal_value(kv.value()))
+                    .write(
+                        &kv.key(),
+                        TimedValue::expirable_value(kv.value(), kv.expire_timestamp()),
+                    )
                     .unwrap();
                 TestingRow::new(
                     kv,
@@ -713,6 +704,28 @@ pub mod database_tests_utils {
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
             TestingKV::new("k3", "value3"),
+            TestingKV::new("k1", "value4"),
+        ];
+        let rows = write_kvs_to_db(&db, kvs);
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_read_write_expirable_value_in_writing_file() {
+        let dir = get_temporary_directory_path();
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+        let clock = DebugClock::new(1000);
+        let db = Database::open(
+            &dir,
+            storage_id_generator,
+            get_database_options().debug_clock(clock),
+        )
+        .unwrap();
+        let kvs = vec![
+            TestingKV::new_expirable("k1", "value1", 100),
+            TestingKV::new("k2", "value2"),
+            TestingKV::new_expirable("k3", "value3", 100),
             TestingKV::new("k1", "value4"),
         ];
         let rows = write_kvs_to_db(&db, kvs);
@@ -748,6 +761,33 @@ pub mod database_tests_utils {
     }
 
     #[test]
+    fn test_read_write_expirable_value_in_stable_files() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+        let db =
+            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let kvs = vec![
+            TestingKV::new("k1", "value1"),
+            TestingKV::new_expirable("k2", "value2", 100),
+        ];
+        rows.append(&mut write_kvs_to_db(&db, kvs));
+        db.flush_writing_file().unwrap();
+
+        let kvs = vec![
+            TestingKV::new_expirable("k3", "hello world", 100),
+            TestingKV::new("k1", "value4"),
+        ];
+        rows.append(&mut write_kvs_to_db(&db, kvs));
+        db.flush_writing_file().unwrap();
+
+        assert_eq!(3, storage_id_generator.get_id());
+        assert_eq!(2, db.stable_storages.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
     fn test_recovery() {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
@@ -757,7 +797,7 @@ pub mod database_tests_utils {
                 Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
-                TestingKV::new("k2", "value2"),
+                TestingKV::new_expirable("k2", "value2", 100),
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
             assert_rows_value(&db, &rows);
@@ -767,7 +807,7 @@ pub mod database_tests_utils {
                 Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
             let kvs = vec![
                 TestingKV::new("k3", "hello world"),
-                TestingKV::new("k1", "value4"),
+                TestingKV::new_expirable("k1", "value4", 100),
             ];
             rows.append(&mut write_kvs_to_db(&db, kvs));
             assert_rows_value(&db, &rows);
@@ -788,13 +828,9 @@ pub mod database_tests_utils {
         let db = Database::open(
             &dir,
             storage_id_generator,
-            DatabaseOptions {
-                storage: DataStorageOptions::default()
-                    .max_data_file_size(120)
-                    .init_data_file_capacity(100),
-                sync_interval_sec: 60,
-                init_hint_file_capacity: 1024,
-            },
+            BitcaskOptions::default()
+                .max_data_file_size(120)
+                .init_data_file_capacity(100),
         )
         .unwrap();
         let kvs = vec![

@@ -8,7 +8,9 @@ use std::{
 };
 
 use common::{
+    clock::Clock,
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    options::BitcaskOptions,
     storage_id::StorageId,
 };
 
@@ -17,9 +19,7 @@ use crate::{
     DataStorageError,
 };
 
-use super::{
-    DataStorageOptions, DataStorageReader, DataStorageWriter, Result, RowLocation, TimedValue,
-};
+use super::{DataStorageReader, DataStorageWriter, Result, RowLocation, TimedValue};
 
 #[derive(Debug)]
 pub struct FileDataStorage {
@@ -27,7 +27,7 @@ pub struct FileDataStorage {
     pub storage_id: StorageId,
     offset: usize,
     capacity: usize,
-    options: DataStorageOptions,
+    options: BitcaskOptions,
     formatter: BitcaskFormatter,
 }
 
@@ -38,7 +38,7 @@ impl FileDataStorage {
         write_offset: usize,
         capacity: usize,
         formatter: BitcaskFormatter,
-        options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> Result<Self> {
         Ok(FileDataStorage {
             data_file,
@@ -81,7 +81,8 @@ impl FileDataStorage {
 
     fn check_storage_overflow<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<V>) -> bool {
         let row_size = self.formatter.net_row_size(row);
-        row_size + padding(row_size) + self.offset > self.options.max_data_file_size
+        row_size + padding(row_size) + self.offset
+            > self.options.database.storage.max_data_file_size
     }
 }
 
@@ -122,7 +123,7 @@ impl DataStorageWriter for FileDataStorage {
 }
 
 impl DataStorageReader for FileDataStorage {
-    fn read_value(&mut self, row_offset: usize) -> Result<TimedValue<Value>> {
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>> {
         self.data_file
             .seek(SeekFrom::Start(row_offset as u64))
             .map_err(|e| {
@@ -136,10 +137,15 @@ impl DataStorageReader for FileDataStorage {
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
+            if meta.expire_timestamp != 0 && meta.expire_timestamp <= self.options.clock.now() {
+                return Ok(None);
+            }
+
             return Ok(TimedValue {
                 value: Value::VectorBytes(kv_bs.slice(meta.key_size..).into()),
-                timestamp: meta.timestamp,
-            });
+                expire_timestamp: meta.expire_timestamp,
+            }
+            .validate());
         }
         Err(DataStorageError::ReadRowFailed(
             self.storage_id,
@@ -157,14 +163,16 @@ impl DataStorageReader for FileDataStorage {
             self.offset = value_offset + padding(net_size) + net_size;
             return Ok(Some(RowToRead {
                 key: kv_bs.slice(0..meta.key_size).into(),
-                value: kv_bs
-                    .slice(meta.key_size..(meta.key_size + meta.value_size))
-                    .into(),
+                value: TimedValue::expirable_value(
+                    kv_bs
+                        .slice(meta.key_size..(meta.key_size + meta.value_size))
+                        .into(),
+                    meta.expire_timestamp,
+                ),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
                     row_offset: value_offset,
                 },
-                timestamp: meta.timestamp,
             }));
         }
         Ok(None)
@@ -187,9 +195,10 @@ mod tests {
     use common::{
         formatter::initialize_new_file,
         fs::{create_file, FileType},
+        options::DataSotrageType,
     };
 
-    use crate::data_storage::{DataSotrageType, DataStorage};
+    use crate::data_storage::DataStorage;
 
     use super::*;
 
@@ -201,7 +210,7 @@ mod tests {
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
         initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
-        let options = DataStorageOptions::default()
+        let options = BitcaskOptions::default()
             .max_data_file_size(max_size)
             .init_data_file_capacity(max_size)
             .storage_type(DataSotrageType::File);
@@ -222,8 +231,20 @@ mod tests {
         let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
-        assert_eq!(v1, *storage.read_value(row_location1.row_offset).unwrap());
-        assert_eq!(v2, *storage.read_value(row_location2.row_offset).unwrap());
+        assert_eq!(
+            v1,
+            *storage
+                .read_value(row_location1.row_offset)
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            v2,
+            *storage
+                .read_value(row_location2.row_offset)
+                .unwrap()
+                .unwrap()
+        );
     }
 
     #[test]
@@ -255,10 +276,10 @@ mod tests {
         let r = storage.read_next_row().unwrap().unwrap();
 
         assert_eq!(k1, r.key);
-        assert_eq!(v1, r.value);
+        assert_eq!(v1, r.value.value);
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k2, r.key);
-        assert_eq!(v2, r.value);
+        assert_eq!(v2, r.value.value);
     }
 
     #[test]

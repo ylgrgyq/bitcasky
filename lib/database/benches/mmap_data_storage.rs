@@ -1,10 +1,8 @@
 use std::vec;
 
 use bitcask_tests::common::RandomTestingDataGenerator;
-use common::formatter::RowToWrite;
-use database::data_storage::{
-    DataStorage, DataStorageOptions, DataStorageReader, DataStorageWriter,
-};
+use common::{formatter::RowToWrite, options::BitcaskOptions};
+use database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{seq::SliceRandom, thread_rng};
@@ -14,10 +12,10 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
     DataStorage::new(
         dir,
         100,
-        DataStorageOptions::default()
+        BitcaskOptions::default()
             .max_data_file_size(usize::MAX)
             .init_data_file_capacity(100)
-            .storage_type(database::data_storage::DataSotrageType::Mmap),
+            .storage_type(common::options::DataSotrageType::Mmap),
     )
     .unwrap()
 }
@@ -115,7 +113,7 @@ fn rand_read_row_benchmark(c: &mut Criterion) {
             let v = data_storage
                 .read_value(*offsets.get(counter % offsets.len()).unwrap())
                 .unwrap();
-            assert_eq!(input.value(), *v.value);
+            assert_eq!(input.value(), *v.unwrap().value);
             counter += 1;
         })
     });

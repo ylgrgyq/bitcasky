@@ -23,7 +23,7 @@ impl KeyDir {
         let kd = KeyDir { index };
         for ret in database.recovery_iter()? {
             let item = ret?;
-            if item.is_tombstone {
+            if item.invalid {
                 kd.delete(&item.key);
                 continue;
             }

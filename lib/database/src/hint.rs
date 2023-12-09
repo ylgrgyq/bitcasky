@@ -11,25 +11,25 @@ use bytes::Bytes;
 use log::{debug, error, warn};
 
 use common::{
+    clock::Clock,
     create_file,
     formatter::{
         get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
+    options::BitcaskOptions,
     storage_id::StorageId,
-    tombstone,
 };
 use memmap2::{MmapMut, MmapOptions};
 
 use crate::{
     common::{DatabaseError, DatabaseResult},
     data_storage::{mmap_data_storage::MmapDataStorage, DataStorage},
-    DatabaseOptions,
 };
 use crossbeam_channel::{unbounded, Sender};
 
-use super::{common::RecoveredRow, data_storage::DataStorageOptions};
+use super::common::RecoveredRow;
 
 const DEFAULT_LOG_TARGET: &str = "Hint";
 const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
@@ -179,9 +179,8 @@ impl Iterator for HintFileIterator {
                     storage_id: self.file.storage_id,
                     row_offset: r.header.row_offset,
                 },
-                timestamp: r.header.timestamp,
+                invalid: false,
                 key: r.key,
-                is_tombstone: false,
             })),
             _ => None,
         }
@@ -195,13 +194,13 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path, options: DatabaseOptions) -> HintWriter {
+    pub fn start(database_dir: &Path, options: BitcaskOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
-                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, options) {
+                if let Err(e) = Self::write_hint_file(&moved_dir, storage_id, options.clone()) {
                     warn!(
                         target: DEFAULT_LOG_TARGET,
                         "write hint file with id: {} under path: {} failed {}",
@@ -235,15 +234,15 @@ impl HintWriter {
     fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        options: DatabaseOptions,
+        options: BitcaskOptions,
     ) -> DatabaseResult<()> {
-        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.storage)?;
+        let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.clone())?;
 
         let hint_file_tmp_dir = create_hint_file_tmp_dir(database_dir)?;
         let mut hint_file = HintFile::create(
             &hint_file_tmp_dir,
             data_storage_id,
-            options.init_hint_file_capacity,
+            options.database.init_hint_file_capacity,
         )?;
         m.values()
             .map(|r| hint_file.write_hint_row(r))
@@ -263,9 +262,9 @@ impl HintWriter {
     fn build_row_hint(
         database_dir: &Path,
         data_storage_id: StorageId,
-        storage_options: DataStorageOptions,
+        options: BitcaskOptions,
     ) -> DatabaseResult<HashMap<Vec<u8>, RowHint>> {
-        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, storage_options)?;
+        let stable_file_opt = DataStorage::open(database_dir, data_storage_id, options.clone())?;
 
         let data_itr = stable_file_opt.iter()?;
 
@@ -273,14 +272,14 @@ impl HintWriter {
         for row in data_itr {
             match row {
                 Ok(r) => {
-                    if tombstone::is_tombstone(&r.value) {
+                    if !r.value.is_valid(options.clock.now()) {
                         m.remove(&r.key);
                     } else {
                         m.insert(
                             r.key.clone(),
                             RowHint {
                                 header: RowHintHeader {
-                                    timestamp: r.timestamp,
+                                    expire_timestamp: r.value.expire_timestamp,
                                     key_size: r.key.len(),
                                     row_offset: r.row_location.row_offset,
                                 },
@@ -356,7 +355,7 @@ mod tests {
         let key = vec![1, 2, 3];
         let expect_row = RowHint {
             header: RowHintHeader {
-                timestamp: 12345,
+                expire_timestamp: 12345,
                 key_size: key.len(),
                 row_offset: 789,
             },
@@ -381,7 +380,7 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            DataStorageOptions::default()
+            BitcaskOptions::default()
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
         )
@@ -396,11 +395,9 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
-                DatabaseOptions::default().storage(
-                    DataStorageOptions::default()
-                        .max_data_file_size(1024)
-                        .init_data_file_capacity(100),
-                ),
+                BitcaskOptions::default()
+                    .max_data_file_size(1024)
+                    .init_data_file_capacity(100),
             );
             writer.async_write_hint_file(storage_id);
         }
