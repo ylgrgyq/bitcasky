@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bitcask::bitcask::Bitcask;
 use bitcask_tests::common::get_temporary_directory_path;
 use common::options::BitcaskOptions;
@@ -99,4 +101,55 @@ fn test_merge_recover_after_merge() {
         bc.get(&"k4".into()).unwrap().unwrap(),
         "value4value4".as_bytes()
     );
+}
+
+#[test]
+fn test_recover_expirable_value() {
+    let db_path = get_temporary_directory_path();
+    {
+        let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+        bc.put("importalK1".into(), "value1".as_bytes()).unwrap();
+        bc.put_with_ttl(
+            "expireToImortalK2".into(),
+            "value2".as_bytes(),
+            Duration::from_nanos(1),
+        )
+        .unwrap();
+        bc.put("imortalToExpireK3".into(), "value3".as_bytes())
+            .unwrap();
+        bc.put_with_ttl(
+            "expireK4".into(),
+            "value4".as_bytes(),
+            Duration::from_nanos(1),
+        )
+        .unwrap();
+    }
+
+    {
+        let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+        bc.put("importalK1".into(), "value1value1".as_bytes())
+            .unwrap();
+        bc.put("expireToImortalK2".into(), "value2value2".as_bytes())
+            .unwrap();
+        bc.put_with_ttl(
+            "imortalToExpireK3".into(),
+            "value3".as_bytes(),
+            Duration::from_nanos(1),
+        )
+        .unwrap();
+
+        bc.merge().unwrap();
+    }
+
+    let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+    assert_eq!(
+        bc.get(&"importalK1".into()).unwrap().unwrap(),
+        "value1value1".as_bytes()
+    );
+    assert_eq!(
+        bc.get(&"expireToImortalK2".into()).unwrap().unwrap(),
+        "value2value2".as_bytes()
+    );
+    assert!(bc.get(&"imortalToExpireK3".into()).unwrap().is_none());
+    assert!(bc.get(&"expireK4".into()).unwrap().is_none());
 }

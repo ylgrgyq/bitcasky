@@ -194,12 +194,17 @@ impl DataStorageReader for MmapDataStorage {
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
         if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
+            let value: Vec<u8> = if meta.expire_timestamp != 0
+                && meta.expire_timestamp <= self.options.clock.now()
+            {
+                vec![]
+            } else {
+                kv_bs.slice(meta.key_size..).into()
+            };
+
             let row_to_read = RowToRead {
                 key: kv_bs.slice(0..meta.key_size).into(),
-                value: TimedValue::expirable_value(
-                    kv_bs.slice(meta.key_size..).into(),
-                    meta.expire_timestamp,
-                ),
+                value: TimedValue::expirable_value(value, meta.expire_timestamp),
                 row_location: RowLocation {
                     storage_id: self.storage_id,
                     row_offset: self.write_offset,
@@ -430,7 +435,7 @@ mod tests {
         assert_eq!(1001, r.value.expire_timestamp);
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k2, r.key);
-        assert_eq!(v2, r.value.value);
+        assert!(r.value.value.is_empty());
         assert_eq!(100, r.value.expire_timestamp);
         assert!(storage.read_next_row().unwrap().is_none());
     }

@@ -5,6 +5,7 @@ use std::{collections::HashMap, path::PathBuf};
 pub struct TestingKV {
     key: Vec<u8>,
     value: Vec<u8>,
+    expire_timestamp: u64,
 }
 
 impl TestingKV {
@@ -12,6 +13,15 @@ impl TestingKV {
         TestingKV {
             key: k.into(),
             value: v.into(),
+            expire_timestamp: 0,
+        }
+    }
+
+    pub fn new_expirable(k: &str, v: &str, expire_timestamp: u64) -> TestingKV {
+        TestingKV {
+            key: k.into(),
+            value: v.into(),
+            expire_timestamp,
         }
     }
 
@@ -19,6 +29,7 @@ impl TestingKV {
         TestingKV {
             key: k.to_vec(),
             value: v.to_vec(),
+            expire_timestamp: 0,
         }
     }
 
@@ -32,8 +43,13 @@ impl TestingKV {
     pub fn key(&self) -> Vec<u8> {
         self.key.clone()
     }
+
     pub fn value(&self) -> Vec<u8> {
         self.value.clone()
+    }
+
+    pub fn expire_timestamp(&self) -> u64 {
+        self.expire_timestamp
     }
 }
 
