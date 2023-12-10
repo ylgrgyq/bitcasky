@@ -130,13 +130,10 @@ impl DataStorageWriter for MmapDataStorage {
     ) -> super::Result<crate::RowLocation> {
         self.ensure_capacity(row)?;
 
-        let mut size = self.formatter.net_row_size(row);
-        size += padding(size);
-
         let value_offset = self.write_offset;
         let formatter = self.formatter;
-        formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
-        self.write_offset += size;
+        let net_size = formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
+        self.write_offset += net_size + padding(net_size);
 
         Ok(RowLocation {
             storage_id: self.storage_id,
