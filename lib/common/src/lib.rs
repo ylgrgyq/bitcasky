@@ -78,16 +78,17 @@ pub fn create_file<P: AsRef<Path>>(
     Ok(file)
 }
 
-pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<()> {
+pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<usize> {
+    let capacity = required_capacity & !7;
     // fs4 provides some cross-platform bindings which help for Windows.
     #[cfg(not(unix))]
-    file.allocate(required_capacity as u64)?;
+    file.allocate(capacity as u64)?;
     // For all unix systems WAL can just use ftruncate directly
     #[cfg(unix)]
     {
-        rustix::fs::ftruncate(file, required_capacity as u64)?;
+        rustix::fs::ftruncate(file, capacity as u64)?;
     }
-    Ok(())
+    Ok(capacity)
 }
 
 pub fn copy_memory(src: &[u8], dst: &mut [u8]) {

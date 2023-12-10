@@ -64,18 +64,19 @@ impl MmapDataStorage {
 
         if required_capacity > self.capacity {
             let mut new_capacity =
-                std::cmp::max(required_capacity, self.capacity + self.capacity / 3);
+                std::cmp::max(required_capacity + 8, self.capacity + self.capacity / 3);
             new_capacity = std::cmp::min(
                 new_capacity,
                 self.options.database.storage.max_data_file_size,
             );
-            debug!(
-                "data file with storage id: {:?}, resizing to {} bytes",
-                self.storage_id, new_capacity
-            );
+
             self.flush()?;
 
-            common::resize_file(&self.data_file, new_capacity)?;
+            new_capacity = common::resize_file(&self.data_file, new_capacity)?;
+            debug!(
+                "data file with storage id: {:?}, require {} bytes, resizing from {} to {} bytes. ",
+                self.storage_id, required_capacity, self.capacity, new_capacity
+            );
             let mut mmap = unsafe {
                 MmapOptions::new()
                     .offset(0)
