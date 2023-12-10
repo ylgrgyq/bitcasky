@@ -9,10 +9,7 @@ use common::{
 use log::debug;
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::{
-    common::{RowToRead, Value},
-    DataStorageError, RowLocation, TimedValue,
-};
+use crate::{common::RowToRead, DataStorageError, RowLocation, TimedValue};
 
 use super::{DataStorageReader, DataStorageWriter, Result};
 
@@ -154,7 +151,7 @@ impl DataStorageWriter for MmapDataStorage {
 }
 
 impl DataStorageReader for MmapDataStorage {
-    fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Value>>> {
+    fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Vec<u8>>>> {
         let storage_id = self.storage_id;
         let clock = self.options.clock.clone();
         let row = self
@@ -173,7 +170,7 @@ impl DataStorageReader for MmapDataStorage {
         }
 
         Ok(TimedValue {
-            value: Value::VectorBytes(buffer[meta.key_size..].into()),
+            value: buffer[meta.key_size..].into(),
             expire_timestamp: meta.expire_timestamp,
         }
         .validate())

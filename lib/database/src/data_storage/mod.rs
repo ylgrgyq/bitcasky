@@ -21,10 +21,7 @@ use common::{
 
 use self::mmap_data_storage::MmapDataStorage;
 
-use super::{
-    common::{RowToRead, Value},
-    RowLocation, TimedValue,
-};
+use super::{common::RowToRead, RowLocation, TimedValue};
 
 #[derive(Error, Debug)]
 #[error("{}")]
@@ -61,7 +58,7 @@ pub trait DataStorageWriter {
 
 pub trait DataStorageReader {
     /// Read value from this storage at row_offset
-    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>>;
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Vec<u8>>>>;
 
     /// Read next value from this storage
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
@@ -232,7 +229,7 @@ impl DataStorageWriter for DataStorage {
 }
 
 impl DataStorageReader for DataStorage {
-    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>> {
+    fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Vec<u8>>>> {
         match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => s
                 .read_value(row_offset)

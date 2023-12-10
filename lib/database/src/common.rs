@@ -13,21 +13,6 @@ pub struct RowLocation {
 }
 
 #[derive(Debug)]
-pub enum Value {
-    VectorBytes(Vec<u8>),
-}
-
-impl Deref for Value {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Value::VectorBytes(v) => v,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct TimedValue<V: Deref<Target = [u8]>> {
     pub value: V,
     pub expire_timestamp: u64,
