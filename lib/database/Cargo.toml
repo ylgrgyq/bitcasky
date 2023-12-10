@@ -5,10 +5,6 @@ version = "0.1.0"
 edition = "2021"
 
 [[bench]]
-name = "file_data_storage"
-harness = false
-
-[[bench]]
 name = "mmap_data_storage"
 harness = false
 

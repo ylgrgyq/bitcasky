@@ -1,11 +1,13 @@
 use std::ops::Deref;
 
+use byteorder::{ByteOrder, LittleEndian};
 use bytes::{Buf, Bytes, BytesMut};
 use crc::{Crc, CRC_32_CKSUM};
 
+use crate::copy_memory;
+
 use super::{
-    padding, Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta,
-    RowToWrite,
+    Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta, RowToWrite,
 };
 
 const CRC_SIZE: usize = 4;
@@ -40,7 +42,7 @@ impl FormatterV1 {
         ck.finalize()
     }
 
-    fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &Bytes) -> u32 {
+    fn gen_crc_by_kv_bytes(&self, meta: &RowMeta, kv: &[u8]) -> u32 {
         let crc32 = Crc::<u32>::new(&CRC_32_CKSUM);
         let mut ck = crc32.digest();
         ck.update(&meta.expire_timestamp.to_be_bytes());
@@ -60,34 +62,26 @@ impl Formatter for FormatterV1 {
         self.row_header_size() + row.key.len() + row.value.len()
     }
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
-        let net_size = self.net_row_size(row);
-        let mut bs = BytesMut::with_capacity(net_size);
-
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]) {
         let crc = self.gen_crc(&row.meta, row.key, &row.value);
-
-        bs.extend_from_slice(&crc.to_be_bytes());
-        bs.extend_from_slice(&row.meta.expire_timestamp.to_be_bytes());
-        bs.extend_from_slice(&row.meta.key_size.to_be_bytes());
-        bs.extend_from_slice(&row.meta.value_size.to_be_bytes());
-        bs.extend_from_slice(row.key);
-        bs.extend_from_slice(&row.value);
-        bs.resize(net_size + padding(net_size), 0);
-        bs.freeze()
+        LittleEndian::write_u32(bs, crc);
+        LittleEndian::write_u64(&mut bs[4..], row.meta.expire_timestamp);
+        LittleEndian::write_u64(&mut bs[12..], row.meta.key_size as u64);
+        LittleEndian::write_u64(&mut bs[20..], row.meta.value_size as u64);
+        copy_memory(row.key, &mut bs[28..]);
+        copy_memory(&row.value, &mut bs[28 + row.key.len()..]);
     }
 
-    fn decode_row_header(&self, bs: Bytes) -> RowHeader {
-        let expected_crc = bs.slice(0..DATA_FILE_TSTAMP_OFFSET).get_u32();
-        let timestamp = bs
-            .slice(DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET)
-            .get_u64();
-
-        let key_size = bs
-            .slice(DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE))
-            .get_u64() as usize;
-        let val_size = bs
-            .slice(DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE))
-            .get_u64() as usize;
+    fn decode_row_header(&self, bs: &[u8]) -> RowHeader {
+        let expected_crc = LittleEndian::read_u32(&bs[0..DATA_FILE_TSTAMP_OFFSET]);
+        let timestamp =
+            LittleEndian::read_u64(&bs[DATA_FILE_TSTAMP_OFFSET..DATA_FILE_KEY_SIZE_OFFSET]);
+        let key_size = LittleEndian::read_u64(
+            &bs[DATA_FILE_KEY_SIZE_OFFSET..(DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE)],
+        ) as usize;
+        let val_size = LittleEndian::read_u64(
+            &bs[DATA_FILE_VALUE_SIZE_OFFSET..(DATA_FILE_VALUE_SIZE_OFFSET + VALUE_SIZE_SIZE)],
+        ) as usize;
         RowHeader {
             crc: expected_crc,
             meta: RowMeta {
@@ -98,7 +92,7 @@ impl Formatter for FormatterV1 {
         }
     }
 
-    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
+    fn validate_key_value(&self, header: &RowHeader, kv: &[u8]) -> Result<()> {
         let actual_crc = self.gen_crc_by_kv_bytes(&header.meta, kv);
         if header.crc != actual_crc {
             return Err(FormatterError::CrcCheckFailed {
@@ -210,12 +204,14 @@ mod tests {
         };
 
         let formatter = FormatterV1 {};
-        let bytes = formatter.encode_row(&row);
+        let mut bs: Vec<u8> = vec![0_u8; 2048];
 
-        assert_eq!(
-            formatter.net_row_size(&row) + padding(formatter.net_row_size(&row)),
-            bytes.len()
-        );
-        assert_eq!(row.meta, formatter.decode_row_header(bytes).meta);
+        formatter.encode_row(&row, bs.as_mut());
+
+        // assert_eq!(
+        //     formatter.net_row_size(&row) + padding(formatter.net_row_size(&row)),
+        //     bytes.len()
+        // );
+        assert_eq!(row.meta, formatter.decode_row_header(bs.as_ref()).meta);
     }
 }

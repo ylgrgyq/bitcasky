@@ -1,4 +1,3 @@
-pub mod file_data_storage;
 pub mod mmap_data_storage;
 
 use log::{debug, error};
@@ -16,11 +15,11 @@ use common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::{BitcaskOptions, DataSotrageType},
+    options::BitcaskOptions,
     storage_id::StorageId,
 };
 
-use self::{file_data_storage::FileDataStorage, mmap_data_storage::MmapDataStorage};
+use self::mmap_data_storage::MmapDataStorage;
 
 use super::{
     common::{RowToRead, Value},
@@ -72,7 +71,6 @@ pub trait DataStorageReader {
 
 #[derive(Debug)]
 enum DataStorageImpl {
-    FileStorage(FileDataStorage),
     MmapStorage(MmapDataStorage),
 }
 
@@ -187,24 +185,14 @@ impl DataStorage {
         options: BitcaskOptions,
     ) -> Result<Self> {
         let capacity = meta.len() as usize;
-        let storage_impl = match options.database.storage.storage_type {
-            DataSotrageType::File => DataStorageImpl::FileStorage(FileDataStorage::new(
-                storage_id,
-                data_file,
-                write_offset,
-                capacity,
-                formatter,
-                options.clone(),
-            )?),
-            DataSotrageType::Mmap => DataStorageImpl::MmapStorage(MmapDataStorage::new(
-                storage_id,
-                data_file,
-                write_offset,
-                capacity,
-                formatter,
-                options.clone(),
-            )?),
-        };
+        let storage_impl = DataStorageImpl::MmapStorage(MmapDataStorage::new(
+            storage_id,
+            data_file,
+            write_offset,
+            capacity,
+            formatter,
+            options.clone(),
+        )?);
         Ok(DataStorage {
             storage_impl,
             storage_id,
@@ -218,7 +206,6 @@ impl DataStorage {
 impl DataStorageWriter for DataStorage {
     fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
         let r = match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s.write_row(row),
             DataStorageImpl::MmapStorage(s) => s.write_row(row),
         }?;
         self.dirty = true;
@@ -227,11 +214,6 @@ impl DataStorageWriter for DataStorage {
 
     fn rewind(&mut self) -> Result<()> {
         match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => {
-                let storage_id = s.storage_id;
-                s.rewind()
-                    .map_err(|e| DataStorageError::RewindFailed(storage_id, e.to_string()))
-            }
             DataStorageImpl::MmapStorage(s) => {
                 let storage_id = s.storage_id;
                 s.rewind()
@@ -242,9 +224,6 @@ impl DataStorageWriter for DataStorage {
 
     fn flush(&mut self) -> Result<()> {
         match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s
-                .flush()
-                .map_err(|e| DataStorageError::FlushStorageFailed(s.storage_id, e.to_string())),
             DataStorageImpl::MmapStorage(s) => s
                 .flush()
                 .map_err(|e| DataStorageError::FlushStorageFailed(s.storage_id, e.to_string())),
@@ -255,9 +234,6 @@ impl DataStorageWriter for DataStorage {
 impl DataStorageReader for DataStorage {
     fn read_value(&mut self, row_offset: usize) -> Result<Option<TimedValue<Value>>> {
         match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s
-                .read_value(row_offset)
-                .map_err(|e| DataStorageError::ReadRowFailed(s.storage_id, e.to_string())),
             DataStorageImpl::MmapStorage(s) => s
                 .read_value(row_offset)
                 .map_err(|e| DataStorageError::ReadRowFailed(s.storage_id, e.to_string())),
@@ -266,14 +242,12 @@ impl DataStorageReader for DataStorage {
 
     fn read_next_row(&mut self) -> Result<Option<RowToRead>> {
         match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s.read_next_row(),
             DataStorageImpl::MmapStorage(s) => s.read_next_row(),
         }
     }
 
     fn seek_to_end(&mut self) -> Result<()> {
         match &mut self.storage_impl {
-            DataStorageImpl::FileStorage(s) => s.seek_to_end(),
             DataStorageImpl::MmapStorage(s) => s.seek_to_end(),
         }
     }
