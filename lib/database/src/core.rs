@@ -88,7 +88,7 @@ impl Database {
         let hint_file_writer = Some(HintWriter::start(&database_dir, options.clone()));
 
         let formatter = Arc::new(BitcaskFormatter::default());
-        let (writing_storage, storages) = prepare_load_storages(
+        let (writing_storage, storages) = prepare_db_storages(
             &database_dir,
             &data_storage_ids,
             &storage_id_generator,
@@ -231,7 +231,7 @@ impl Database {
     }
 
     pub fn reload_data_files(&self, data_storage_ids: Vec<StorageId>) -> DatabaseResult<()> {
-        let (writing, stables) = prepare_load_storages(
+        let (writing, stables) = prepare_db_storages(
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
@@ -600,7 +600,7 @@ fn open_storages<P: AsRef<Path>>(
         .collect::<crate::data_storage::Result<Vec<DataStorage>>>()?)
 }
 
-fn prepare_load_storages<P: AsRef<Path>>(
+fn prepare_db_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
     storage_id_generator: &StorageIdGenerator,
