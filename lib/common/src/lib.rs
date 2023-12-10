@@ -2,6 +2,7 @@ use std::{
     fs::{File, OpenOptions},
     io::{Seek, SeekFrom},
     path::{Path, PathBuf},
+    ptr,
 };
 
 use formatter::BitcaskFormatter;
@@ -87,6 +88,14 @@ pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<()>
         rustix::fs::ftruncate(file, required_capacity as u64)?;
     }
     Ok(())
+}
+
+pub fn copy_memory(src: &[u8], dst: &mut [u8]) {
+    let len_src = src.len();
+    assert!(dst.len() >= len_src);
+    unsafe {
+        ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len_src);
+    }
 }
 
 #[cfg(test)]

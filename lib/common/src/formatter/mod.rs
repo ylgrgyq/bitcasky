@@ -100,11 +100,11 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 
     fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes;
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]);
 
-    fn decode_row_header(&self, bs: Bytes) -> RowHeader;
+    fn decode_row_header(&self, bs: &[u8]) -> RowHeader;
 
-    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()>;
+    fn validate_key_value(&self, header: &RowHeader, kv: &[u8]) -> Result<()>;
 
     fn encode_row_hint(&self, hint: &RowHint) -> Bytes;
 
@@ -145,19 +145,19 @@ impl Formatter for BitcaskFormatter {
         }
     }
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> Bytes {
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]) {
         match self {
-            BitcaskFormatter::V1(f) => f.encode_row(row),
+            BitcaskFormatter::V1(f) => f.encode_row(row, bs),
         }
     }
 
-    fn decode_row_header(&self, bs: Bytes) -> RowHeader {
+    fn decode_row_header(&self, bs: &[u8]) -> RowHeader {
         match self {
             BitcaskFormatter::V1(f) => f.decode_row_header(bs),
         }
     }
 
-    fn validate_key_value(&self, header: &RowHeader, kv: &Bytes) -> Result<()> {
+    fn validate_key_value(&self, header: &RowHeader, kv: &[u8]) -> Result<()> {
         match self {
             BitcaskFormatter::V1(f) => f.validate_key_value(header, kv),
         }

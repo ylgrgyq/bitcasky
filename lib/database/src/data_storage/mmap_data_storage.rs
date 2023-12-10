@@ -1,6 +1,5 @@
-use std::{fs::File, io::Write, mem, ops::Deref, ptr};
+use std::{fs::File, io::Write, mem, ops::Deref};
 
-use bytes::Bytes;
 use common::{
     clock::Clock,
     formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
@@ -97,25 +96,15 @@ impl MmapDataStorage {
         &self.map_view[0..self.capacity]
     }
 
-    pub fn copy_memory(src: &[u8], dst: &mut [u8]) {
-        let len_src = src.len();
-        assert!(dst.len() >= len_src);
-        unsafe {
-            ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len_src);
-        }
-    }
-
-    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Bytes)>> {
+    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Vec<u8>, Vec<u8>)>> {
         let header_size = self.formatter.row_header_size();
         if offset + header_size >= self.capacity {
             return Ok(None);
         }
 
-        let header_bs = Bytes::copy_from_slice(
+        let header = self.formatter.decode_row_header(
             &self.as_slice()[offset..(offset + self.formatter.row_header_size())],
         );
-
-        let header = self.formatter.decode_row_header(header_bs);
         if header.meta.key_size == 0 {
             return Ok(None);
         }
@@ -127,12 +116,19 @@ impl MmapDataStorage {
         let net_size =
             self.formatter.row_header_size() + header.meta.key_size + header.meta.value_size;
 
-        let kv_bs = Bytes::copy_from_slice(
-            &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size],
-        );
+        let kv_bs = &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size];
 
-        self.formatter.validate_key_value(&header, &kv_bs)?;
-        Ok(Some((header.meta, kv_bs)))
+        self.formatter.validate_key_value(&header, kv_bs)?;
+        let key = kv_bs[0..header.meta.key_size].into();
+        let value = if header.meta.expire_timestamp != 0
+            && header.meta.expire_timestamp <= self.options.clock.now()
+        {
+            vec![]
+        } else {
+            kv_bs[header.meta.key_size..].into()
+        };
+
+        Ok(Some((header.meta, key, value)))
     }
 }
 
@@ -143,11 +139,13 @@ impl DataStorageWriter for MmapDataStorage {
     ) -> super::Result<crate::RowLocation> {
         self.ensure_capacity(row)?;
 
-        let data_to_write = self.formatter.encode_row(row);
+        let mut size = self.formatter.net_row_size(row);
+        size += padding(size);
 
         let value_offset = self.write_offset;
-        MmapDataStorage::copy_memory(&data_to_write, &mut self.as_mut_slice()[value_offset..]);
-        self.write_offset += data_to_write.len();
+        let formatter = self.formatter;
+        formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
+        self.write_offset += size;
 
         Ok(RowLocation {
             storage_id: self.storage_id,
@@ -168,7 +166,7 @@ impl DataStorageWriter for MmapDataStorage {
 
 impl DataStorageReader for MmapDataStorage {
     fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Value>>> {
-        if let Some((meta, kv_bs)) = self
+        if let Some((meta, _, value)) = self
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
         {
@@ -177,11 +175,7 @@ impl DataStorageReader for MmapDataStorage {
             }
 
             return Ok(TimedValue {
-                value: Value::VectorBytes(
-                    kv_bs
-                        .slice(meta.key_size..meta.key_size + meta.value_size)
-                        .into(),
-                ),
+                value: Value::VectorBytes(value),
                 expire_timestamp: meta.expire_timestamp,
             }
             .validate());
@@ -193,28 +187,27 @@ impl DataStorageReader for MmapDataStorage {
     }
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
-        if let Some((meta, kv_bs)) = self.do_read_row(self.write_offset)? {
-            let value: Vec<u8> = if meta.expire_timestamp != 0
-                && meta.expire_timestamp <= self.options.clock.now()
-            {
-                vec![]
-            } else {
-                kv_bs.slice(meta.key_size..).into()
-            };
-
-            let row_to_read = RowToRead {
-                key: kv_bs.slice(0..meta.key_size).into(),
-                value: TimedValue::expirable_value(value, meta.expire_timestamp),
-                row_location: RowLocation {
-                    storage_id: self.storage_id,
-                    row_offset: self.write_offset,
-                },
-            };
-            let net_size = self.formatter.row_header_size() + kv_bs.len();
-            self.write_offset += net_size + padding(net_size);
-            return Ok(Some(row_to_read));
+        let row_offset = self.write_offset;
+        let row = self.do_read_row(row_offset)?;
+        if row.is_none() {
+            return Ok(None);
         }
-        Ok(None)
+
+        let (meta, key, value) = row.unwrap();
+
+        let row_to_read = RowToRead {
+            key,
+            value: TimedValue::expirable_value(value, meta.expire_timestamp),
+            row_location: RowLocation {
+                storage_id: self.storage_id,
+                row_offset,
+            },
+        };
+
+        let net_size: usize = self.formatter.row_header_size() + meta.key_size + meta.value_size;
+        self.write_offset += net_size + padding(net_size);
+
+        Ok(Some(row_to_read))
     }
 
     fn seek_to_end(&mut self) -> Result<()> {

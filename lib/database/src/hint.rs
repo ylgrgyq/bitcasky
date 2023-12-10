@@ -12,7 +12,7 @@ use log::{debug, error, warn};
 
 use common::{
     clock::Clock,
-    create_file,
+    copy_memory, create_file,
     formatter::{
         get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
         FILE_HEADER_SIZE,
@@ -25,7 +25,7 @@ use memmap2::{MmapMut, MmapOptions};
 
 use crate::{
     common::{DatabaseError, DatabaseResult},
-    data_storage::{mmap_data_storage::MmapDataStorage, DataStorage},
+    data_storage::DataStorage,
 };
 use crossbeam_channel::{unbounded, Sender};
 
@@ -80,7 +80,7 @@ impl HintFile {
         let data_to_write = self.formatter.encode_row_hint(hint);
 
         let value_offset = self.offset;
-        MmapDataStorage::copy_memory(&data_to_write, &mut self.as_mut_slice()[value_offset..]);
+        copy_memory(&data_to_write, &mut self.as_mut_slice()[value_offset..]);
         self.offset += data_to_write.len();
 
         debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}, offset: {}", 
