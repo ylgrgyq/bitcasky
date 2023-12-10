@@ -72,11 +72,23 @@ enum DataStorageImpl {
 }
 
 #[derive(Debug)]
+pub struct DataStorageTelemetry {
+    pub storage_id: StorageId,
+    pub formatter_version: u8,
+    pub capacity: usize,
+    pub offset: usize,
+    pub usage: f64,
+    pub read_value_times: u64,
+    pub write_times: u64,
+}
+
+#[derive(Debug)]
 pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
     options: BitcaskOptions,
+    formatter: BitcaskFormatter,
     dirty: bool,
 }
 
@@ -172,6 +184,20 @@ impl DataStorage {
         })
     }
 
+    pub fn get_telemetry_data(&self) -> DataStorageTelemetry {
+        match &self.storage_impl {
+            DataStorageImpl::MmapStorage(s) => DataStorageTelemetry {
+                storage_id: self.storage_id,
+                formatter_version: self.formatter.version(),
+                capacity: s.capacity,
+                offset: s.offset,
+                usage: s.offset as f64 / s.capacity as f64,
+                read_value_times: s.read_value_times,
+                write_times: s.write_times,
+            },
+        }
+    }
+
     fn open_by_file(
         database_dir: &Path,
         storage_id: StorageId,
@@ -195,6 +221,7 @@ impl DataStorage {
             storage_id,
             database_dir: database_dir.to_path_buf(),
             options,
+            formatter,
             dirty: false,
         })
     }
@@ -212,7 +239,7 @@ impl DataStorageWriter for DataStorage {
     fn rewind(&mut self) -> Result<()> {
         match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => {
-                let storage_id = s.storage_id;
+                let storage_id = self.storage_id;
                 s.rewind()
                     .map_err(|e| DataStorageError::RewindFailed(storage_id, e.to_string()))
             }
@@ -223,7 +250,7 @@ impl DataStorageWriter for DataStorage {
         match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => s
                 .flush()
-                .map_err(|e| DataStorageError::FlushStorageFailed(s.storage_id, e.to_string())),
+                .map_err(|e| DataStorageError::FlushStorageFailed(self.storage_id, e.to_string())),
         }
     }
 }
@@ -233,7 +260,7 @@ impl DataStorageReader for DataStorage {
         match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => s
                 .read_value(row_offset)
-                .map_err(|e| DataStorageError::ReadRowFailed(s.storage_id, e.to_string())),
+                .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string())),
         }
     }
 

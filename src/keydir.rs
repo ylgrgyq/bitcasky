@@ -7,6 +7,11 @@ use dashmap::{
 use crate::error::BitcaskResult;
 use database::{Database, RowLocation};
 
+#[derive(Debug)]
+pub struct KeyDirTelemetry {
+    pub number_of_keys: usize,
+}
+
 #[derive(Clone, Debug)]
 pub struct KeyDir {
     index: DashMap<Vec<u8>, RowLocation>,
@@ -79,6 +84,12 @@ impl KeyDir {
 
     pub fn clear(&self) {
         self.index.clear();
+    }
+
+    pub fn get_telemetry_data(&self) -> KeyDirTelemetry {
+        KeyDirTelemetry {
+            number_of_keys: self.len(),
+        }
     }
 }
 

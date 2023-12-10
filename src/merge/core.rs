@@ -27,6 +27,11 @@ use crate::{
 const MERGE_FILES_DIRECTORY: &str = "Merge";
 const DEFAULT_LOG_TARGET: &str = "DatabaseMerge";
 
+#[derive(Debug)]
+pub struct MergeManagerTelemetry {
+    pub is_merging: bool,
+}
+
 pub struct MergeManager {
     instance_id: String,
     database_dir: PathBuf,
@@ -119,6 +124,12 @@ impl MergeManager {
             }
         }
         Ok(())
+    }
+
+    pub fn get_telemetry_data(&self) -> MergeManagerTelemetry {
+        MergeManagerTelemetry {
+            is_merging: self.merge_lock.is_locked(),
+        }
     }
 
     fn do_recover_merge(&self) -> BitcaskResult<()> {

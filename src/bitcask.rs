@@ -10,19 +10,19 @@ use parking_lot::RwLock;
 use uuid::Uuid;
 
 use crate::error::{BitcaskError, BitcaskResult};
-use crate::keydir::KeyDir;
-use crate::merge::MergeManager;
+use crate::keydir::{KeyDir, KeyDirTelemetry};
+use crate::merge::{MergeManager, MergeManagerTelemetry};
 use common::{
     fs::{self},
     storage_id::StorageIdGenerator,
 };
-use database::{deleted_value, Database, TimedValue};
+use database::{deleted_value, Database, DatabaseTelemetry, TimedValue};
 
-#[derive(PartialEq, Eq, Debug)]
-pub struct BitcaskStats {
-    pub number_of_data_files: usize,
-    pub number_of_keys: usize,
-    pub number_of_pending_hint_files: usize,
+#[derive(Debug)]
+pub struct BitcaskTelemetry {
+    pub keydir: KeyDirTelemetry,
+    pub database: DatabaseTelemetry,
+    pub merge_manager: MergeManagerTelemetry,
 }
 
 pub struct Bitcask {
@@ -225,15 +225,14 @@ impl Bitcask {
 
     /// Returns statistics about the database, like the number of data files,
     /// keys and overall size on disk of the data
-    pub fn stats(&self) -> BitcaskResult<BitcaskStats> {
+    pub fn get_telemetry_data(&self) -> BitcaskTelemetry {
         let kd = self.keydir.read();
-        let key_size = kd.len();
-        let db_stats = self.database.stats()?;
-        Ok(BitcaskStats {
-            number_of_data_files: db_stats.number_of_data_files,
-            number_of_pending_hint_files: db_stats.number_of_pending_hint_files,
-            number_of_keys: key_size,
-        })
+        let keydir = kd.get_telemetry_data();
+        BitcaskTelemetry {
+            keydir,
+            database: self.database.get_telemetry_data(),
+            merge_manager: self.merge_manager.get_telemetry_data(),
+        }
     }
 
     pub fn do_put<V: Deref<Target = [u8]>>(

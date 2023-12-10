@@ -15,10 +15,12 @@ use super::{DataStorageReader, DataStorageWriter, Result};
 
 #[derive(Debug)]
 pub struct MmapDataStorage {
+    pub offset: usize,
+    pub capacity: usize,
+    pub read_value_times: u64,
+    pub write_times: u64,
     data_file: File,
-    pub storage_id: StorageId,
-    write_offset: usize,
-    capacity: usize,
+    storage_id: StorageId,
     options: BitcaskOptions,
     formatter: BitcaskFormatter,
     map_view: MmapMut,
@@ -43,18 +45,20 @@ impl MmapDataStorage {
         Ok(MmapDataStorage {
             data_file,
             storage_id,
-            write_offset,
+            offset: write_offset,
             capacity,
             options,
             formatter,
             map_view: mmap,
+            read_value_times: 0,
+            write_times: 0,
         })
     }
 
     fn ensure_capacity<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<()> {
         let mut row_size = self.formatter.net_row_size(row);
         row_size += padding(row_size);
-        let required_capacity = row_size + self.write_offset;
+        let required_capacity = row_size + self.offset;
         if required_capacity > self.options.database.storage.max_data_file_size {
             return Err(DataStorageError::StorageOverflow(self.storage_id));
         }
@@ -128,10 +132,11 @@ impl DataStorageWriter for MmapDataStorage {
     ) -> super::Result<crate::RowLocation> {
         self.ensure_capacity(row)?;
 
-        let value_offset = self.write_offset;
+        let value_offset = self.offset;
         let formatter = self.formatter;
         let net_size = formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
-        self.write_offset += net_size + padding(net_size);
+        self.offset += net_size + padding(net_size);
+        self.write_times += 1;
 
         Ok(RowLocation {
             storage_id: self.storage_id,
@@ -141,7 +146,7 @@ impl DataStorageWriter for MmapDataStorage {
 
     fn rewind(&mut self) -> super::Result<()> {
         self.data_file.flush()?;
-        self.write_offset = FILE_HEADER_SIZE;
+        self.offset = FILE_HEADER_SIZE;
         Ok(())
     }
 
@@ -164,20 +169,24 @@ impl DataStorageReader for MmapDataStorage {
             ));
         }
 
-        let (meta, buffer) = row.unwrap();
-        if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
-            return Ok(None);
-        }
-
-        Ok(TimedValue {
-            value: buffer[meta.key_size..].into(),
-            expire_timestamp: meta.expire_timestamp,
-        }
-        .validate())
+        let ret = {
+            let (meta, buffer) = row.unwrap();
+            if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
+                Ok(None)
+            } else {
+                Ok(TimedValue {
+                    value: buffer[meta.key_size..].into(),
+                    expire_timestamp: meta.expire_timestamp,
+                }
+                .validate())
+            }
+        };
+        self.read_value_times += 1;
+        ret
     }
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
-        let row_offset = self.write_offset;
+        let row_offset = self.offset;
         let clock = self.options.clock.clone();
         let row = self.do_read_row(row_offset)?;
         if row.is_none() {
@@ -201,7 +210,7 @@ impl DataStorageReader for MmapDataStorage {
         };
 
         let net_size: usize = self.formatter.row_header_size() + meta.key_size + meta.value_size;
-        self.write_offset += net_size + padding(net_size);
+        self.offset += net_size + padding(net_size);
 
         Ok(Some(row_to_read))
     }
