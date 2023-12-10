@@ -96,7 +96,7 @@ impl MmapDataStorage {
         &self.map_view[0..self.capacity]
     }
 
-    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, Vec<u8>, Vec<u8>)>> {
+    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, &[u8])>> {
         let header_size = self.formatter.row_header_size();
         if offset + header_size >= self.capacity {
             return Ok(None);
@@ -119,16 +119,7 @@ impl MmapDataStorage {
         let kv_bs = &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size];
 
         self.formatter.validate_key_value(&header, kv_bs)?;
-        let key = kv_bs[0..header.meta.key_size].into();
-        let value = if header.meta.expire_timestamp != 0
-            && header.meta.expire_timestamp <= self.options.clock.now()
-        {
-            vec![]
-        } else {
-            kv_bs[header.meta.key_size..].into()
-        };
-
-        Ok(Some((header.meta, key, value)))
+        Ok(Some((header.meta, kv_bs)))
     }
 }
 
@@ -166,37 +157,47 @@ impl DataStorageWriter for MmapDataStorage {
 
 impl DataStorageReader for MmapDataStorage {
     fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Value>>> {
-        if let Some((meta, _, value)) = self
+        let storage_id = self.storage_id;
+        let clock = self.options.clock.clone();
+        let row = self
             .do_read_row(row_offset)
-            .map_err(|e| DataStorageError::ReadRowFailed(self.storage_id, e.to_string()))?
-        {
-            if meta.expire_timestamp != 0 && meta.expire_timestamp <= self.options.clock.now() {
-                return Ok(None);
-            }
-
-            return Ok(TimedValue {
-                value: Value::VectorBytes(value),
-                expire_timestamp: meta.expire_timestamp,
-            }
-            .validate());
+            .map_err(|e| DataStorageError::ReadRowFailed(storage_id, e.to_string()))?;
+        if row.is_none() {
+            return Err(DataStorageError::ReadRowFailed(
+                self.storage_id,
+                format!("no value found at offset: {}", row_offset),
+            ));
         }
-        Err(DataStorageError::ReadRowFailed(
-            self.storage_id,
-            format!("no value found at offset: {}", row_offset),
-        ))
+
+        let (meta, buffer) = row.unwrap();
+        if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
+            return Ok(None);
+        }
+
+        Ok(TimedValue {
+            value: Value::VectorBytes(buffer[meta.key_size..].into()),
+            expire_timestamp: meta.expire_timestamp,
+        }
+        .validate())
     }
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
         let row_offset = self.write_offset;
+        let clock = self.options.clock.clone();
         let row = self.do_read_row(row_offset)?;
         if row.is_none() {
             return Ok(None);
         }
 
-        let (meta, key, value) = row.unwrap();
+        let (meta, buffer) = row.unwrap();
 
+        let value = if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
+            vec![]
+        } else {
+            buffer[meta.key_size..].into()
+        };
         let row_to_read = RowToRead {
-            key,
+            key: buffer[0..meta.key_size].into(),
             value: TimedValue::expirable_value(value, meta.expire_timestamp),
             row_location: RowLocation {
                 storage_id: self.storage_id,
