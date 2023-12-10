@@ -9,10 +9,7 @@ use common::{
 use log::debug;
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::{
-    common::{RowToRead, Value},
-    DataStorageError, RowLocation, TimedValue,
-};
+use crate::{common::RowToRead, DataStorageError, RowLocation, TimedValue};
 
 use super::{DataStorageReader, DataStorageWriter, Result};
 
@@ -64,18 +61,19 @@ impl MmapDataStorage {
 
         if required_capacity > self.capacity {
             let mut new_capacity =
-                std::cmp::max(required_capacity, self.capacity + self.capacity / 3);
+                std::cmp::max(required_capacity + 8, self.capacity + self.capacity / 3);
             new_capacity = std::cmp::min(
                 new_capacity,
                 self.options.database.storage.max_data_file_size,
             );
-            debug!(
-                "data file with storage id: {:?}, resizing to {} bytes",
-                self.storage_id, new_capacity
-            );
+
             self.flush()?;
 
-            common::resize_file(&self.data_file, new_capacity)?;
+            new_capacity = common::resize_file(&self.data_file, new_capacity)?;
+            debug!(
+                "data file with storage id: {:?}, require {} bytes, resizing from {} to {} bytes. ",
+                self.storage_id, required_capacity, self.capacity, new_capacity
+            );
             let mut mmap = unsafe {
                 MmapOptions::new()
                     .offset(0)
@@ -130,13 +128,10 @@ impl DataStorageWriter for MmapDataStorage {
     ) -> super::Result<crate::RowLocation> {
         self.ensure_capacity(row)?;
 
-        let mut size = self.formatter.net_row_size(row);
-        size += padding(size);
-
         let value_offset = self.write_offset;
         let formatter = self.formatter;
-        formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
-        self.write_offset += size;
+        let net_size = formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
+        self.write_offset += net_size + padding(net_size);
 
         Ok(RowLocation {
             storage_id: self.storage_id,
@@ -156,7 +151,7 @@ impl DataStorageWriter for MmapDataStorage {
 }
 
 impl DataStorageReader for MmapDataStorage {
-    fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Value>>> {
+    fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Vec<u8>>>> {
         let storage_id = self.storage_id;
         let clock = self.options.clock.clone();
         let row = self
@@ -175,7 +170,7 @@ impl DataStorageReader for MmapDataStorage {
         }
 
         Ok(TimedValue {
-            value: Value::VectorBytes(buffer[meta.key_size..].into()),
+            value: buffer[meta.key_size..].into(),
             expire_timestamp: meta.expire_timestamp,
         }
         .validate())

@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use byteorder::{ByteOrder, LittleEndian};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
 
 use crate::copy_memory;
@@ -62,7 +62,7 @@ impl Formatter for FormatterV1 {
         self.row_header_size() + row.key.len() + row.value.len()
     }
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]) {
+    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]) -> usize {
         let crc = self.gen_crc(&row.meta, row.key, &row.value);
         LittleEndian::write_u32(bs, crc);
         LittleEndian::write_u64(&mut bs[4..], row.meta.expire_timestamp);
@@ -70,6 +70,7 @@ impl Formatter for FormatterV1 {
         LittleEndian::write_u64(&mut bs[20..], row.meta.value_size as u64);
         copy_memory(row.key, &mut bs[28..]);
         copy_memory(&row.value, &mut bs[28 + row.key.len()..]);
+        self.net_row_size(row)
     }
 
     fn decode_row_header(&self, bs: &[u8]) -> RowHeader {
@@ -103,29 +104,28 @@ impl Formatter for FormatterV1 {
         Ok(())
     }
 
-    fn encode_row_hint(&self, hint: &super::RowHint) -> Bytes {
-        let mut bs = BytesMut::with_capacity(HINT_FILE_HEADER_SIZE + hint.key.len());
+    fn encode_row_hint(&self, hint: &super::RowHint, output: &mut [u8]) -> usize {
         let header = &hint.header;
-        bs.extend_from_slice(&header.expire_timestamp.to_be_bytes());
-        bs.extend_from_slice(&header.key_size.to_be_bytes());
-        bs.extend_from_slice(&header.row_offset.to_be_bytes());
-        bs.extend_from_slice(&hint.key);
-        bs.freeze()
+
+        LittleEndian::write_u64(output, header.expire_timestamp);
+        LittleEndian::write_u64(&mut output[8..], header.key_size as u64);
+        LittleEndian::write_u64(&mut output[16..], header.row_offset as u64);
+        copy_memory(&hint.key, &mut output[24..]);
+        HINT_FILE_HEADER_SIZE + hint.key.len()
     }
 
     fn row_hint_header_size(&self) -> usize {
         HINT_FILE_HEADER_SIZE
     }
 
-    fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader {
-        let timestamp = header_bs.slice(0..TSTAMP_SIZE).get_u64();
-        let key_size = header_bs
-            .slice(HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET)
-            .get_u64() as usize;
-        let row_offset = header_bs
-            .slice(HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET)
-            .get_u64() as usize;
-
+    fn decode_row_hint_header(&self, header_bs: &[u8]) -> RowHintHeader {
+        let timestamp = LittleEndian::read_u64(&header_bs[0..TSTAMP_SIZE]);
+        let key_size = LittleEndian::read_u64(
+            &header_bs[HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET],
+        ) as usize;
+        let row_offset =
+            LittleEndian::read_u64(&header_bs[HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET])
+                as usize;
         RowHintHeader {
             expire_timestamp: timestamp,
             key_size,
@@ -172,7 +172,6 @@ mod tests {
     #[test]
     fn test_encode_decode_row_hint() {
         let k = b"Hello".to_vec();
-        let k_len = k.len();
         let hint = RowHint {
             header: RowHintHeader {
                 expire_timestamp: 12345,
@@ -183,10 +182,9 @@ mod tests {
         };
 
         let formatter = FormatterV1 {};
-        let bytes = formatter.encode_row_hint(&hint);
-
-        assert_eq!(k_len + formatter.row_hint_header_size(), bytes.len());
-        assert_eq!(hint.header, formatter.decode_row_hint_header(bytes));
+        let mut bs: Vec<u8> = vec![0_u8; 2048];
+        formatter.encode_row_hint(&hint, bs.as_mut());
+        assert_eq!(hint.header, formatter.decode_row_hint_header(&bs));
     }
 
     #[test]
@@ -208,10 +206,6 @@ mod tests {
 
         formatter.encode_row(&row, bs.as_mut());
 
-        // assert_eq!(
-        //     formatter.net_row_size(&row) + padding(formatter.net_row_size(&row)),
-        //     bytes.len()
-        // );
         assert_eq!(row.meta, formatter.decode_row_header(bs.as_ref()).meta);
     }
 }

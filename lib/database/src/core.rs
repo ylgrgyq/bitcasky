@@ -28,7 +28,7 @@ use crate::{
 use log::{debug, error, info, trace, warn};
 
 use super::{
-    common::{RecoveredRow, TimedValue, Value},
+    common::{RecoveredRow, TimedValue},
     data_storage::{DataStorage, DataStorageReader, DataStorageWriter, StorageIter},
     DataStorageError,
 };
@@ -215,7 +215,7 @@ impl Database {
     pub fn read_value(
         &self,
         row_location: &RowLocation,
-    ) -> DatabaseResult<Option<TimedValue<Value>>> {
+    ) -> DatabaseResult<Option<TimedValue<Vec<u8>>>> {
         {
             let mut writing_file_ref = self.writing_storage.lock();
             if row_location.storage_id == writing_file_ref.storage_id() {

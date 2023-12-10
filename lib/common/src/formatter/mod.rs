@@ -100,17 +100,21 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 
     fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]);
+    fn encode_row<V: Deref<Target = [u8]>>(
+        &self,
+        row: &RowToWrite<'_, V>,
+        output: &mut [u8],
+    ) -> usize;
 
     fn decode_row_header(&self, bs: &[u8]) -> RowHeader;
 
     fn validate_key_value(&self, header: &RowHeader, kv: &[u8]) -> Result<()>;
 
-    fn encode_row_hint(&self, hint: &RowHint) -> Bytes;
+    fn encode_row_hint(&self, hint: &RowHint, output: &mut [u8]) -> usize;
 
     fn row_hint_header_size(&self) -> usize;
 
-    fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader;
+    fn decode_row_hint_header(&self, header_bs: &[u8]) -> RowHintHeader;
 
     fn merge_meta_size(&self) -> usize;
 
@@ -145,9 +149,13 @@ impl Formatter for BitcaskFormatter {
         }
     }
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]) {
+    fn encode_row<V: Deref<Target = [u8]>>(
+        &self,
+        row: &RowToWrite<'_, V>,
+        output: &mut [u8],
+    ) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.encode_row(row, bs),
+            BitcaskFormatter::V1(f) => f.encode_row(row, output),
         }
     }
 
@@ -169,13 +177,13 @@ impl Formatter for BitcaskFormatter {
         }
     }
 
-    fn encode_row_hint(&self, hint: &RowHint) -> Bytes {
+    fn encode_row_hint(&self, hint: &RowHint, output: &mut [u8]) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.encode_row_hint(hint),
+            BitcaskFormatter::V1(f) => f.encode_row_hint(hint, output),
         }
     }
 
-    fn decode_row_hint_header(&self, header_bs: Bytes) -> RowHintHeader {
+    fn decode_row_hint_header(&self, header_bs: &[u8]) -> RowHintHeader {
         match self {
             BitcaskFormatter::V1(f) => f.decode_row_hint_header(header_bs),
         }

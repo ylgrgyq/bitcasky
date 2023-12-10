@@ -7,14 +7,13 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use bytes::Bytes;
 use log::{debug, error, warn};
 
 use common::{
     clock::Clock,
-    copy_memory, create_file,
+    create_file,
     formatter::{
-        get_formatter_from_file, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
+        get_formatter_from_file, padding, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
@@ -77,11 +76,12 @@ impl HintFile {
     }
 
     pub fn write_hint_row(&mut self, hint: &RowHint) -> DatabaseResult<()> {
-        let data_to_write = self.formatter.encode_row_hint(hint);
-
         let value_offset = self.offset;
-        copy_memory(&data_to_write, &mut self.as_mut_slice()[value_offset..]);
-        self.offset += data_to_write.len();
+
+        let formatter = self.formatter;
+        let net_size = formatter.encode_row_hint(hint, &mut self.as_mut_slice()[value_offset..]);
+
+        self.offset += net_size + padding(net_size);
 
         debug!(target: DEFAULT_LOG_TARGET, "write hint row success. key: {:?}, header: {:?}, offset: {}", 
             hint.key, hint.header, value_offset);
@@ -94,21 +94,18 @@ impl HintFile {
         }
 
         let mut offset = self.offset;
-        let header_bs = Bytes::copy_from_slice(
-            &self.as_slice()[offset..offset + self.formatter.row_hint_header_size()],
-        );
+        let header_bs = &self.as_slice()[offset..offset + self.formatter.row_hint_header_size()];
+        let header = self.formatter.decode_row_hint_header(header_bs);
 
         offset += self.formatter.row_hint_header_size();
 
-        let header = self.formatter.decode_row_hint_header(header_bs);
-
-        let key: Vec<u8> =
-            Bytes::copy_from_slice(&self.as_slice()[offset..(offset + header.key_size)]).into();
+        let key: Vec<u8> = self.as_slice()[offset..(offset + header.key_size)].into();
 
         debug!(target: DEFAULT_LOG_TARGET, "read hint row success. key: {:?}, header: {:?}, offset: {}", 
             key, header, self.offset);
 
-        self.offset += self.formatter.row_hint_header_size() + header.key_size;
+        let net_size = self.formatter.row_hint_header_size() + header.key_size;
+        self.offset += net_size + padding(net_size);
 
         Ok(Some(RowHint { header, key }))
     }
