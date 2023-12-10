@@ -396,6 +396,7 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
+            Arc::new(BitcaskFormatter::default()),
             BitcaskOptions::default()
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),

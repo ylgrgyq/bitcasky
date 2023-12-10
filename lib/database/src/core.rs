@@ -14,7 +14,7 @@ use parking_lot::{Mutex, MutexGuard};
 
 use common::{
     clock::Clock,
-    formatter::RowToWrite,
+    formatter::{BitcaskFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
     options::BitcaskOptions,
     storage_id::{StorageId, StorageIdGenerator},
@@ -64,6 +64,7 @@ pub struct Database {
     hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
+    formatter: Arc<BitcaskFormatter>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -86,10 +87,12 @@ impl Database {
 
         let hint_file_writer = Some(HintWriter::start(&database_dir, options.clone()));
 
+        let formatter = Arc::new(BitcaskFormatter::default());
         let (writing_storage, storages) = prepare_load_storages(
             &database_dir,
             &data_storage_ids,
             &storage_id_generator,
+            formatter.clone(),
             options.clone(),
         )?;
 
@@ -107,6 +110,7 @@ impl Database {
             options: options.clone(),
             hint_file_writer,
             sync_worker: None,
+            formatter,
             is_error: Mutex::new(None),
         };
 
@@ -231,6 +235,7 @@ impl Database {
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
+            self.formatter.clone(),
             self.options.clone(),
         )?;
 
@@ -341,8 +346,12 @@ impl Database {
             return Ok(());
         }
         let next_storage_id = self.storage_id_generator.generate_next_id();
-        let next_writing_file =
-            DataStorage::new(&self.database_dir, next_storage_id, self.options.clone())?;
+        let next_writing_file = DataStorage::new(
+            &self.database_dir,
+            next_storage_id,
+            self.formatter.clone(),
+            self.options.clone(),
+        )?;
         let mut old_storage = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_storage.flush()?;
         let storage_id = old_storage.storage_id();
@@ -595,13 +604,14 @@ fn prepare_load_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
     storage_id_generator: &StorageIdGenerator,
+    formatter: Arc<BitcaskFormatter>,
     options: BitcaskOptions,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, options.clone())?;
     let mut writing_storage;
     if storages.is_empty() {
         let writing_storage_id = storage_id_generator.generate_next_id();
-        let storage = DataStorage::new(&database_dir, writing_storage_id, options)?;
+        let storage = DataStorage::new(&database_dir, writing_storage_id, formatter, options)?;
         debug!(target: "Database", "create writing file with id: {}", writing_storage_id);
         writing_storage = storage;
     } else {
