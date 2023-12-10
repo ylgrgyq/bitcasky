@@ -4,7 +4,6 @@ use crate::clock::{BitcaskClock, ClockImpl, DebugClock};
 
 #[derive(Debug, Clone, Copy)]
 pub enum DataSotrageType {
-    File,
     Mmap,
 }
 
