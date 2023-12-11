@@ -13,7 +13,7 @@ mod formatter_v1;
 pub use self::formatter_v1::FormatterV1;
 
 const MAGIC: &[u8; 3] = b"btk";
-const FORMATTER_V1_VERSION: u8 = 0;
+const FORMATTER_V1_VERSION: u8 = 1;
 pub const FILE_HEADER_SIZE: usize = 8;
 
 #[derive(Debug, PartialEq, Eq)]

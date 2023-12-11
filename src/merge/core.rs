@@ -2,6 +2,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 use bytes::Bytes;
@@ -26,6 +27,11 @@ use crate::{
 
 const MERGE_FILES_DIRECTORY: &str = "Merge";
 const DEFAULT_LOG_TARGET: &str = "DatabaseMerge";
+
+#[derive(Debug)]
+pub struct MergeManagerTelemetry {
+    pub is_merging: bool,
+}
 
 pub struct MergeManager {
     instance_id: String,
@@ -58,6 +64,7 @@ impl MergeManager {
             return Err(BitcaskError::MergeInProgress());
         }
 
+        let start = Instant::now();
         let (kd, known_max_storage_id) = self.flush_writing_file(database, keydir)?;
 
         debug!(target: "Bitcask", "start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_storage_id);
@@ -95,7 +102,8 @@ impl MergeManager {
             warn!(target: "Bitcask", "delete merge directory failed. {}", delete_ret.unwrap_err());
         }
 
-        debug!(target: "Bitcask", "merge success. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_storage_id);
+        info!(target: "Bitcask", "merge success. instanceId: {}, knownMaxFileId {}, cost: {} millis",
+          self.instance_id, known_max_storage_id, start.elapsed().as_millis());
 
         Ok(())
     }
@@ -119,6 +127,12 @@ impl MergeManager {
             }
         }
         Ok(())
+    }
+
+    pub fn get_telemetry_data(&self) -> MergeManagerTelemetry {
+        MergeManagerTelemetry {
+            is_merging: self.merge_lock.is_locked(),
+        }
     }
 
     fn do_recover_merge(&self) -> BitcaskResult<()> {

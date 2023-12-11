@@ -4,6 +4,10 @@ use std::{
     io::Write,
     mem::ManuallyDrop,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -184,16 +188,25 @@ impl Iterator for HintFileIterator {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct HintWriterTelemetry {
+    pub number_of_pending_hint_files: usize,
+    pub write_times: u64,
+}
+
 #[derive(Debug)]
 pub struct HintWriter {
     sender: ManuallyDrop<Sender<StorageId>>,
     worker_join_handle: Option<JoinHandle<()>>,
+    write_counter: Arc<AtomicU64>,
 }
 
 impl HintWriter {
     pub fn start(database_dir: &Path, options: BitcaskOptions) -> HintWriter {
         let (sender, receiver) = unbounded();
 
+        let write_counter = Arc::new(AtomicU64::new(0));
+        let moved_counter = write_counter.clone();
         let moved_dir = database_dir.to_path_buf();
         let worker_join_handle = Some(thread::spawn(move || {
             while let Ok(storage_id) = receiver.recv() {
@@ -205,6 +218,8 @@ impl HintWriter {
                         moved_dir.display(),
                         e
                     );
+                } else {
+                    moved_counter.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }));
@@ -212,6 +227,7 @@ impl HintWriter {
         HintWriter {
             sender: ManuallyDrop::new(sender),
             worker_join_handle,
+            write_counter,
         }
     }
 
@@ -224,8 +240,11 @@ impl HintWriter {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.sender.len()
+    pub fn get_telemetry_data(&self) -> HintWriterTelemetry {
+        HintWriterTelemetry {
+            number_of_pending_hint_files: self.sender.len(),
+            write_times: self.write_counter.load(Ordering::Acquire),
+        }
     }
 
     fn write_hint_file(

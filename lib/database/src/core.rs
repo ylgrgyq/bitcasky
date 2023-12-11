@@ -22,6 +22,7 @@ use common::{
 
 use crate::{
     common::{DatabaseError, DatabaseResult},
+    data_storage::DataStorageTelemetry,
     hint::{self, HintWriter},
 };
 
@@ -40,15 +41,11 @@ use super::{
  * Statistics of a Database.
  * Some of the metrics may not accurate due to concurrent access.
  */
-pub struct DatabaseStats {
-    /**
-     * Number of data files in Database
-     */
-    pub number_of_data_files: usize,
-    /**
-     * Number of hint files waiting to write
-     */
-    pub number_of_pending_hint_files: usize,
+#[derive(Debug)]
+pub struct DatabaseTelemetry {
+    pub writing_storage: DataStorageTelemetry,
+    pub stable_storages: Vec<DataStorageTelemetry>,
+    pub hint_file_writer: hint::HintWriterTelemetry,
 }
 
 #[derive(Debug)]
@@ -272,15 +269,24 @@ impl Database {
         }
     }
 
-    pub fn stats(&self) -> DatabaseResult<DatabaseStats> {
-        Ok(DatabaseStats {
-            number_of_data_files: self.stable_storages.len() + 1,
-            number_of_pending_hint_files: self
+    pub fn get_telemetry_data(&self) -> DatabaseTelemetry {
+        let writing_storage = { self.writing_storage.lock().get_telemetry_data() };
+        let stable_storages: Vec<DataStorageTelemetry> = {
+            self.stable_storages
+                .iter()
+                .map(|s| s.lock().get_telemetry_data())
+                .collect()
+        };
+
+        DatabaseTelemetry {
+            hint_file_writer: self
                 .hint_file_writer
                 .as_ref()
-                .map(|w| w.len())
-                .unwrap_or(0),
-        })
+                .map(|h| h.get_telemetry_data())
+                .unwrap_or_default(),
+            writing_storage,
+            stable_storages,
+        }
     }
 
     // Clear this database completely. Delete data physically and delete all data files.

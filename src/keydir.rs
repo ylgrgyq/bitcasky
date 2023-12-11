@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use dashmap::{
     iter::{Iter, OwningIter},
     mapref::{multiple::RefMulti, one::Ref},
@@ -7,30 +9,43 @@ use dashmap::{
 use crate::error::BitcaskResult;
 use database::{Database, RowLocation};
 
+#[derive(Debug)]
+pub struct KeyDirTelemetry {
+    pub number_of_keys: usize,
+    pub recovery_duration: Duration,
+}
+
 #[derive(Clone, Debug)]
 pub struct KeyDir {
     index: DashMap<Vec<u8>, RowLocation>,
+    recovery_duration: Duration,
 }
 
 impl KeyDir {
     pub fn new_empty_key_dir() -> KeyDir {
         let index = DashMap::new();
-        KeyDir { index }
+        KeyDir {
+            index,
+            recovery_duration: Duration::ZERO,
+        }
     }
 
     pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
         let index = DashMap::new();
-        let kd = KeyDir { index };
+        let start = Instant::now();
         for ret in database.recovery_iter()? {
             let item = ret?;
             if item.invalid {
-                kd.delete(&item.key);
+                index.remove(&item.key);
                 continue;
             }
 
-            kd.put(item.key, item.row_location);
+            index.insert(item.key, item.row_location);
         }
-        Ok(kd)
+        Ok(KeyDir {
+            index,
+            recovery_duration: start.elapsed(),
+        })
     }
 
     pub fn put(&self, key: Vec<u8>, value: RowLocation) {
@@ -79,6 +94,13 @@ impl KeyDir {
 
     pub fn clear(&self) {
         self.index.clear();
+    }
+
+    pub fn get_telemetry_data(&self) -> KeyDirTelemetry {
+        KeyDirTelemetry {
+            number_of_keys: self.len(),
+            recovery_duration: self.recovery_duration,
+        }
     }
 }
 

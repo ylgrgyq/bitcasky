@@ -18,9 +18,9 @@ fn test_merge_delete_no_remain() {
 
     bc.merge().unwrap();
 
-    let stats = bc.stats().unwrap();
-    assert_eq!(1, stats.number_of_data_files);
-    assert_eq!(0, stats.number_of_keys);
+    let telemetry = bc.get_telemetry_data();
+    assert_eq!(0, telemetry.database.stable_storages.len());
+    assert_eq!(0, telemetry.keydir.number_of_keys);
 }
 
 #[test]
@@ -35,12 +35,12 @@ fn test_merge_has_remain() {
     bc.delete(&"k2".into()).unwrap();
     bc.delete(&"k3".into()).unwrap();
 
-    let before_merge_stats = bc.stats().unwrap();
+    let before_merge_telemetry = bc.get_telemetry_data();
     bc.merge().unwrap();
-    let after_merge_stats = bc.stats().unwrap();
-    assert_eq!(1, before_merge_stats.number_of_data_files);
-    assert_eq!(2, after_merge_stats.number_of_data_files);
-    assert_eq!(1, after_merge_stats.number_of_keys);
+    let after_merge_telemetry = bc.get_telemetry_data();
+    assert_eq!(0, before_merge_telemetry.database.stable_storages.len());
+    assert_eq!(1, after_merge_telemetry.database.stable_storages.len());
+    assert_eq!(1, after_merge_telemetry.keydir.number_of_keys);
 }
 
 #[test]
@@ -51,14 +51,14 @@ fn test_merge_duplicate() {
     bc.put("k1".into(), "value2".as_bytes()).unwrap();
     bc.put("k1".into(), "value3".as_bytes()).unwrap();
 
-    let before_merge_stats = bc.stats().unwrap();
+    let before_merge_telemetry = bc.get_telemetry_data();
     bc.merge().unwrap();
-    let after_merge_stats = bc.stats().unwrap();
+    let after_merge_telemetry = bc.get_telemetry_data();
 
-    assert_eq!(1, before_merge_stats.number_of_data_files);
+    assert_eq!(0, before_merge_telemetry.database.stable_storages.len());
 
-    assert_eq!(2, after_merge_stats.number_of_data_files);
-    assert_eq!(1, after_merge_stats.number_of_keys);
+    assert_eq!(1, after_merge_telemetry.database.stable_storages.len());
+    assert_eq!(1, after_merge_telemetry.keydir.number_of_keys);
 }
 
 #[test]
