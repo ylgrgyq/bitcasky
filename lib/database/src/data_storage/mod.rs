@@ -45,6 +45,8 @@ pub enum DataStorageError {
     DataStorageFormatter(#[from] FormatterError),
     #[error("Failed to read file header for storage with id: {1}")]
     ReadFileHeaderError(#[source] FormatterError, StorageId),
+    #[error("Read end of file")]
+    EofError(),
 }
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
