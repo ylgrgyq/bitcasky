@@ -5,6 +5,7 @@ use std::{
     fs::{File, Metadata},
     ops::Deref,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use thiserror::Error;
 
@@ -44,6 +45,8 @@ pub enum DataStorageError {
     DataStorageFormatter(#[from] FormatterError),
     #[error("Failed to read file header for storage with id: {1}")]
     ReadFileHeaderError(#[source] FormatterError, StorageId),
+    #[error("Read end of file")]
+    EofError(),
 }
 
 pub type Result<T> = std::result::Result<T, DataStorageError>;
@@ -64,6 +67,8 @@ pub trait DataStorageReader {
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 
     fn seek_to_end(&mut self) -> Result<()>;
+
+    fn offset(&self) -> usize;
 }
 
 #[derive(Debug)]
@@ -88,7 +93,7 @@ pub struct DataStorage {
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
     options: BitcaskOptions,
-    formatter: BitcaskFormatter,
+    formatter: Arc<BitcaskFormatter>,
     dirty: bool,
 }
 
@@ -96,10 +101,10 @@ impl DataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
+        formatter: Arc<BitcaskFormatter>,
         options: BitcaskOptions,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
-        let formatter = BitcaskFormatter::default();
         let data_file = create_file(
             &path,
             FileType::DataFile,
@@ -137,7 +142,7 @@ impl DataStorage {
             &path, storage_id
         );
         let meta = data_file.file.metadata()?;
-        let formatter = get_formatter_from_file(&mut data_file.file)?;
+        let formatter = Arc::new(get_formatter_from_file(&mut data_file.file)?);
 
         DataStorage::open_by_file(
             &path,
@@ -168,8 +173,10 @@ impl DataStorage {
             "Create iterator under path: {:?} with storage id: {}",
             &self.database_dir, self.storage_id
         );
-        let formatter = formatter::get_formatter_from_file(&mut data_file.file)
-            .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?;
+        let formatter = Arc::new(
+            formatter::get_formatter_from_file(&mut data_file.file)
+                .map_err(|e| DataStorageError::ReadFileHeaderError(e, self.storage_id))?,
+        );
         let meta = data_file.file.metadata()?;
         Ok(StorageIter {
             storage: DataStorage::open_by_file(
@@ -204,7 +211,7 @@ impl DataStorage {
         data_file: File,
         meta: Metadata,
         write_offset: usize,
-        formatter: BitcaskFormatter,
+        formatter: Arc<BitcaskFormatter>,
         options: BitcaskOptions,
     ) -> Result<Self> {
         let capacity = meta.len() as usize;
@@ -213,7 +220,7 @@ impl DataStorage {
             data_file,
             write_offset,
             capacity,
-            formatter,
+            formatter.clone(),
             options.clone(),
         )?);
         Ok(DataStorage {
@@ -273,6 +280,12 @@ impl DataStorageReader for DataStorage {
     fn seek_to_end(&mut self) -> Result<()> {
         match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => s.seek_to_end(),
+        }
+    }
+
+    fn offset(&self) -> usize {
+        match &self.storage_impl {
+            DataStorageImpl::MmapStorage(s) => s.offset(),
         }
     }
 }

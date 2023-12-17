@@ -14,7 +14,7 @@ use parking_lot::{Mutex, MutexGuard};
 
 use common::{
     clock::Clock,
-    formatter::RowToWrite,
+    formatter::{BitcaskFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
     options::BitcaskOptions,
     storage_id::{StorageId, StorageIdGenerator},
@@ -64,6 +64,7 @@ pub struct Database {
     hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
+    formatter: Arc<BitcaskFormatter>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -86,10 +87,12 @@ impl Database {
 
         let hint_file_writer = Some(HintWriter::start(&database_dir, options.clone()));
 
-        let (writing_storage, storages) = prepare_load_storages(
+        let formatter = Arc::new(BitcaskFormatter::default());
+        let (writing_storage, storages) = prepare_db_storages(
             &database_dir,
             &data_storage_ids,
             &storage_id_generator,
+            formatter.clone(),
             options.clone(),
         )?;
 
@@ -107,6 +110,7 @@ impl Database {
             options: options.clone(),
             hint_file_writer,
             sync_worker: None,
+            formatter,
             is_error: Mutex::new(None),
         };
 
@@ -227,10 +231,11 @@ impl Database {
     }
 
     pub fn reload_data_files(&self, data_storage_ids: Vec<StorageId>) -> DatabaseResult<()> {
-        let (writing, stables) = prepare_load_storages(
+        let (writing, stables) = prepare_db_storages(
             &self.database_dir,
             &data_storage_ids,
             &self.storage_id_generator,
+            self.formatter.clone(),
             self.options.clone(),
         )?;
 
@@ -341,8 +346,12 @@ impl Database {
             return Ok(());
         }
         let next_storage_id = self.storage_id_generator.generate_next_id();
-        let next_writing_file =
-            DataStorage::new(&self.database_dir, next_storage_id, self.options.clone())?;
+        let next_writing_file = DataStorage::new(
+            &self.database_dir,
+            next_storage_id,
+            self.formatter.clone(),
+            self.options.clone(),
+        )?;
         let mut old_storage = mem::replace(&mut **writing_file_ref, next_writing_file);
         old_storage.flush()?;
         let storage_id = old_storage.storage_id();
@@ -591,22 +600,33 @@ fn open_storages<P: AsRef<Path>>(
         .collect::<crate::data_storage::Result<Vec<DataStorage>>>()?)
 }
 
-fn prepare_load_storages<P: AsRef<Path>>(
+fn prepare_db_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
     storage_id_generator: &StorageIdGenerator,
+    formatter: Arc<BitcaskFormatter>,
     options: BitcaskOptions,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, options.clone())?;
     let mut writing_storage;
     if storages.is_empty() {
         let writing_storage_id = storage_id_generator.generate_next_id();
-        let storage = DataStorage::new(&database_dir, writing_storage_id, options)?;
+        let storage = DataStorage::new(&database_dir, writing_storage_id, formatter, options)?;
         debug!(target: "Database", "create writing file with id: {}", writing_storage_id);
         writing_storage = storage;
     } else {
         writing_storage = storages.pop().unwrap();
-        writing_storage.seek_to_end()?;
+        if let Err(e) = writing_storage.seek_to_end() {
+            match e {
+                DataStorageError::EofError() => {
+                    warn!(target: "Database", "got EOF in writing file with id: {}", writing_storage.storage_id());
+                }
+                DataStorageError::DataStorageFormatter(e) => {
+                    warn!(target: "Database", "has invalid data in writing file with id: {}, reason: {}", writing_storage.storage_id(), e);
+                }
+                _ => return Err(DatabaseError::StorageError(e)),
+            }
+        }
         debug!(target: "Database", "reuse writing file with id: {}", writing_storage.storage_id());
     }
 
@@ -615,13 +635,21 @@ fn prepare_load_storages<P: AsRef<Path>>(
 
 #[cfg(test)]
 pub mod database_tests {
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        io::{Seek, Write},
+        sync::Arc,
+        time::Duration,
+    };
 
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use common::{clock::DebugClock, options::BitcaskOptions, storage_id::StorageIdGenerator};
+    use common::{
+        clock::DebugClock, fs, fs::FileType, options::BitcaskOptions,
+        storage_id::StorageIdGenerator,
+    };
+
     use test_log::test;
 
-    use crate::{RowLocation, TimedValue};
+    use crate::{data_storage::DataStorageReader, RowLocation, TimedValue};
 
     use super::Database;
 
@@ -683,22 +711,18 @@ pub mod database_tests {
 
     pub fn write_kvs_to_db(db: &Database, kvs: Vec<TestingKV>) -> Vec<TestingRow> {
         kvs.into_iter()
-            .map(|kv| {
-                let pos = db
-                    .write(
-                        &kv.key(),
-                        TimedValue::expirable_value(kv.value(), kv.expire_timestamp()),
-                    )
-                    .unwrap();
-                TestingRow::new(
-                    kv,
-                    RowLocation {
-                        storage_id: pos.storage_id,
-                        row_offset: pos.row_offset,
-                    },
-                )
-            })
+            .map(|kv| write_kv_to_db(db, kv))
             .collect::<Vec<TestingRow>>()
+    }
+
+    pub fn write_kv_to_db(db: &Database, kv: TestingKV) -> TestingRow {
+        let pos = db
+            .write(
+                &kv.key(),
+                TimedValue::expirable_value(kv.value(), kv.expire_timestamp()),
+            )
+            .unwrap();
+        TestingRow::new(kv, pos)
     }
 
     #[test]
@@ -823,6 +847,123 @@ pub mod database_tests {
             Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
         assert_eq!(1, storage_id_generator.get_id());
         assert_eq!(0, db.stable_storages.len());
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_recovery_from_key_value_not_fully_written() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+
+        {
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+
+            rows.push(write_kv_to_db(&db, TestingKV::new("k1", "value1")));
+            write_kv_to_db(&db, TestingKV::new_expirable("k2", "value2", 100));
+
+            let storage_id = db.writing_storage.lock().storage_id();
+            let offset = db.writing_storage.lock().offset();
+            let f = fs::open_file(&dir, FileType::DataFile, Some(storage_id))
+                .unwrap()
+                .file;
+
+            // data file broken, key value not fully written
+            f.set_len(offset as u64 - 1).unwrap();
+        }
+        {
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            // can only recover one value
+            assert_rows_value(&db, &rows);
+            assert_database_rows(&db, &rows);
+            // overwrite broken value
+            rows.push(write_kv_to_db(&db, TestingKV::new("k3", "hello")));
+        }
+
+        let db =
+            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_recovery_from_header_not_fully_written() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+
+        {
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+
+            rows.push(write_kv_to_db(&db, TestingKV::new("k1", "value1")));
+            let pos = write_kv_to_db(&db, TestingKV::new_expirable("k2", "value2", 100)).pos;
+
+            let storage_id = db.writing_storage.lock().storage_id();
+            let f = fs::open_file(&dir, FileType::DataFile, Some(storage_id))
+                .unwrap()
+                .file;
+
+            // data file broken, header not fully written
+            f.set_len((pos.row_offset + 1) as u64).unwrap();
+        }
+
+        {
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            // can only recover one value
+            assert_rows_value(&db, &rows);
+            assert_database_rows(&db, &rows);
+            // overwrite broken value
+            rows.push(write_kv_to_db(&db, TestingKV::new("k3", "hello")));
+        }
+
+        let db =
+            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        assert_rows_value(&db, &rows);
+        assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_recovery_from_crc_failed() {
+        let dir = get_temporary_directory_path();
+        let mut rows: Vec<TestingRow> = vec![];
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+
+        {
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+
+            rows.push(write_kv_to_db(&db, TestingKV::new("k1", "value1")));
+            write_kv_to_db(&db, TestingKV::new_expirable("k2", "value2", 100));
+
+            let storage_id = db.writing_storage.lock().storage_id();
+            let offset = db.writing_storage.lock().offset();
+            let mut f = fs::open_file(&dir, FileType::DataFile, Some(storage_id))
+                .unwrap()
+                .file;
+
+            // data file broken, change last byte to break crc check
+            f.set_len(offset as u64 - 1).unwrap();
+            f.seek(std::io::SeekFrom::End(0)).unwrap();
+            f.write_all(&[1_u8]).unwrap();
+        }
+
+        {
+            let db =
+                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            // can only recover one value
+            assert_rows_value(&db, &rows);
+            assert_database_rows(&db, &rows);
+            // overwrite broken value
+            rows.push(write_kv_to_db(&db, TestingKV::new("k3", "hello")));
+        }
+
+        let db =
+            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }

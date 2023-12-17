@@ -1,7 +1,10 @@
-use std::vec;
+use std::{sync::Arc, vec};
 
 use bitcask_tests::common::RandomTestingDataGenerator;
-use common::{formatter::RowToWrite, options::BitcaskOptions};
+use common::{
+    formatter::{BitcaskFormatter, RowToWrite},
+    options::BitcaskOptions,
+};
 use database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
 
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -12,6 +15,7 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
     DataStorage::new(
         dir,
         100,
+        Arc::new(BitcaskFormatter::default()),
         BitcaskOptions::default()
             .max_data_file_size(usize::MAX)
             .init_data_file_capacity(100)

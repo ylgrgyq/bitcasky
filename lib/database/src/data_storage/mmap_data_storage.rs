@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, mem, ops::Deref};
+use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc};
 
 use common::{
     clock::Clock,
@@ -22,7 +22,7 @@ pub struct MmapDataStorage {
     data_file: File,
     storage_id: StorageId,
     options: BitcaskOptions,
-    formatter: BitcaskFormatter,
+    formatter: Arc<BitcaskFormatter>,
     map_view: MmapMut,
 }
 
@@ -32,7 +32,7 @@ impl MmapDataStorage {
         data_file: File,
         write_offset: usize,
         capacity: usize,
-        formatter: BitcaskFormatter,
+        formatter: Arc<BitcaskFormatter>,
         options: BitcaskOptions,
     ) -> Result<Self> {
         let mmap = unsafe {
@@ -99,9 +99,17 @@ impl MmapDataStorage {
     }
 
     fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, &[u8])>> {
+        if offset > self.capacity {
+            return Err(DataStorageError::EofError());
+        }
+
+        if offset == self.capacity {
+            return Ok(None);
+        }
+
         let header_size = self.formatter.row_header_size();
         if offset + header_size >= self.capacity {
-            return Ok(None);
+            return Err(DataStorageError::EofError());
         }
 
         let header = self.formatter.decode_row_header(
@@ -112,7 +120,7 @@ impl MmapDataStorage {
         }
 
         if offset + header_size + header.meta.key_size + header.meta.value_size > self.capacity {
-            return Ok(None);
+            return Err(DataStorageError::EofError());
         }
 
         let net_size =
@@ -133,7 +141,7 @@ impl DataStorageWriter for MmapDataStorage {
         self.ensure_capacity(row)?;
 
         let value_offset = self.offset;
-        let formatter = self.formatter;
+        let formatter = self.formatter.clone();
         let net_size = formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
         self.offset += net_size + padding(net_size);
         self.write_times += 1;
@@ -223,6 +231,10 @@ impl DataStorageReader for MmapDataStorage {
         }
         Ok(())
     }
+
+    fn offset(&self) -> usize {
+        self.offset
+    }
 }
 
 #[cfg(test)]
@@ -247,7 +259,7 @@ mod tests {
     fn get_file_storage(options: BitcaskOptions) -> MmapDataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
-        let formatter = BitcaskFormatter::default();
+        let formatter = Arc::new(BitcaskFormatter::default());
         let file = create_file(dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
         let meta = file.metadata().unwrap();
         MmapDataStorage::new(
