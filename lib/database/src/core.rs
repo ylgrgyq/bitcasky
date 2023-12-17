@@ -641,11 +641,11 @@ pub mod database_tests {
         time::Duration,
     };
 
-    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use common::{
         clock::DebugClock, fs, fs::FileType, options::BitcaskOptions,
         storage_id::StorageIdGenerator,
     };
+    use utilities::common::{get_temporary_directory_path, TestingKV};
 
     use test_log::test;
 

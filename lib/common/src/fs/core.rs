@@ -191,9 +191,9 @@ mod tests {
     };
 
     use super::*;
-    use bitcask_tests::common::get_temporary_directory_path;
     use bytes::{Buf, Bytes, BytesMut};
     use test_log::test;
+    use utilities::common::get_temporary_directory_path;
 
     fn open_file_by_path(file_type: FileType, file_path: &Path) -> Result<IdentifiedFile> {
         if file_type.check_file_belongs_to_type(file_path) {

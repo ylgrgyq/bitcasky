@@ -83,8 +83,7 @@ impl std::fmt::Display for FileType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bitcask_tests::common::get_temporary_directory_path;
-    use test_log::test;
+    use utilities::common::get_temporary_directory_path;
 
     #[test]
     fn test_file_type() {
