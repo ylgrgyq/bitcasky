@@ -3,6 +3,8 @@ name = "common"
 version = "0.1.0"
 resolver = "2"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/ylgrgyq/bitcask"
 
 [dependencies]
 crc = "3.0.0"
