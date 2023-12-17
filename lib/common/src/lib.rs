@@ -107,9 +107,9 @@ mod tests {
 
     use super::*;
 
-    use bitcask_tests::common::get_temporary_directory_path;
     use bytes::{Buf, BufMut, Bytes, BytesMut};
     use test_log::test;
+    use utilities::common::get_temporary_directory_path;
 
     #[test]
     fn test_create_file() {

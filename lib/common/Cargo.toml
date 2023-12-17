@@ -20,4 +20,4 @@ parking_lot = { version = "0.12.1" }
 test-log = "0.2.11"
 env_logger = "*"
 assert_matches = "1.5.0"
-bitcask-tests = { path = "../../bitcask-tests" }
+utilities = { path = "../../utilities" }

@@ -1,11 +1,11 @@
 use std::{collections::HashSet, time::Duration};
 
 use bitcask::{bitcask::Bitcask, error::BitcaskError};
-use bitcask_tests::common::{
-    get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
-};
 use common::options::BitcaskOptions;
 use test_log::test;
+use utilities::common::{
+    get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
+};
 
 fn execute_testing_operations(bc: &Bitcask, ops: &TestingOperations) {
     for op in ops.operations() {

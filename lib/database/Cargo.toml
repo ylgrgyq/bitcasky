@@ -28,4 +28,4 @@ test-log = "0.2.11"
 env_logger = "*"
 criterion = "0.5"
 tempfile = "3.3.0"
-bitcask-tests = { path = "../../bitcask-tests" }
+utilities = { path = "../../utilities" }

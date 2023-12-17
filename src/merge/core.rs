@@ -377,8 +377,8 @@ mod tests {
     use database::RowLocation;
 
     use super::*;
-    use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
+    use utilities::common::{get_temporary_directory_path, TestingKV};
 
     #[derive(Debug)]
     pub struct TestingRow {
