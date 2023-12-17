@@ -308,55 +308,27 @@ mod tests {
 
     #[test]
     fn test_read_write_expired_value() {
-        let clock = DebugClock::new(1000);
-        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+        let time = 1000;
+        let clock = Arc::new(DebugClock::new(time));
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock.clone()));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), 100);
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), time);
         let row_location1 = storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), 100);
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), time + 1);
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
         assert!(storage
             .read_value(row_location1.row_offset)
             .unwrap()
             .is_none());
-        assert!(storage
-            .read_value(row_location2.row_offset)
-            .unwrap()
-            .is_none());
-    }
-
-    #[test]
-    fn test_read_write_not_expired_value() {
-        let clock = DebugClock::new(1000);
-        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
-
-        let k1: Vec<u8> = "key1".into();
-        let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), 2000);
-        let row_location1 = storage.write_row(&row_to_write).unwrap();
-
-        let k2: Vec<u8> = "key2".into();
-        let v2: Vec<u8> = "value2".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), 2000);
-        let row_location2 = storage.write_row(&row_to_write).unwrap();
-
-        assert_eq!(
-            v1,
-            *storage
-                .read_value(row_location1.row_offset)
-                .unwrap()
-                .unwrap()
-        );
+        // v2 still valid
         assert_eq!(
             v2,
             *storage
@@ -364,6 +336,13 @@ mod tests {
                 .unwrap()
                 .unwrap()
         );
+
+        // move clock, let v2 expire
+        clock.set(time + 1);
+        assert!(storage
+            .read_value(row_location2.row_offset)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -425,19 +404,20 @@ mod tests {
 
     #[test]
     fn test_read_next_expired_row() {
-        let clock = DebugClock::new(1000);
-        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+        let time = 1000;
+        let clock = Arc::new(DebugClock::new(time));
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock.clone()));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), 1001);
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), time + 1);
         storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), 100);
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), time);
         storage.write_row(&row_to_write).unwrap();
 
         storage.rewind().unwrap();
@@ -445,11 +425,24 @@ mod tests {
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k1, r.key);
         assert_eq!(v1, r.value.value);
-        assert_eq!(1001, r.value.expire_timestamp);
+        assert_eq!(time + 1, r.value.expire_timestamp);
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k2, r.key);
         assert!(r.value.value.is_empty());
-        assert_eq!(100, r.value.expire_timestamp);
+        assert_eq!(time, r.value.expire_timestamp);
+        assert!(storage.read_next_row().unwrap().is_none());
+
+        // move clock, no valid value
+        clock.set(time + 1);
+        storage.rewind().unwrap();
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k1, r.key);
+        assert!(r.value.is_empty());
+        assert_eq!(time + 1, r.value.expire_timestamp);
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k2, r.key);
+        assert!(r.value.value.is_empty());
+        assert_eq!(time, r.value.expire_timestamp);
         assert!(storage.read_next_row().unwrap().is_none());
     }
 

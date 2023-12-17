@@ -745,7 +745,7 @@ pub mod database_tests {
     fn test_read_write_expirable_value_in_writing_file() {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let clock = DebugClock::new(1000);
+        let clock = Arc::new(DebugClock::new(1000));
         let db = Database::open(
             &dir,
             storage_id_generator,

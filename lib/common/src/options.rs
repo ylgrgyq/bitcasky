@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::clock::{BitcaskClock, ClockImpl, DebugClock};
 
@@ -141,7 +141,7 @@ impl BitcaskOptions {
     }
 
     // Use debug clock
-    pub fn debug_clock(mut self, clock: DebugClock) -> BitcaskOptions {
+    pub fn debug_clock(mut self, clock: Arc<DebugClock>) -> BitcaskOptions {
         self.clock = BitcaskClock {
             clock: ClockImpl::Debug(clock),
         };
