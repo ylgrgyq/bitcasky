@@ -67,6 +67,8 @@ pub trait DataStorageReader {
     fn read_next_row(&mut self) -> Result<Option<RowToRead>>;
 
     fn seek_to_end(&mut self) -> Result<()>;
+
+    fn offset(&self) -> usize;
 }
 
 #[derive(Debug)]
@@ -278,6 +280,12 @@ impl DataStorageReader for DataStorage {
     fn seek_to_end(&mut self) -> Result<()> {
         match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => s.seek_to_end(),
+        }
+    }
+
+    fn offset(&self) -> usize {
+        match &self.storage_impl {
+            DataStorageImpl::MmapStorage(s) => s.offset(),
         }
     }
 }

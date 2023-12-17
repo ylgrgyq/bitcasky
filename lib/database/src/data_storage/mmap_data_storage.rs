@@ -231,6 +231,10 @@ impl DataStorageReader for MmapDataStorage {
         }
         Ok(())
     }
+
+    fn offset(&self) -> usize {
+        self.offset
+    }
 }
 
 #[cfg(test)]
