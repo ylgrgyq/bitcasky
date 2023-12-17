@@ -38,7 +38,7 @@ pub struct MergeManager {
     database_dir: PathBuf,
     merge_lock: Mutex<()>,
     storage_id_generator: Arc<StorageIdGenerator>,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
 }
 
 impl MergeManager {
@@ -46,7 +46,7 @@ impl MergeManager {
         instance_id: String,
         database_dir: &Path,
         storage_id_generator: Arc<StorageIdGenerator>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> MergeManager {
         MergeManager {
             instance_id,
@@ -392,12 +392,14 @@ mod tests {
         }
     }
 
-    fn get_options() -> BitcaskOptions {
-        BitcaskOptions::default()
-            .sync_interval(Duration::from_secs(60))
-            .init_hint_file_capacity(1024)
-            .max_data_file_size(1024)
-            .init_data_file_capacity(100)
+    fn get_options() -> Arc<BitcaskOptions> {
+        Arc::new(
+            BitcaskOptions::default()
+                .sync_interval(Duration::from_secs(60))
+                .init_hint_file_capacity(1024)
+                .max_data_file_size(1024)
+                .init_data_file_capacity(100),
+        )
     }
 
     pub fn assert_row_value(db: &Database, expect: &TestingRow) {

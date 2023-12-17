@@ -16,10 +16,12 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
         dir,
         100,
         Arc::new(BitcaskFormatter::default()),
-        BitcaskOptions::default()
-            .max_data_file_size(usize::MAX)
-            .init_data_file_capacity(100)
-            .storage_type(common::options::DataSotrageType::Mmap),
+        Arc::new(
+            BitcaskOptions::default()
+                .max_data_file_size(usize::MAX)
+                .init_data_file_capacity(100)
+                .storage_type(common::options::DataSotrageType::Mmap),
+        ),
     )
     .unwrap()
 }

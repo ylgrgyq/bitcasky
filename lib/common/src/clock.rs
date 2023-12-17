@@ -1,6 +1,10 @@
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -8,7 +12,7 @@ pub trait Clock {
     fn now(&self) -> u64;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct SystemClock {}
 
 impl Clock for SystemClock {
@@ -20,27 +24,33 @@ impl Clock for SystemClock {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DebugClock {
-    time: u64,
+    time: AtomicU64,
 }
 
 impl DebugClock {
     pub fn new(time: u64) -> DebugClock {
-        DebugClock { time }
+        DebugClock {
+            time: AtomicU64::new(time),
+        }
+    }
+
+    pub fn set(&self, time: u64) {
+        self.time.store(time, Ordering::Release);
     }
 }
 
 impl Clock for DebugClock {
     fn now(&self) -> u64 {
-        self.time
+        self.time.load(Ordering::Acquire)
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ClockImpl {
     System(SystemClock),
-    Debug(DebugClock),
+    Debug(Arc<DebugClock>),
 }
 
 impl Clock for ClockImpl {
@@ -52,7 +62,7 @@ impl Clock for ClockImpl {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BitcaskClock {
     pub clock: ClockImpl,
 }

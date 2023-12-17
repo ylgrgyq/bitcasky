@@ -60,7 +60,7 @@ pub struct Database {
     storage_id_generator: Arc<StorageIdGenerator>,
     writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
     hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
@@ -72,7 +72,7 @@ impl Database {
     pub fn open(
         directory: &Path,
         storage_id_generator: Arc<StorageIdGenerator>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> DatabaseResult<Database> {
         let database_dir: PathBuf = directory.into();
 
@@ -499,7 +499,7 @@ impl Iterator for DatabaseIter {
 fn recovered_iter(
     database_dir: &Path,
     storage_id: StorageId,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
 ) -> DatabaseResult<Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>>> {
     if FileType::HintFile
         .get_path(database_dir, Some(storage_id))
@@ -509,14 +509,13 @@ fn recovered_iter(
         Ok(Box::new(HintFile::open_iterator(database_dir, storage_id)?))
     } else {
         debug!(target: "Database", "recover from data file with id: {}", storage_id);
-        let clock = options.clock.clone();
-        let stable_file = DataStorage::open(database_dir, storage_id, options)?;
+        let stable_file = DataStorage::open(database_dir, storage_id, options.clone())?;
         let i = stable_file.iter().map(move |iter| {
             iter.map(move |row| {
                 row.map(|r| RecoveredRow {
                     row_location: r.row_location,
                     key: r.key,
-                    invalid: !r.value.is_valid(clock.now()),
+                    invalid: !r.value.is_valid(options.clock.now()),
                 })
                 .map_err(DatabaseError::StorageError)
             })
@@ -529,14 +528,14 @@ pub struct DatabaseRecoverIter {
     current_iter: Cell<Option<Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>>>>,
     data_storage_ids: Vec<StorageId>,
     database_dir: PathBuf,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
 }
 
 impl DatabaseRecoverIter {
     fn new(
         database_dir: PathBuf,
         mut iters: Vec<StorageId>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> DatabaseResult<Self> {
         if let Some(id) = iters.pop() {
             let iter: Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>> =
@@ -589,7 +588,7 @@ impl Iterator for DatabaseRecoverIter {
 fn open_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
 ) -> DatabaseResult<Vec<DataStorage>> {
     let mut storage_ids = data_storage_ids.to_owned();
     storage_ids.sort();
@@ -605,7 +604,7 @@ fn prepare_db_storages<P: AsRef<Path>>(
     data_storage_ids: &[u32],
     storage_id_generator: &StorageIdGenerator,
     formatter: Arc<BitcaskFormatter>,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, options.clone())?;
     let mut writing_storage;
@@ -729,7 +728,8 @@ pub mod database_tests {
     fn test_read_write_writing_file() {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let db = Database::open(&dir, storage_id_generator, get_database_options()).unwrap();
+        let db =
+            Database::open(&dir, storage_id_generator, Arc::new(get_database_options())).unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -745,11 +745,11 @@ pub mod database_tests {
     fn test_read_write_expirable_value_in_writing_file() {
         let dir = get_temporary_directory_path();
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let clock = DebugClock::new(1000);
+        let clock = Arc::new(DebugClock::new(1000));
         let db = Database::open(
             &dir,
             storage_id_generator,
-            get_database_options().debug_clock(clock),
+            Arc::new(get_database_options().debug_clock(clock)),
         )
         .unwrap();
         let kvs = vec![
@@ -768,8 +768,12 @@ pub mod database_tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let db = Database::open(
+            &dir,
+            storage_id_generator.clone(),
+            Arc::new(get_database_options()),
+        )
+        .unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new("k2", "value2"),
@@ -795,8 +799,12 @@ pub mod database_tests {
         let dir = get_temporary_directory_path();
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let db = Database::open(
+            &dir,
+            storage_id_generator.clone(),
+            Arc::new(get_database_options()),
+        )
+        .unwrap();
         let kvs = vec![
             TestingKV::new("k1", "value1"),
             TestingKV::new_expirable("k2", "value2", 100),
@@ -823,8 +831,12 @@ pub mod database_tests {
         let mut rows: Vec<TestingRow> = vec![];
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
             let kvs = vec![
                 TestingKV::new("k1", "value1"),
                 TestingKV::new_expirable("k2", "value2", 100),
@@ -833,8 +845,12 @@ pub mod database_tests {
             assert_rows_value(&db, &rows);
         }
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
             let kvs = vec![
                 TestingKV::new("k3", "hello world"),
                 TestingKV::new_expirable("k1", "value4", 100),
@@ -843,8 +859,12 @@ pub mod database_tests {
             assert_rows_value(&db, &rows);
         }
 
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let db = Database::open(
+            &dir,
+            storage_id_generator.clone(),
+            Arc::new(get_database_options()),
+        )
+        .unwrap();
         assert_eq!(1, storage_id_generator.get_id());
         assert_eq!(0, db.stable_storages.len());
         assert_rows_value(&db, &rows);
@@ -858,8 +878,12 @@ pub mod database_tests {
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
 
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
 
             rows.push(write_kv_to_db(&db, TestingKV::new("k1", "value1")));
             write_kv_to_db(&db, TestingKV::new_expirable("k2", "value2", 100));
@@ -874,8 +898,12 @@ pub mod database_tests {
             f.set_len(offset as u64 - 1).unwrap();
         }
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
             // can only recover one value
             assert_rows_value(&db, &rows);
             assert_database_rows(&db, &rows);
@@ -883,8 +911,12 @@ pub mod database_tests {
             rows.push(write_kv_to_db(&db, TestingKV::new("k3", "hello")));
         }
 
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let db = Database::open(
+            &dir,
+            storage_id_generator.clone(),
+            Arc::new(get_database_options()),
+        )
+        .unwrap();
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
@@ -896,8 +928,12 @@ pub mod database_tests {
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
 
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
 
             rows.push(write_kv_to_db(&db, TestingKV::new("k1", "value1")));
             let pos = write_kv_to_db(&db, TestingKV::new_expirable("k2", "value2", 100)).pos;
@@ -912,8 +948,12 @@ pub mod database_tests {
         }
 
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
             // can only recover one value
             assert_rows_value(&db, &rows);
             assert_database_rows(&db, &rows);
@@ -921,8 +961,12 @@ pub mod database_tests {
             rows.push(write_kv_to_db(&db, TestingKV::new("k3", "hello")));
         }
 
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let db = Database::open(
+            &dir,
+            storage_id_generator.clone(),
+            Arc::new(get_database_options()),
+        )
+        .unwrap();
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
@@ -934,8 +978,12 @@ pub mod database_tests {
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
 
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
 
             rows.push(write_kv_to_db(&db, TestingKV::new("k1", "value1")));
             write_kv_to_db(&db, TestingKV::new_expirable("k2", "value2", 100));
@@ -953,8 +1001,12 @@ pub mod database_tests {
         }
 
         {
-            let db =
-                Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+            let db = Database::open(
+                &dir,
+                storage_id_generator.clone(),
+                Arc::new(get_database_options()),
+            )
+            .unwrap();
             // can only recover one value
             assert_rows_value(&db, &rows);
             assert_database_rows(&db, &rows);
@@ -962,8 +1014,12 @@ pub mod database_tests {
             rows.push(write_kv_to_db(&db, TestingKV::new("k3", "hello")));
         }
 
-        let db =
-            Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+        let db = Database::open(
+            &dir,
+            storage_id_generator.clone(),
+            Arc::new(get_database_options()),
+        )
+        .unwrap();
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
@@ -975,9 +1031,11 @@ pub mod database_tests {
         let db = Database::open(
             &dir,
             storage_id_generator,
-            BitcaskOptions::default()
-                .max_data_file_size(120)
-                .init_data_file_capacity(100),
+            Arc::new(
+                BitcaskOptions::default()
+                    .max_data_file_size(120)
+                    .init_data_file_capacity(100),
+            ),
         )
         .unwrap();
         let kvs = vec![

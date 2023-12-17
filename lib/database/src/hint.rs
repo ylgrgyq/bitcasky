@@ -202,7 +202,7 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path, options: BitcaskOptions) -> HintWriter {
+    pub fn start(database_dir: &Path, options: Arc<BitcaskOptions>) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let write_counter = Arc::new(AtomicU64::new(0));
@@ -250,7 +250,7 @@ impl HintWriter {
     fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> DatabaseResult<()> {
         let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.clone())?;
 
@@ -278,7 +278,7 @@ impl HintWriter {
     fn build_row_hint(
         database_dir: &Path,
         data_storage_id: StorageId,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> DatabaseResult<HashMap<Vec<u8>, RowHint>> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, options.clone())?;
 
@@ -397,9 +397,11 @@ mod tests {
             &dir,
             storage_id,
             Arc::new(BitcaskFormatter::default()),
-            BitcaskOptions::default()
-                .max_data_file_size(1024)
-                .init_data_file_capacity(100),
+            Arc::new(
+                BitcaskOptions::default()
+                    .max_data_file_size(1024)
+                    .init_data_file_capacity(100),
+            ),
         )
         .unwrap();
         let key = vec![1, 2, 3];
@@ -412,9 +414,11 @@ mod tests {
         {
             let writer = HintWriter::start(
                 &dir,
-                BitcaskOptions::default()
-                    .max_data_file_size(1024)
-                    .init_data_file_capacity(100),
+                Arc::new(
+                    BitcaskOptions::default()
+                        .max_data_file_size(1024)
+                        .init_data_file_capacity(100),
+                ),
             );
             writer.async_write_hint_file(storage_id);
         }

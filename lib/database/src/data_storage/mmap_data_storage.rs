@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc};
+use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc, vec};
 
 use common::{
     clock::Clock,
@@ -13,6 +13,8 @@ use crate::{common::RowToRead, DataStorageError, RowLocation, TimedValue};
 
 use super::{DataStorageReader, DataStorageWriter, Result};
 
+type MetaAndKeyValue<'a> = (RowMeta, &'a [u8], Option<Vec<u8>>);
+
 #[derive(Debug)]
 pub struct MmapDataStorage {
     pub offset: usize,
@@ -21,7 +23,7 @@ pub struct MmapDataStorage {
     pub write_times: u64,
     data_file: File,
     storage_id: StorageId,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
     formatter: Arc<BitcaskFormatter>,
     map_view: MmapMut,
 }
@@ -33,7 +35,7 @@ impl MmapDataStorage {
         write_offset: usize,
         capacity: usize,
         formatter: Arc<BitcaskFormatter>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> Result<Self> {
         let mmap = unsafe {
             MmapOptions::new()
@@ -98,7 +100,7 @@ impl MmapDataStorage {
         &self.map_view[0..self.capacity]
     }
 
-    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, &[u8])>> {
+    fn do_read_row(&mut self, offset: usize) -> Result<Option<MetaAndKeyValue>> {
         if offset > self.capacity {
             return Err(DataStorageError::EofError());
         }
@@ -129,7 +131,16 @@ impl MmapDataStorage {
         let kv_bs = &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size];
 
         self.formatter.validate_key_value(&header, kv_bs)?;
-        Ok(Some((header.meta, kv_bs)))
+
+        let k = &kv_bs[0..header.meta.key_size];
+        if header.meta.expire_timestamp != 0
+            && header.meta.expire_timestamp <= self.options.clock.now()
+        {
+            Ok(Some((header.meta, k, None)))
+        } else {
+            let v = Some(kv_bs[header.meta.key_size..].into());
+            Ok(Some((header.meta, k, v)))
+        }
     }
 }
 
@@ -166,7 +177,6 @@ impl DataStorageWriter for MmapDataStorage {
 impl DataStorageReader for MmapDataStorage {
     fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Vec<u8>>>> {
         let storage_id = self.storage_id;
-        let clock = self.options.clock.clone();
         let row = self
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(storage_id, e.to_string()))?;
@@ -178,15 +188,15 @@ impl DataStorageReader for MmapDataStorage {
         }
 
         let ret = {
-            let (meta, buffer) = row.unwrap();
-            if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
-                Ok(None)
-            } else {
+            let (meta, _, v_op) = row.unwrap();
+            if let Some(v) = v_op {
                 Ok(TimedValue {
-                    value: buffer[meta.key_size..].into(),
+                    value: v,
                     expire_timestamp: meta.expire_timestamp,
                 }
                 .validate())
+            } else {
+                Ok(None)
             }
         };
         self.read_value_times += 1;
@@ -195,22 +205,15 @@ impl DataStorageReader for MmapDataStorage {
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
         let row_offset = self.offset;
-        let clock = self.options.clock.clone();
         let row = self.do_read_row(row_offset)?;
         if row.is_none() {
             return Ok(None);
         }
 
-        let (meta, buffer) = row.unwrap();
-
-        let value = if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
-            vec![]
-        } else {
-            buffer[meta.key_size..].into()
-        };
+        let (meta, key, v) = row.unwrap();
         let row_to_read = RowToRead {
-            key: buffer[0..meta.key_size].into(),
-            value: TimedValue::expirable_value(value, meta.expire_timestamp),
+            key: key.into(),
+            value: TimedValue::expirable_value(v.unwrap_or(vec![]), meta.expire_timestamp),
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset,
@@ -268,7 +271,7 @@ mod tests {
             FILE_HEADER_SIZE,
             meta.len() as usize,
             formatter,
-            options,
+            Arc::new(options),
         )
         .unwrap()
     }
@@ -305,55 +308,27 @@ mod tests {
 
     #[test]
     fn test_read_write_expired_value() {
-        let clock = DebugClock::new(1000);
-        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+        let time = 1000;
+        let clock = Arc::new(DebugClock::new(time));
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock.clone()));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), 100);
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), time);
         let row_location1 = storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), 100);
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), time + 1);
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
         assert!(storage
             .read_value(row_location1.row_offset)
             .unwrap()
             .is_none());
-        assert!(storage
-            .read_value(row_location2.row_offset)
-            .unwrap()
-            .is_none());
-    }
-
-    #[test]
-    fn test_read_write_not_expired_value() {
-        let clock = DebugClock::new(1000);
-        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
-
-        let k1: Vec<u8> = "key1".into();
-        let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), 2000);
-        let row_location1 = storage.write_row(&row_to_write).unwrap();
-
-        let k2: Vec<u8> = "key2".into();
-        let v2: Vec<u8> = "value2".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), 2000);
-        let row_location2 = storage.write_row(&row_to_write).unwrap();
-
-        assert_eq!(
-            v1,
-            *storage
-                .read_value(row_location1.row_offset)
-                .unwrap()
-                .unwrap()
-        );
+        // v2 still valid
         assert_eq!(
             v2,
             *storage
@@ -361,6 +336,13 @@ mod tests {
                 .unwrap()
                 .unwrap()
         );
+
+        // move clock, let v2 expire
+        clock.set(time + 1);
+        assert!(storage
+            .read_value(row_location2.row_offset)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -422,19 +404,20 @@ mod tests {
 
     #[test]
     fn test_read_next_expired_row() {
-        let clock = DebugClock::new(1000);
-        let mut storage = get_file_storage(get_options(1024).debug_clock(clock));
+        let time = 1000;
+        let clock = Arc::new(DebugClock::new(time));
+        let mut storage = get_file_storage(get_options(1024).debug_clock(clock.clone()));
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), 1001);
+            RowToWrite::new_with_timestamp(&k1, v1.clone(), time + 1);
         storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
         let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), 100);
+            RowToWrite::new_with_timestamp(&k2, v2.clone(), time);
         storage.write_row(&row_to_write).unwrap();
 
         storage.rewind().unwrap();
@@ -442,11 +425,24 @@ mod tests {
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k1, r.key);
         assert_eq!(v1, r.value.value);
-        assert_eq!(1001, r.value.expire_timestamp);
+        assert_eq!(time + 1, r.value.expire_timestamp);
         let r = storage.read_next_row().unwrap().unwrap();
         assert_eq!(k2, r.key);
         assert!(r.value.value.is_empty());
-        assert_eq!(100, r.value.expire_timestamp);
+        assert_eq!(time, r.value.expire_timestamp);
+        assert!(storage.read_next_row().unwrap().is_none());
+
+        // move clock, no valid value
+        clock.set(time + 1);
+        storage.rewind().unwrap();
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k1, r.key);
+        assert!(r.value.is_empty());
+        assert_eq!(time + 1, r.value.expire_timestamp);
+        let r = storage.read_next_row().unwrap().unwrap();
+        assert_eq!(k2, r.key);
+        assert!(r.value.value.is_empty());
+        assert_eq!(time, r.value.expire_timestamp);
         assert!(storage.read_next_row().unwrap().is_none());
     }
 

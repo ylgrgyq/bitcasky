@@ -92,7 +92,7 @@ pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
     formatter: Arc<BitcaskFormatter>,
     dirty: bool,
 }
@@ -102,7 +102,7 @@ impl DataStorage {
         database_dir: P,
         storage_id: StorageId,
         formatter: Arc<BitcaskFormatter>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(
@@ -133,7 +133,7 @@ impl DataStorage {
     pub fn open<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = fs::open_file(&path, FileType::DataFile, Some(storage_id))?;
@@ -212,7 +212,7 @@ impl DataStorage {
         meta: Metadata,
         write_offset: usize,
         formatter: Arc<BitcaskFormatter>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> Result<Self> {
         let capacity = meta.len() as usize;
         let storage_impl = DataStorageImpl::MmapStorage(MmapDataStorage::new(
