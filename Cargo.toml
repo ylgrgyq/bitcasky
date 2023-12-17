@@ -2,6 +2,7 @@
 name = "bitcask"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
 
 [[test]]
 name = "test_read_write"
@@ -27,9 +28,10 @@ uuid = { version = "1.3.3", features = [
 [dev-dependencies]
 test-log = "0.2.11"
 env_logger = "*"
-bitcask-tests = { version="0.1.0", path = "./lib/bitcask-tests" }
+bitcask-tests = { path = "./bitcask-tests" }
 
 [workspace]
 members = [
   "lib/*",
+  "bitcask-tests",
 ]
