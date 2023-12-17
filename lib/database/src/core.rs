@@ -616,7 +616,17 @@ fn prepare_db_storages<P: AsRef<Path>>(
         writing_storage = storage;
     } else {
         writing_storage = storages.pop().unwrap();
-        writing_storage.seek_to_end()?;
+        if let Err(e) = writing_storage.seek_to_end() {
+            match e {
+                DataStorageError::EofError() => {
+                    warn!(target: "Database", "has invalid data in writing file with id: {}", writing_storage.storage_id());
+                }
+                DataStorageError::DataStorageFormatter(e) => {
+                    warn!(target: "Database", "has invalid data in writing file with id: {}", writing_storage.storage_id());
+                }
+                _ => return Err(DatabaseError::StorageError(e)),
+            }
+        }
         debug!(target: "Database", "reuse writing file with id: {}", writing_storage.storage_id());
     }
 
@@ -628,10 +638,20 @@ pub mod database_tests {
     use std::{sync::Arc, time::Duration};
 
     use bitcask_tests::common::{get_temporary_directory_path, TestingKV};
-    use common::{clock::DebugClock, options::BitcaskOptions, storage_id::StorageIdGenerator};
+    use common::{
+        clock::DebugClock,
+        formatter::{BitcaskFormatter, Formatter},
+        fs,
+        fs::FileType,
+        options::BitcaskOptions,
+        storage_id::StorageIdGenerator,
+    };
     use test_log::test;
 
-    use crate::{RowLocation, TimedValue};
+    use crate::{
+        data_storage::{DataStorage, DataStorageWriter},
+        RowLocation, TimedValue,
+    };
 
     use super::Database;
 
@@ -700,13 +720,7 @@ pub mod database_tests {
                         TimedValue::expirable_value(kv.value(), kv.expire_timestamp()),
                     )
                     .unwrap();
-                TestingRow::new(
-                    kv,
-                    RowLocation {
-                        storage_id: pos.storage_id,
-                        row_offset: pos.row_offset,
-                    },
-                )
+                TestingRow::new(kv, pos)
             })
             .collect::<Vec<TestingRow>>()
     }
@@ -836,6 +850,52 @@ pub mod database_tests {
         assert_rows_value(&db, &rows);
         assert_database_rows(&db, &rows);
     }
+
+    // #[test]
+    // fn test_recovery2() {
+    //     let dir = get_temporary_directory_path();
+    //     let mut rows: Vec<TestingRow> = vec![];
+    //     let storage_id_generator = Arc::new(StorageIdGenerator::default());
+    //     {
+    //         let db =
+    //             Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+    //         let kvs = vec![
+    //             TestingKV::new("k1", "value1"),
+    //             TestingKV::new_expirable("k2", "value2", 100),
+    //         ];
+    //         rows.append(&mut write_kvs_to_db(&db, kvs));
+    //         assert_rows_value(&db, &rows);
+    //         let storage_id = db.writing_storage.lock().storage_id();
+    //         let storage = DataStorage::open(&dir, storage_id, get_database_options()).unwrap();
+    //         // let formatter = BitcaskFormatter::default();
+    //         // formatter.net_row_size(row);
+    //         // let last_row = rows.get(rows.len() - 1).unwrap();
+
+    //         let f = fs::open_file(&dir, FileType::DataFile, Some(storage_id))
+    //             .unwrap()
+    //             .file;
+    //         // f
+    //         // f.set_len(size);
+    //     }
+
+    //     {
+    //         let db =
+    //             Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+    //         let kvs = vec![
+    //             TestingKV::new("k3", "hello world"),
+    //             TestingKV::new_expirable("k1", "value4", 100),
+    //         ];
+    //         rows.append(&mut write_kvs_to_db(&db, kvs));
+    //         assert_rows_value(&db, &rows);
+    //     }
+
+    //     let db =
+    //         Database::open(&dir, storage_id_generator.clone(), get_database_options()).unwrap();
+    //     assert_eq!(1, storage_id_generator.get_id());
+    //     assert_eq!(0, db.stable_storages.len());
+    //     assert_rows_value(&db, &rows);
+    //     assert_database_rows(&db, &rows);
+    // }
 
     #[test]
     fn test_wrap_file() {

@@ -99,9 +99,17 @@ impl MmapDataStorage {
     }
 
     fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, &[u8])>> {
+        if offset > self.capacity {
+            return Err(DataStorageError::EofError());
+        }
+
+        if offset == self.capacity {
+            return Ok(None);
+        }
+
         let header_size = self.formatter.row_header_size();
         if offset + header_size >= self.capacity {
-            return Ok(None);
+            return Err(DataStorageError::EofError());
         }
 
         let header = self.formatter.decode_row_header(
@@ -112,7 +120,7 @@ impl MmapDataStorage {
         }
 
         if offset + header_size + header.meta.key_size + header.meta.value_size > self.capacity {
-            return Ok(None);
+            return Err(DataStorageError::EofError());
         }
 
         let net_size =
