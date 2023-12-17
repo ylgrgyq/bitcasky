@@ -7,7 +7,7 @@ pub enum DataSotrageType {
     Mmap,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DataStorageOptions {
     pub max_data_file_size: usize,
     pub init_data_file_capacity: usize,
@@ -43,7 +43,7 @@ impl DataStorageOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DatabaseOptions {
     pub storage: DataStorageOptions,
     /// How frequent can we flush data
@@ -69,7 +69,7 @@ impl Default for DatabaseOptions {
 }
 
 /// Bitcask optional options. Used on opening Bitcask instance.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BitcaskOptions {
     pub database: DatabaseOptions,
     // maximum key size, default: 1 KB

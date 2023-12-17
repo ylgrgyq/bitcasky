@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc};
+use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc, vec};
 
 use common::{
     clock::Clock,
@@ -13,6 +13,8 @@ use crate::{common::RowToRead, DataStorageError, RowLocation, TimedValue};
 
 use super::{DataStorageReader, DataStorageWriter, Result};
 
+type MetaAndKeyValue<'a> = (RowMeta, &'a [u8], Option<Vec<u8>>);
+
 #[derive(Debug)]
 pub struct MmapDataStorage {
     pub offset: usize,
@@ -21,7 +23,7 @@ pub struct MmapDataStorage {
     pub write_times: u64,
     data_file: File,
     storage_id: StorageId,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
     formatter: Arc<BitcaskFormatter>,
     map_view: MmapMut,
 }
@@ -33,7 +35,7 @@ impl MmapDataStorage {
         write_offset: usize,
         capacity: usize,
         formatter: Arc<BitcaskFormatter>,
-        options: BitcaskOptions,
+        options: Arc<BitcaskOptions>,
     ) -> Result<Self> {
         let mmap = unsafe {
             MmapOptions::new()
@@ -98,7 +100,7 @@ impl MmapDataStorage {
         &self.map_view[0..self.capacity]
     }
 
-    fn do_read_row(&mut self, offset: usize) -> Result<Option<(RowMeta, &[u8])>> {
+    fn do_read_row(&mut self, offset: usize) -> Result<Option<MetaAndKeyValue>> {
         if offset > self.capacity {
             return Err(DataStorageError::EofError());
         }
@@ -129,7 +131,16 @@ impl MmapDataStorage {
         let kv_bs = &self.as_slice()[offset + self.formatter.row_header_size()..offset + net_size];
 
         self.formatter.validate_key_value(&header, kv_bs)?;
-        Ok(Some((header.meta, kv_bs)))
+
+        let k = &kv_bs[0..header.meta.key_size];
+        if header.meta.expire_timestamp != 0
+            && header.meta.expire_timestamp <= self.options.clock.now()
+        {
+            Ok(Some((header.meta, k, None)))
+        } else {
+            let v = Some(kv_bs[header.meta.key_size..].into());
+            Ok(Some((header.meta, k, v)))
+        }
     }
 }
 
@@ -166,7 +177,6 @@ impl DataStorageWriter for MmapDataStorage {
 impl DataStorageReader for MmapDataStorage {
     fn read_value(&mut self, row_offset: usize) -> super::Result<Option<TimedValue<Vec<u8>>>> {
         let storage_id = self.storage_id;
-        let clock = self.options.clock.clone();
         let row = self
             .do_read_row(row_offset)
             .map_err(|e| DataStorageError::ReadRowFailed(storage_id, e.to_string()))?;
@@ -178,15 +188,15 @@ impl DataStorageReader for MmapDataStorage {
         }
 
         let ret = {
-            let (meta, buffer) = row.unwrap();
-            if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
-                Ok(None)
-            } else {
+            let (meta, _, v_op) = row.unwrap();
+            if let Some(v) = v_op {
                 Ok(TimedValue {
-                    value: buffer[meta.key_size..].into(),
+                    value: v,
                     expire_timestamp: meta.expire_timestamp,
                 }
                 .validate())
+            } else {
+                Ok(None)
             }
         };
         self.read_value_times += 1;
@@ -195,22 +205,15 @@ impl DataStorageReader for MmapDataStorage {
 
     fn read_next_row(&mut self) -> super::Result<Option<RowToRead>> {
         let row_offset = self.offset;
-        let clock = self.options.clock.clone();
         let row = self.do_read_row(row_offset)?;
         if row.is_none() {
             return Ok(None);
         }
 
-        let (meta, buffer) = row.unwrap();
-
-        let value = if meta.expire_timestamp != 0 && meta.expire_timestamp <= clock.now() {
-            vec![]
-        } else {
-            buffer[meta.key_size..].into()
-        };
+        let (meta, key, v) = row.unwrap();
         let row_to_read = RowToRead {
-            key: buffer[0..meta.key_size].into(),
-            value: TimedValue::expirable_value(value, meta.expire_timestamp),
+            key: key.into(),
+            value: TimedValue::expirable_value(v.unwrap_or(vec![]), meta.expire_timestamp),
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset,
@@ -268,7 +271,7 @@ mod tests {
             FILE_HEADER_SIZE,
             meta.len() as usize,
             formatter,
-            options,
+            Arc::new(options),
         )
         .unwrap()
     }

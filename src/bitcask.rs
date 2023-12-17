@@ -29,7 +29,7 @@ pub struct Bitcask {
     instance_id: String,
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
-    options: BitcaskOptions,
+    options: Arc<BitcaskOptions>,
     database: Database,
     merge_manager: MergeManager,
 }
@@ -48,6 +48,7 @@ impl Bitcask {
 
         validate_database_directory(directory)?;
 
+        let options = Arc::new(options);
         let id = Uuid::new_v4();
         let storage_id_generator = Arc::new(StorageIdGenerator::default());
         let merge_manager = MergeManager::new(

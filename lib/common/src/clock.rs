@@ -8,7 +8,7 @@ pub trait Clock {
     fn now(&self) -> u64;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct SystemClock {}
 
 impl Clock for SystemClock {
@@ -20,7 +20,7 @@ impl Clock for SystemClock {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct DebugClock {
     time: u64,
 }
@@ -37,7 +37,7 @@ impl Clock for DebugClock {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ClockImpl {
     System(SystemClock),
     Debug(DebugClock),
@@ -52,7 +52,7 @@ impl Clock for ClockImpl {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BitcaskClock {
     pub clock: ClockImpl,
 }
