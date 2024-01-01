@@ -9,9 +9,9 @@ repository = "https://github.com/ylgrgyq/bitcask"
 [dependencies]
 crc = "3.0.0"
 byteorder = "1.4"
-bytes = "1.3.0"
-thiserror = "1.0.38"
-log = "0.4.17"
+bytes = "1.5.0"
+thiserror = "1.0.53"
+log = "0.4.20"
 fs4 = "0.6.6"
 # fs4 depends on rustix, but pulling this dependency explicitly into the tree
 # to use direct functions on FreeBSD

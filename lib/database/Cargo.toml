@@ -16,10 +16,10 @@ bench = false
 [dependencies]
 common = { path = "../common" }
 
-thiserror = "1.0.38"
-memmap2 = "0.7.0"
-dashmap = "5.4.0"
-log = "0.4.17"
+thiserror = "1.0.53"
+memmap2 = "0.9.3"
+dashmap = "5.5.3"
+log = "0.4.20"
 rand = "0.8"
 parking_lot = { version = "0.12.1" }
 crossbeam = "0.8.2"
