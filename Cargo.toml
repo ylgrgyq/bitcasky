@@ -5,6 +5,7 @@ edition = "2021"
 resolver = "2"
 license = "MIT"
 repository = "https://github.com/ylgrgyq/bitcask"
+description = "Bitcasky is a Rust implementation of the Bitcask key-value store"
 
 [[test]]
 name = "test_read_write"

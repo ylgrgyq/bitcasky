@@ -2,7 +2,7 @@
 
 # Bitcask-rs
 
-Bitcask-rs is a Rust implementation of the Bitcask key-value store. Bitcask is an ACID-compliant, append-only key-value store that provides high write throughput. It is optimized for write-heavy workloads, and is commonly used for applications such as log storage and time-series data.
+Bitcasky is a Rust implementation of the Bitcask key-value store. Bitcask is an ACID-compliant, append-only key-value store that provides high write throughput. It is optimized for write-heavy workloads, and is commonly used for applications such as log storage and time-series data.
 
 ## Features
 
