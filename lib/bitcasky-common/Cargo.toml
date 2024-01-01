@@ -5,7 +5,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ylgrgyq/bitcask"
-description = "common part for bitcasky lib"
+description = "Common part for bitcasky lib"
 
 [dependencies]
 crc = "3.0.0"
