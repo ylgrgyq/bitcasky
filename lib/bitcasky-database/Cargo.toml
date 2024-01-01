@@ -1,25 +1,33 @@
 [package]
-name = "common"
+name = "bitcasky-database"
 version = "0.1.0"
 resolver = "2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ylgrgyq/bitcask"
 
+[[bench]]
+name = "mmap_data_storage"
+harness = false
+
+[lib]
+bench = false
+
 [dependencies]
-crc = "3.0.0"
-byteorder = "1.4"
-bytes = "1.5.0"
+bitcasky-common = { path = "../bitcasky-common", version = "0.1.0" }
+
 thiserror = "1.0.53"
+memmap2 = "0.9.3"
+dashmap = "5.5.3"
 log = "0.4.20"
-fs4 = "0.6.6"
-# fs4 depends on rustix, but pulling this dependency explicitly into the tree
-# to use direct functions on FreeBSD
-rustix = { version = "0", features = [ "fs" ]}
+rand = "0.8"
 parking_lot = { version = "0.12.1" }
+crossbeam = "0.8.2"
+crossbeam-channel = "0.5.8"
 
 [dev-dependencies]
 test-log = "0.2.11"
 env_logger = "*"
-assert_matches = "1.5.0"
+criterion = "0.5"
+tempfile = "3.3.0"
 utilities = { path = "../../utilities" }

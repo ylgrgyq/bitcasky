@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
-use bitcask::{bitcask::Bitcask, error::BitcaskError};
-use common::options::BitcaskOptions;
+use bitcasky::{bitcask::Bitcask, error::BitcaskError};
+use bitcasky_common::options::BitcaskOptions;
 use test_log::test;
 use utilities::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,

@@ -13,7 +13,7 @@ use std::{
 
 use log::{debug, error, warn};
 
-use common::{
+use bitcasky_common::{
     clock::Clock,
     create_file,
     formatter::{
@@ -357,7 +357,7 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use crate::data_storage::DataStorageWriter;
-    use common::formatter::RowToWrite;
+    use bitcasky_common::formatter::RowToWrite;
 
     use super::*;
     use test_log::test;

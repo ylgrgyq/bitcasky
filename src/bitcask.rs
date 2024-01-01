@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use common::options::BitcaskOptions;
+use bitcasky_common::options::BitcaskOptions;
 use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
@@ -12,11 +12,11 @@ use uuid::Uuid;
 use crate::error::{BitcaskError, BitcaskResult};
 use crate::keydir::{KeyDir, KeyDirTelemetry};
 use crate::merge::{MergeManager, MergeManagerTelemetry};
-use common::{
+use bitcasky_common::{
     fs::{self},
     storage_id::StorageIdGenerator,
 };
-use database::{deleted_value, Database, DatabaseTelemetry, TimedValue};
+use bitcasky_database::{deleted_value, Database, DatabaseTelemetry, TimedValue};
 
 #[derive(Debug)]
 pub struct BitcaskTelemetry {

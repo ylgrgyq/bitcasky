@@ -7,7 +7,7 @@ use dashmap::{
 };
 
 use crate::error::BitcaskResult;
-use database::{Database, RowLocation};
+use bitcasky_database::{Database, RowLocation};
 
 #[derive(Debug)]
 pub struct KeyDirTelemetry {

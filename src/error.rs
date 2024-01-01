@@ -1,7 +1,7 @@
-use database::DatabaseError;
+use bitcasky_database::DatabaseError;
 use thiserror::Error;
 
-use common::formatter::FormatterError;
+use bitcasky_common::formatter::FormatterError;
 
 #[derive(Error, Debug)]
 pub enum BitcaskError {
