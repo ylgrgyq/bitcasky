@@ -29,7 +29,7 @@ uuid = { version = "1.6.1", features = [
 
 [dev-dependencies]
 test-log = "0.2.11"
-env_logger = "*"
+env_logger = "0.10.1"
 utilities = { path = "./utilities" }
 
 [workspace]

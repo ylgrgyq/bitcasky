@@ -27,7 +27,7 @@ crossbeam-channel = "0.5.8"
 
 [dev-dependencies]
 test-log = "0.2.11"
-env_logger = "*"
+env_logger = "0.10.1"
 criterion = "0.5"
 tempfile = "3.3.0"
 utilities = { path = "../../utilities" }
