@@ -17,11 +17,11 @@ use bitcasky_common::{
     clock::Clock,
     create_file,
     formatter::{
-        get_formatter_from_file, padding, BitcaskFormatter, Formatter, RowHint, RowHintHeader,
+        get_formatter_from_file, padding, BitcaskyFormatter, Formatter, RowHint, RowHintHeader,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::BitcaskOptions,
+    options::BitcaskyOptions,
     storage_id::StorageId,
 };
 use memmap2::{MmapMut, MmapOptions};
@@ -40,7 +40,7 @@ const HINT_FILES_TMP_DIRECTORY: &str = "TmpHint";
 pub struct HintFile {
     storage_id: StorageId,
     file: File,
-    formatter: BitcaskFormatter,
+    formatter: BitcaskyFormatter,
     map_view: MmapMut,
     offset: usize,
     capacity: usize,
@@ -52,7 +52,7 @@ impl HintFile {
         storage_id: StorageId,
         init_hint_file_capacity: usize,
     ) -> DatabaseResult<Self> {
-        let formatter = BitcaskFormatter::default();
+        let formatter = BitcaskyFormatter::default();
         let file = create_file(
             database_dir,
             FileType::HintFile,
@@ -130,7 +130,7 @@ impl HintFile {
     fn new(
         file: File,
         storage_id: StorageId,
-        formatter: BitcaskFormatter,
+        formatter: BitcaskyFormatter,
     ) -> DatabaseResult<HintFile> {
         let capacity = file.metadata()?.len() as usize;
         let mmap = unsafe { MmapOptions::new().offset(0).len(capacity).map_mut(&file)? };
@@ -202,7 +202,7 @@ pub struct HintWriter {
 }
 
 impl HintWriter {
-    pub fn start(database_dir: &Path, options: Arc<BitcaskOptions>) -> HintWriter {
+    pub fn start(database_dir: &Path, options: Arc<BitcaskyOptions>) -> HintWriter {
         let (sender, receiver) = unbounded();
 
         let write_counter = Arc::new(AtomicU64::new(0));
@@ -250,7 +250,7 @@ impl HintWriter {
     fn write_hint_file(
         database_dir: &Path,
         data_storage_id: StorageId,
-        options: Arc<BitcaskOptions>,
+        options: Arc<BitcaskyOptions>,
     ) -> DatabaseResult<()> {
         let m = HintWriter::build_row_hint(database_dir, data_storage_id, options.clone())?;
 
@@ -278,7 +278,7 @@ impl HintWriter {
     fn build_row_hint(
         database_dir: &Path,
         data_storage_id: StorageId,
-        options: Arc<BitcaskOptions>,
+        options: Arc<BitcaskyOptions>,
     ) -> DatabaseResult<HashMap<Vec<u8>, RowHint>> {
         let stable_file_opt = DataStorage::open(database_dir, data_storage_id, options.clone())?;
 
@@ -396,9 +396,9 @@ mod tests {
         let mut writing_file = DataStorage::new(
             &dir,
             storage_id,
-            Arc::new(BitcaskFormatter::default()),
+            Arc::new(BitcaskyFormatter::default()),
             Arc::new(
-                BitcaskOptions::default()
+                BitcaskyOptions::default()
                     .max_data_file_size(1024)
                     .init_data_file_capacity(100),
             ),
@@ -415,7 +415,7 @@ mod tests {
             let writer = HintWriter::start(
                 &dir,
                 Arc::new(
-                    BitcaskOptions::default()
+                    BitcaskyOptions::default()
                         .max_data_file_size(1024)
                         .init_data_file_capacity(100),
                 ),

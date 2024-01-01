@@ -1,4 +1,4 @@
-pub mod bitcask;
+pub mod bitcasky;
 pub mod error;
 
 mod keydir;

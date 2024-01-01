@@ -12,11 +12,11 @@ use thiserror::Error;
 use bitcasky_common::{
     create_file,
     formatter::{
-        self, get_formatter_from_file, BitcaskFormatter, FormatterError, RowToWrite,
+        self, get_formatter_from_file, BitcaskyFormatter, FormatterError, RowToWrite,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::BitcaskOptions,
+    options::BitcaskyOptions,
     storage_id::StorageId,
 };
 
@@ -92,8 +92,8 @@ pub struct DataStorage {
     database_dir: PathBuf,
     storage_id: StorageId,
     storage_impl: DataStorageImpl,
-    options: Arc<BitcaskOptions>,
-    formatter: Arc<BitcaskFormatter>,
+    options: Arc<BitcaskyOptions>,
+    formatter: Arc<BitcaskyFormatter>,
     dirty: bool,
 }
 
@@ -101,8 +101,8 @@ impl DataStorage {
     pub fn new<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        formatter: Arc<BitcaskFormatter>,
-        options: Arc<BitcaskOptions>,
+        formatter: Arc<BitcaskyFormatter>,
+        options: Arc<BitcaskyOptions>,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(
@@ -133,7 +133,7 @@ impl DataStorage {
     pub fn open<P: AsRef<Path>>(
         database_dir: P,
         storage_id: StorageId,
-        options: Arc<BitcaskOptions>,
+        options: Arc<BitcaskyOptions>,
     ) -> Result<Self> {
         let path = database_dir.as_ref().to_path_buf();
         let mut data_file = fs::open_file(&path, FileType::DataFile, Some(storage_id))?;
@@ -211,8 +211,8 @@ impl DataStorage {
         data_file: File,
         meta: Metadata,
         write_offset: usize,
-        formatter: Arc<BitcaskFormatter>,
-        options: Arc<BitcaskOptions>,
+        formatter: Arc<BitcaskyFormatter>,
+        options: Arc<BitcaskyOptions>,
     ) -> Result<Self> {
         let capacity = meta.len() as usize;
         let storage_impl = DataStorageImpl::MmapStorage(MmapDataStorage::new(

@@ -2,8 +2,8 @@ use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc, vec};
 
 use bitcasky_common::{
     clock::Clock,
-    formatter::{padding, BitcaskFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
-    options::BitcaskOptions,
+    formatter::{padding, BitcaskyFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
+    options::BitcaskyOptions,
     storage_id::StorageId,
 };
 use log::debug;
@@ -23,8 +23,8 @@ pub struct MmapDataStorage {
     pub write_times: u64,
     data_file: File,
     storage_id: StorageId,
-    options: Arc<BitcaskOptions>,
-    formatter: Arc<BitcaskFormatter>,
+    options: Arc<BitcaskyOptions>,
+    formatter: Arc<BitcaskyFormatter>,
     map_view: MmapMut,
 }
 
@@ -34,8 +34,8 @@ impl MmapDataStorage {
         data_file: File,
         write_offset: usize,
         capacity: usize,
-        formatter: Arc<BitcaskFormatter>,
-        options: Arc<BitcaskOptions>,
+        formatter: Arc<BitcaskyFormatter>,
+        options: Arc<BitcaskyOptions>,
     ) -> Result<Self> {
         let mmap = unsafe {
             MmapOptions::new()
@@ -252,17 +252,17 @@ mod tests {
     use test_log::test;
     use utilities::common::get_temporary_directory_path;
 
-    fn get_options(max_size: usize) -> BitcaskOptions {
-        BitcaskOptions::default()
+    fn get_options(max_size: usize) -> BitcaskyOptions {
+        BitcaskyOptions::default()
             .max_data_file_size(max_size)
             .init_data_file_capacity(max_size)
             .storage_type(DataSotrageType::Mmap)
     }
 
-    fn get_file_storage(options: BitcaskOptions) -> MmapDataStorage {
+    fn get_file_storage(options: BitcaskyOptions) -> MmapDataStorage {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
-        let formatter = Arc::new(BitcaskFormatter::default());
+        let formatter = Arc::new(BitcaskyFormatter::default());
         let file = create_file(dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
         let meta = file.metadata().unwrap();
         MmapDataStorage::new(

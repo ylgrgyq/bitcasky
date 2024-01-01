@@ -63,17 +63,17 @@ impl Clock for ClockImpl {
 }
 
 #[derive(Debug)]
-pub struct BitcaskClock {
+pub struct BitcaskyClock {
     pub clock: ClockImpl,
 }
 
-impl Clock for BitcaskClock {
+impl Clock for BitcaskyClock {
     fn now(&self) -> u64 {
         self.clock.now()
     }
 }
 
-impl Deref for BitcaskClock {
+impl Deref for BitcaskyClock {
     type Target = ClockImpl;
 
     fn deref(&self) -> &Self::Target {
@@ -81,13 +81,13 @@ impl Deref for BitcaskClock {
     }
 }
 
-impl DerefMut for BitcaskClock {
+impl DerefMut for BitcaskyClock {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.clock
     }
 }
 
-impl Default for BitcaskClock {
+impl Default for BitcaskyClock {
     fn default() -> Self {
         Self {
             clock: ClockImpl::System(SystemClock {}),

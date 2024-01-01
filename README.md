@@ -1,6 +1,4 @@
-# bitcask
-
-# Bitcask-rs
+# Bitcasky
 
 Bitcasky is a Rust implementation of the Bitcask key-value store. Bitcask is an ACID-compliant, append-only key-value store that provides high write throughput. It is optimized for write-heavy workloads, and is commonly used for applications such as log storage and time-series data.
 
@@ -12,15 +10,15 @@ Bitcasky is a Rust implementation of the Bitcask key-value store. Bitcask is an 
 
 ## Usage
 
-To use Bitcask, simply add it to your `Cargo.toml` file:
+To use Bitcasky, simply add it to your `Cargo.toml` file:
 
 ```
 [dependencies]
-bitcask = "0.1.0"
+bitcasky = "0.1.0"
 
 ```
 
-Then, in your Rust code, import the `bitcask` crate and start using the key-value store:
+Then, in your Rust code, import the `bitcasky` crate and start using the key-value store:
 
 ```
 use bitcask::Bitcask;

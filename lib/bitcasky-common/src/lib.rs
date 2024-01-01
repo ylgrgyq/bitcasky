@@ -5,7 +5,7 @@ use std::{
     ptr,
 };
 
-use formatter::BitcaskFormatter;
+use formatter::BitcaskyFormatter;
 use fs::FileType;
 #[cfg(not(unix))]
 use fs4::FileExt;
@@ -28,7 +28,7 @@ pub fn create_file<P: AsRef<Path>>(
     base_dir: P,
     file_type: FileType,
     storage_id: Option<StorageId>,
-    formatter: &BitcaskFormatter,
+    formatter: &BitcaskyFormatter,
     init_data_file_capacity: usize,
 ) -> std::io::Result<File> {
     // Round capacity down to the nearest 8-byte alignment, since the
@@ -115,7 +115,7 @@ mod tests {
     fn test_create_file() {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
-        let formatter = BitcaskFormatter::default();
+        let formatter = BitcaskyFormatter::default();
         let mut file =
             create_file(&dir, FileType::DataFile, Some(storage_id), &formatter, 100).unwrap();
 
