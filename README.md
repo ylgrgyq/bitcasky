@@ -21,10 +21,10 @@ bitcasky = "0.1.0"
 Then, in your Rust code, import the `bitcasky` crate and start using the key-value store:
 
 ```
-use bitcask::Bitcask;
+use bitcasky::Bitcasky;
 
 fn main() {
-    let mut db = Bitcask::open("/path/to/db").unwrap();
+    let mut db = Bitcasky::open("/path/to/db", BitcaskyOptions::default()).unwrap()
 
     db.put(b"key", b"value").unwrap();
     let value = db.get(b"key").unwrap();
@@ -33,5 +33,3 @@ fn main() {
 }
 
 ```
-
-For more information on how to use Bitcask-rs, please see the [documentation](https://docs.rs/bitcask-rs/0.1.0/bitcask/).
