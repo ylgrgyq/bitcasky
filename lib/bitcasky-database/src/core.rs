@@ -12,11 +12,11 @@ use crossbeam_channel::{select, Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
-use common::{
+use bitcasky_common::{
     clock::Clock,
-    formatter::{BitcaskFormatter, RowToWrite},
+    formatter::{BitcaskyFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
-    options::BitcaskOptions,
+    options::BitcaskyOptions,
     storage_id::{StorageId, StorageIdGenerator},
 };
 
@@ -60,11 +60,11 @@ pub struct Database {
     storage_id_generator: Arc<StorageIdGenerator>,
     writing_storage: Arc<Mutex<DataStorage>>,
     stable_storages: DashMap<StorageId, Mutex<DataStorage>>,
-    options: Arc<BitcaskOptions>,
+    options: Arc<BitcaskyOptions>,
     hint_file_writer: Option<HintWriter>,
     /// Process that periodically flushes writing storage
     sync_worker: Option<SyncWorker>,
-    formatter: Arc<BitcaskFormatter>,
+    formatter: Arc<BitcaskyFormatter>,
     is_error: Mutex<Option<String>>,
 }
 
@@ -72,7 +72,7 @@ impl Database {
     pub fn open(
         directory: &Path,
         storage_id_generator: Arc<StorageIdGenerator>,
-        options: Arc<BitcaskOptions>,
+        options: Arc<BitcaskyOptions>,
     ) -> DatabaseResult<Database> {
         let database_dir: PathBuf = directory.into();
 
@@ -87,7 +87,7 @@ impl Database {
 
         let hint_file_writer = Some(HintWriter::start(&database_dir, options.clone()));
 
-        let formatter = Arc::new(BitcaskFormatter::default());
+        let formatter = Arc::new(BitcaskyFormatter::default());
         let (writing_storage, storages) = prepare_db_storages(
             &database_dir,
             &data_storage_ids,
@@ -499,7 +499,7 @@ impl Iterator for DatabaseIter {
 fn recovered_iter(
     database_dir: &Path,
     storage_id: StorageId,
-    options: Arc<BitcaskOptions>,
+    options: Arc<BitcaskyOptions>,
 ) -> DatabaseResult<Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>>> {
     if FileType::HintFile
         .get_path(database_dir, Some(storage_id))
@@ -528,14 +528,14 @@ pub struct DatabaseRecoverIter {
     current_iter: Cell<Option<Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>>>>,
     data_storage_ids: Vec<StorageId>,
     database_dir: PathBuf,
-    options: Arc<BitcaskOptions>,
+    options: Arc<BitcaskyOptions>,
 }
 
 impl DatabaseRecoverIter {
     fn new(
         database_dir: PathBuf,
         mut iters: Vec<StorageId>,
-        options: Arc<BitcaskOptions>,
+        options: Arc<BitcaskyOptions>,
     ) -> DatabaseResult<Self> {
         if let Some(id) = iters.pop() {
             let iter: Box<dyn Iterator<Item = DatabaseResult<RecoveredRow>>> =
@@ -588,7 +588,7 @@ impl Iterator for DatabaseRecoverIter {
 fn open_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
-    options: Arc<BitcaskOptions>,
+    options: Arc<BitcaskyOptions>,
 ) -> DatabaseResult<Vec<DataStorage>> {
     let mut storage_ids = data_storage_ids.to_owned();
     storage_ids.sort();
@@ -603,8 +603,8 @@ fn prepare_db_storages<P: AsRef<Path>>(
     database_dir: P,
     data_storage_ids: &[u32],
     storage_id_generator: &StorageIdGenerator,
-    formatter: Arc<BitcaskFormatter>,
-    options: Arc<BitcaskOptions>,
+    formatter: Arc<BitcaskyFormatter>,
+    options: Arc<BitcaskyOptions>,
 ) -> DatabaseResult<(DataStorage, Vec<DataStorage>)> {
     let mut storages = open_storages(&database_dir, data_storage_ids, options.clone())?;
     let mut writing_storage;
@@ -640,8 +640,8 @@ pub mod database_tests {
         time::Duration,
     };
 
-    use common::{
-        clock::DebugClock, fs, fs::FileType, options::BitcaskOptions,
+    use bitcasky_common::{
+        clock::DebugClock, fs, fs::FileType, options::BitcaskyOptions,
         storage_id::StorageIdGenerator,
     };
     use utilities::common::{get_temporary_directory_path, TestingKV};
@@ -664,8 +664,8 @@ pub mod database_tests {
         }
     }
 
-    fn get_database_options() -> BitcaskOptions {
-        BitcaskOptions::default()
+    fn get_database_options() -> BitcaskyOptions {
+        BitcaskyOptions::default()
             .max_data_file_size(1024)
             .init_data_file_capacity(100)
             .sync_interval(Duration::from_secs(60))
@@ -1032,7 +1032,7 @@ pub mod database_tests {
             &dir,
             storage_id_generator,
             Arc::new(
-                BitcaskOptions::default()
+                BitcaskyOptions::default()
                     .max_data_file_size(120)
                     .init_data_file_capacity(100),
             ),

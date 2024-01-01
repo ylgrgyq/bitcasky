@@ -6,8 +6,8 @@ use dashmap::{
     DashMap,
 };
 
-use crate::error::BitcaskResult;
-use database::{Database, RowLocation};
+use crate::error::BitcaskyResult;
+use bitcasky_database::{Database, RowLocation};
 
 #[derive(Debug)]
 pub struct KeyDirTelemetry {
@@ -30,7 +30,7 @@ impl KeyDir {
         }
     }
 
-    pub fn new(database: &Database) -> BitcaskResult<KeyDir> {
+    pub fn new(database: &Database) -> BitcaskyResult<KeyDir> {
         let index = DashMap::new();
         let start = Instant::now();
         for ret in database.recovery_iter()? {

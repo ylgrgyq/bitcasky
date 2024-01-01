@@ -4,19 +4,19 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use common::options::BitcaskOptions;
+use bitcasky_common::options::BitcaskyOptions;
 use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::error::{BitcaskError, BitcaskResult};
+use crate::error::{BitcaskyError, BitcaskyResult};
 use crate::keydir::{KeyDir, KeyDirTelemetry};
 use crate::merge::{MergeManager, MergeManagerTelemetry};
-use common::{
+use bitcasky_common::{
     fs::{self},
     storage_id::StorageIdGenerator,
 };
-use database::{deleted_value, Database, DatabaseTelemetry, TimedValue};
+use bitcasky_database::{deleted_value, Database, DatabaseTelemetry, TimedValue};
 
 #[derive(Debug)]
 pub struct BitcaskTelemetry {
@@ -25,22 +25,22 @@ pub struct BitcaskTelemetry {
     pub merge_manager: MergeManagerTelemetry,
 }
 
-pub struct Bitcask {
+pub struct Bitcasky {
     instance_id: String,
     directory_lock_file: File,
     keydir: RwLock<KeyDir>,
-    options: Arc<BitcaskOptions>,
+    options: Arc<BitcaskyOptions>,
     database: Database,
     merge_manager: MergeManager,
 }
 
-impl Bitcask {
+impl Bitcasky {
     /// Open opens the database at the given path with optional options.
-    pub fn open(directory: &Path, options: BitcaskOptions) -> BitcaskResult<Bitcask> {
+    pub fn open(directory: &Path, options: BitcaskyOptions) -> BitcaskyResult<Bitcasky> {
         let directory_lock_file = match fs::lock_directory(directory)? {
             Some(f) => f,
             None => {
-                return Err(BitcaskError::LockDirectoryFailed(
+                return Err(BitcaskyError::LockDirectoryFailed(
                     directory.display().to_string(),
                 ));
             }
@@ -62,8 +62,8 @@ impl Bitcask {
         let database = Database::open(directory, storage_id_generator, options.clone())?;
         let keydir = RwLock::new(KeyDir::new(&database)?);
 
-        debug!(target: "Bitcask", "Bitcask created. instanceId: {}", id);
-        Ok(Bitcask {
+        debug!(target: "Bitcasky", "Bitcask created. instanceId: {}", id);
+        Ok(Bitcasky {
             instance_id: id.to_string(),
             directory_lock_file,
             keydir,
@@ -74,7 +74,7 @@ impl Bitcask {
     }
 
     /// Stores the key and value in the database.
-    pub fn put<V: Deref<Target = [u8]>>(&self, key: Vec<u8>, value: V) -> BitcaskResult<()> {
+    pub fn put<V: Deref<Target = [u8]>>(&self, key: Vec<u8>, value: V) -> BitcaskyResult<()> {
         self.do_put(key, TimedValue::immortal_value(value))
     }
 
@@ -84,9 +84,9 @@ impl Bitcask {
         key: Vec<u8>,
         value: V,
         ttl: Duration,
-    ) -> BitcaskResult<()> {
+    ) -> BitcaskyResult<()> {
         if ttl.is_zero() {
-            return Err(BitcaskError::InvalidParameter(
+            return Err(BitcaskyError::InvalidParameter(
                 "ttl".into(),
                 "ttl cannot be zero".into(),
             ));
@@ -99,7 +99,7 @@ impl Bitcask {
     }
 
     /// Fetches value for a key
-    pub fn get(&self, key: &Vec<u8>) -> BitcaskResult<Option<Vec<u8>>> {
+    pub fn get(&self, key: &Vec<u8>) -> BitcaskyResult<Option<Vec<u8>>> {
         self.database.check_db_error()?;
 
         let row_pos = { self.keydir.read().get(key).map(|r| *r.value()) };
@@ -116,14 +116,14 @@ impl Bitcask {
     }
 
     /// Returns true if the key exists in the database, false otherwise.
-    pub fn has(&self, key: &Vec<u8>) -> BitcaskResult<bool> {
+    pub fn has(&self, key: &Vec<u8>) -> BitcaskyResult<bool> {
         self.database.check_db_error()?;
 
         Ok(self.keydir.read().get(key).map(|r| *r.value()).is_some())
     }
 
     /// Iterates all the keys in database and apply each of them to the function f
-    pub fn foreach_key<F>(&self, mut f: F) -> BitcaskResult<()>
+    pub fn foreach_key<F>(&self, mut f: F) -> BitcaskyResult<()>
     where
         F: FnMut(&Vec<u8>),
     {
@@ -136,9 +136,9 @@ impl Bitcask {
     }
 
     /// Iterates all the keys in database and apply them to the function f with a initial accumulator.
-    pub fn fold_key<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskResult<Option<T>>
+    pub fn fold_key<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskyResult<Option<T>>
     where
-        F: FnMut(&Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
+        F: FnMut(&Vec<u8>, Option<T>) -> BitcaskyResult<Option<T>>,
     {
         self.database.check_db_error()?;
         let mut acc = init;
@@ -149,7 +149,7 @@ impl Bitcask {
     }
 
     /// Iterates all the key value pair in database and apply each of them to the function f
-    pub fn foreach<F>(&self, mut f: F) -> BitcaskResult<()>
+    pub fn foreach<F>(&self, mut f: F) -> BitcaskyResult<()>
     where
         F: FnMut(&Vec<u8>, &Vec<u8>),
     {
@@ -159,7 +159,7 @@ impl Bitcask {
             if let Ok(row) = row_ret {
                 f(&row.key, &row.value.value);
             } else {
-                return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
+                return Err(BitcaskyError::DatabaseError(row_ret.unwrap_err()));
             }
         }
 
@@ -167,9 +167,9 @@ impl Bitcask {
     }
 
     /// Iterates all the key value pair in database and apply them to the function f with a initial accumulator.
-    pub fn fold<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskResult<Option<T>>
+    pub fn fold<T, F>(&self, mut f: F, init: Option<T>) -> BitcaskyResult<Option<T>>
     where
-        F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskResult<Option<T>>,
+        F: FnMut(&Vec<u8>, &Vec<u8>, Option<T>) -> BitcaskyResult<Option<T>>,
     {
         self.database.check_db_error()?;
         let _kd = self.keydir.read();
@@ -178,14 +178,14 @@ impl Bitcask {
             if let Ok(row) = row_ret {
                 acc = f(&row.key, &row.value.value, acc)?;
             } else {
-                return Err(BitcaskError::DatabaseError(row_ret.unwrap_err()));
+                return Err(BitcaskyError::DatabaseError(row_ret.unwrap_err()));
             }
         }
         Ok(acc)
     }
 
     /// Deletes the named key.
-    pub fn delete(&self, key: &Vec<u8>) -> BitcaskResult<()> {
+    pub fn delete(&self, key: &Vec<u8>) -> BitcaskyResult<()> {
         self.database.check_db_error()?;
         let kd = self.keydir.write();
 
@@ -198,13 +198,13 @@ impl Bitcask {
     }
 
     /// Drop this entire database
-    pub fn drop(&self) -> BitcaskResult<()> {
+    pub fn drop(&self) -> BitcaskyResult<()> {
         let kd = self.keydir.write();
 
         if let Err(e) = self.database.drop() {
             self.database
                 .mark_db_error(format!("drop database failed. {}", e));
-            return Err(BitcaskError::DatabaseError(e));
+            return Err(BitcaskyError::DatabaseError(e));
         }
 
         kd.clear();
@@ -212,13 +212,13 @@ impl Bitcask {
     }
 
     /// Flushes all buffers to disk ensuring all data is written
-    pub fn sync(&self) -> BitcaskResult<()> {
+    pub fn sync(&self) -> BitcaskyResult<()> {
         Ok(self.database.sync()?)
     }
 
     /// Merges all datafiles in the database. Old keys are squashed and deleted keys removes.
     /// Duplicate key/value pairs are also removed. Call this function periodically to reclaim disk space.
-    pub fn merge(&self) -> BitcaskResult<()> {
+    pub fn merge(&self) -> BitcaskyResult<()> {
         self.database.check_db_error()?;
 
         self.merge_manager.merge(&self.database, &self.keydir)
@@ -240,15 +240,15 @@ impl Bitcask {
         &self,
         key: Vec<u8>,
         value: TimedValue<V>,
-    ) -> BitcaskResult<()> {
+    ) -> BitcaskyResult<()> {
         if key.len() > self.options.max_key_size {
-            return Err(BitcaskError::InvalidParameter(
+            return Err(BitcaskyError::InvalidParameter(
                 "key".into(),
                 "key size overflow".into(),
             ));
         }
         if value.len() > self.options.max_value_size {
-            return Err(BitcaskError::InvalidParameter(
+            return Err(BitcaskyError::InvalidParameter(
                 "value".into(),
                 "values size overflow".into(),
             ));
@@ -264,24 +264,24 @@ impl Bitcask {
             e
         })?;
 
-        debug!(target: "Bitcask", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
+        debug!(target: "Bitcasky", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
             key, ret.storage_id, ret.row_offset);
         kd.put(key, ret);
         Ok(())
     }
 }
 
-impl Drop for Bitcask {
+impl Drop for Bitcasky {
     fn drop(&mut self) {
         fs::unlock_directory(&self.directory_lock_file);
-        debug!(target: "Bitcask", "Bitcask shutdown. instanceId = {}", self.instance_id);
+        debug!(target: "Bitcasky", "Bitcask shutdown. instanceId = {}", self.instance_id);
     }
 }
 
-fn validate_database_directory(dir: &Path) -> BitcaskResult<()> {
+fn validate_database_directory(dir: &Path) -> BitcaskyResult<()> {
     std::fs::create_dir_all(dir)?;
     if !fs::check_directory_is_writable(dir) {
-        return Err(BitcaskError::PermissionDenied(format!(
+        return Err(BitcaskyError::PermissionDenied(format!(
             "do not have writable permission for path: {}",
             dir.display()
         )));

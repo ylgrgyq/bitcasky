@@ -1,10 +1,10 @@
-use database::DatabaseError;
+use bitcasky_database::DatabaseError;
 use thiserror::Error;
 
-use common::formatter::FormatterError;
+use bitcasky_common::formatter::FormatterError;
 
 #[derive(Error, Debug)]
-pub enum BitcaskError {
+pub enum BitcaskyError {
     #[error(transparent)]
     IoError(#[from] std::io::Error),
     #[error("Permission Denied: \"{0}\"")]
@@ -25,4 +25,4 @@ pub enum BitcaskError {
     DatabaseError(#[from] DatabaseError),
 }
 
-pub type BitcaskResult<T> = Result<T, BitcaskError>;
+pub type BitcaskyResult<T> = Result<T, BitcaskyError>;

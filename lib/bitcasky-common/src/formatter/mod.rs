@@ -124,28 +124,28 @@ pub trait Formatter: std::marker::Send + 'static + Copy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum BitcaskFormatter {
+pub enum BitcaskyFormatter {
     V1(FormatterV1),
 }
 
-impl BitcaskFormatter {
+impl BitcaskyFormatter {
     pub fn version(&self) -> u8 {
         match self {
-            BitcaskFormatter::V1(_) => FORMATTER_V1_VERSION,
+            BitcaskyFormatter::V1(_) => FORMATTER_V1_VERSION,
         }
     }
 }
 
-impl Formatter for BitcaskFormatter {
+impl Formatter for BitcaskyFormatter {
     fn row_header_size(&self) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.row_header_size(),
+            BitcaskyFormatter::V1(f) => f.row_header_size(),
         }
     }
 
     fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.net_row_size(row),
+            BitcaskyFormatter::V1(f) => f.net_row_size(row),
         }
     }
 
@@ -155,62 +155,62 @@ impl Formatter for BitcaskFormatter {
         output: &mut [u8],
     ) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.encode_row(row, output),
+            BitcaskyFormatter::V1(f) => f.encode_row(row, output),
         }
     }
 
     fn decode_row_header(&self, bs: &[u8]) -> RowHeader {
         match self {
-            BitcaskFormatter::V1(f) => f.decode_row_header(bs),
+            BitcaskyFormatter::V1(f) => f.decode_row_header(bs),
         }
     }
 
     fn validate_key_value(&self, header: &RowHeader, kv: &[u8]) -> Result<()> {
         match self {
-            BitcaskFormatter::V1(f) => f.validate_key_value(header, kv),
+            BitcaskyFormatter::V1(f) => f.validate_key_value(header, kv),
         }
     }
 
     fn row_hint_header_size(&self) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.row_hint_header_size(),
+            BitcaskyFormatter::V1(f) => f.row_hint_header_size(),
         }
     }
 
     fn encode_row_hint(&self, hint: &RowHint, output: &mut [u8]) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.encode_row_hint(hint, output),
+            BitcaskyFormatter::V1(f) => f.encode_row_hint(hint, output),
         }
     }
 
     fn decode_row_hint_header(&self, header_bs: &[u8]) -> RowHintHeader {
         match self {
-            BitcaskFormatter::V1(f) => f.decode_row_hint_header(header_bs),
+            BitcaskyFormatter::V1(f) => f.decode_row_hint_header(header_bs),
         }
     }
 
     fn merge_meta_size(&self) -> usize {
         match self {
-            BitcaskFormatter::V1(f) => f.merge_meta_size(),
+            BitcaskyFormatter::V1(f) => f.merge_meta_size(),
         }
     }
 
     fn encode_merge_meta(&self, meta: &MergeMeta) -> Bytes {
         match self {
-            BitcaskFormatter::V1(f) => f.encode_merge_meta(meta),
+            BitcaskyFormatter::V1(f) => f.encode_merge_meta(meta),
         }
     }
 
     fn decode_merge_meta(&self, meta: Bytes) -> MergeMeta {
         match self {
-            BitcaskFormatter::V1(f) => f.decode_merge_meta(meta),
+            BitcaskyFormatter::V1(f) => f.decode_merge_meta(meta),
         }
     }
 }
 
-impl Default for BitcaskFormatter {
+impl Default for BitcaskyFormatter {
     fn default() -> Self {
-        BitcaskFormatter::V1(FormatterV1::default())
+        BitcaskyFormatter::V1(FormatterV1::default())
     }
 }
 
@@ -226,7 +226,7 @@ pub fn initialize_new_file(file: &mut File, version: u8) -> std::io::Result<()> 
     Ok(())
 }
 
-pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
+pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskyFormatter> {
     let mut file_header = vec![0; FILE_HEADER_SIZE];
 
     file.read_exact(&mut file_header)
@@ -238,7 +238,7 @@ pub fn get_formatter_from_file(file: &mut File) -> Result<BitcaskFormatter> {
 
     let formatter_version = file_header[3];
     if formatter_version == FORMATTER_V1_VERSION {
-        return Ok(BitcaskFormatter::V1(FormatterV1::default()));
+        return Ok(BitcaskyFormatter::V1(FormatterV1::default()));
     }
 
     Err(FormatterError::UnknownFormatterVersion(formatter_version))
@@ -263,7 +263,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let mut file = create_file(&dir, FileType::DataFile, Some(storage_id)).unwrap();
-        let init_formatter = BitcaskFormatter::V1(FormatterV1::default());
+        let init_formatter = BitcaskyFormatter::V1(FormatterV1::default());
         initialize_new_file(&mut file, init_formatter.version()).unwrap();
 
         let mut file = open_file(&dir, FileType::DataFile, Some(storage_id))
@@ -271,7 +271,7 @@ mod tests {
             .file;
 
         let read_formatter = get_formatter_from_file(&mut file).unwrap();
-        assert_matches!(read_formatter, BitcaskFormatter::V1(_));
+        assert_matches!(read_formatter, BitcaskyFormatter::V1(_));
         assert_eq!(init_formatter, read_formatter);
     }
 

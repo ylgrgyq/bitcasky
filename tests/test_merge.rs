@@ -1,14 +1,14 @@
 use std::time::Duration;
 
-use bitcask::bitcask::Bitcask;
-use common::options::BitcaskOptions;
+use bitcasky::bitcasky::Bitcasky;
+use bitcasky_common::options::BitcaskyOptions;
 use test_log::test;
 use utilities::common::get_temporary_directory_path;
 
 #[test]
 fn test_merge_delete_no_remain() {
     let db_path = get_temporary_directory_path();
-    let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+    let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();
     bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -26,7 +26,7 @@ fn test_merge_delete_no_remain() {
 #[test]
 fn test_merge_has_remain() {
     let db_path = get_temporary_directory_path();
-    let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+    let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k2".into(), "value2".as_bytes()).unwrap();
     bc.put("k3".into(), "value3".as_bytes()).unwrap();
@@ -46,7 +46,7 @@ fn test_merge_has_remain() {
 #[test]
 fn test_merge_duplicate() {
     let db_path = get_temporary_directory_path();
-    let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+    let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
     bc.put("k1".into(), "value1".as_bytes()).unwrap();
     bc.put("k1".into(), "value2".as_bytes()).unwrap();
     bc.put("k1".into(), "value3".as_bytes()).unwrap();
@@ -65,13 +65,13 @@ fn test_merge_duplicate() {
 fn test_merge_recover_after_merge() {
     let db_path = get_temporary_directory_path();
     {
-        let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+        let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
         bc.put("k2".into(), "value3value3".as_bytes()).unwrap();
         bc.put("k4".into(), "value4value4".as_bytes()).unwrap();
     }
 
     {
-        let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+        let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
         // duplicate
         bc.put("k1".into(), "value1".as_bytes()).unwrap();
         bc.put("k1".into(), "value2".as_bytes()).unwrap();
@@ -92,7 +92,7 @@ fn test_merge_recover_after_merge() {
         bc.merge().unwrap();
     }
 
-    let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+    let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
     assert_eq!(
         bc.get(&"k2".into()).unwrap().unwrap(),
         "value2value3".as_bytes()
@@ -107,7 +107,7 @@ fn test_merge_recover_after_merge() {
 fn test_recover_expirable_value() {
     let db_path = get_temporary_directory_path();
     {
-        let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+        let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
         bc.put("importalK1".into(), "value1".as_bytes()).unwrap();
         bc.put_with_ttl(
             "expireToImortalK2".into(),
@@ -132,7 +132,7 @@ fn test_recover_expirable_value() {
     }
 
     {
-        let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+        let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
         bc.put("importalK1".into(), "value1value1".as_bytes())
             .unwrap();
         bc.put("expireToImortalK2".into(), "value2value2".as_bytes())
@@ -147,7 +147,7 @@ fn test_recover_expirable_value() {
         bc.merge().unwrap();
     }
 
-    let bc = Bitcask::open(&db_path, BitcaskOptions::default()).unwrap();
+    let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
     assert_eq!(
         bc.get(&"importalK1".into()).unwrap().unwrap(),
         "value1value1".as_bytes()

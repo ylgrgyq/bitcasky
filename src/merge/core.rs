@@ -10,18 +10,18 @@ use bytes::Bytes;
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
-use common::{
+use bitcasky_common::{
     formatter::{
-        get_formatter_from_file, initialize_new_file, BitcaskFormatter, Formatter, MergeMeta,
+        get_formatter_from_file, initialize_new_file, BitcaskyFormatter, Formatter, MergeMeta,
     },
     fs::{self, FileType},
-    options::BitcaskOptions,
+    options::BitcaskyOptions,
     storage_id::{StorageId, StorageIdGenerator},
 };
-use database::{Database, TimedValue};
+use bitcasky_database::{Database, TimedValue};
 
 use crate::{
-    error::{BitcaskError, BitcaskResult},
+    error::{BitcaskyError, BitcaskyResult},
     keydir::KeyDir,
 };
 
@@ -38,7 +38,7 @@ pub struct MergeManager {
     database_dir: PathBuf,
     merge_lock: Mutex<()>,
     storage_id_generator: Arc<StorageIdGenerator>,
-    options: Arc<BitcaskOptions>,
+    options: Arc<BitcaskyOptions>,
 }
 
 impl MergeManager {
@@ -46,7 +46,7 @@ impl MergeManager {
         instance_id: String,
         database_dir: &Path,
         storage_id_generator: Arc<StorageIdGenerator>,
-        options: Arc<BitcaskOptions>,
+        options: Arc<BitcaskyOptions>,
     ) -> MergeManager {
         MergeManager {
             instance_id,
@@ -57,17 +57,17 @@ impl MergeManager {
         }
     }
 
-    pub fn merge(&self, database: &Database, keydir: &RwLock<KeyDir>) -> BitcaskResult<()> {
+    pub fn merge(&self, database: &Database, keydir: &RwLock<KeyDir>) -> BitcaskyResult<()> {
         let lock_ret = self.merge_lock.try_lock();
 
         if lock_ret.is_none() {
-            return Err(BitcaskError::MergeInProgress());
+            return Err(BitcaskyError::MergeInProgress());
         }
 
         let start = Instant::now();
         let (kd, known_max_storage_id) = self.flush_writing_file(database, keydir)?;
 
-        debug!(target: "Bitcask", "start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_storage_id);
+        debug!(target: "Bitcasky", "start merging. instanceId: {}, knownMaxFileId {}", self.instance_id, known_max_storage_id);
 
         let merge_dir_path = create_merge_file_dir(database.get_database_dir())?;
         let (storage_ids, merged_key_dir) =
@@ -81,11 +81,11 @@ impl MergeManager {
                 .and_then(|storage_ids| {
                     database
                         .reload_data_files(storage_ids)
-                        .map_err(BitcaskError::DatabaseError)
+                        .map_err(BitcaskyError::DatabaseError)
                 })
                 .map_err(|e| {
                     database.mark_db_error(e.to_string());
-                    error!(target: "Bitcask", "database commit merge failed with error: {}", &e);
+                    error!(target: "Bitcasky", "database commit merge failed with error: {}", &e);
                     e
                 })?;
 
@@ -94,22 +94,22 @@ impl MergeManager {
             }
         }
 
-        info!(target: "Bitcask", "purge files with id smaller than: {}", known_max_storage_id);
+        info!(target: "Bitcasky", "purge files with id smaller than: {}", known_max_storage_id);
 
         purge_outdated_data_files(&database.database_dir, known_max_storage_id)?;
         let delete_ret = fs::delete_dir(&merge_dir_path);
         if delete_ret.is_err() {
-            warn!(target: "Bitcask", "delete merge directory failed. {}", delete_ret.unwrap_err());
+            warn!(target: "Bitcasky", "delete merge directory failed. {}", delete_ret.unwrap_err());
         }
 
-        info!(target: "Bitcask", "merge success. instanceId: {}, knownMaxFileId {}, cost: {} millis",
+        info!(target: "Bitcasky", "merge success. instanceId: {}, knownMaxFileId {}, cost: {} millis",
           self.instance_id, known_max_storage_id, start.elapsed().as_millis());
 
         Ok(())
     }
 
-    pub fn recover_merge(&self) -> BitcaskResult<()> {
-        debug!(target: "Bitcask", "start recover merge");
+    pub fn recover_merge(&self) -> BitcaskyResult<()> {
+        debug!(target: "Bitcasky", "start recover merge");
         let recover_ret = self.do_recover_merge();
         if let Err(err) = recover_ret {
             let merge_dir = merge_file_dir(&self.database_dir);
@@ -119,7 +119,7 @@ impl MergeManager {
                 err
             );
             match err {
-                BitcaskError::InvalidMergeDataFile(_, _) => {
+                BitcaskyError::InvalidMergeDataFile(_, _) => {
                     // clear Merge directory when recover merge failed
                     fs::delete_dir(&merge_file_dir(&self.database_dir))?;
                 }
@@ -135,7 +135,7 @@ impl MergeManager {
         }
     }
 
-    fn do_recover_merge(&self) -> BitcaskResult<()> {
+    fn do_recover_merge(&self) -> BitcaskyResult<()> {
         let merge_file_dir = merge_file_dir(&self.database_dir);
 
         if !merge_file_dir.exists() {
@@ -151,7 +151,7 @@ impl MergeManager {
         merge_data_storage_ids.sort();
         let merge_meta = read_merge_meta(&merge_file_dir)?;
         if *merge_data_storage_ids.first().unwrap() <= merge_meta.known_max_storage_id {
-            return Err(BitcaskError::InvalidMergeDataFile(
+            return Err(BitcaskyError::InvalidMergeDataFile(
                 merge_meta.known_max_storage_id,
                 *merge_data_storage_ids.first().unwrap(),
             ));
@@ -177,7 +177,7 @@ impl MergeManager {
         &self,
         database: &Database,
         keydir: &RwLock<KeyDir>,
-    ) -> BitcaskResult<(KeyDir, StorageId)> {
+    ) -> BitcaskyResult<(KeyDir, StorageId)> {
         // stop writing and switch the writing file to stable files
         let _kd = keydir.write();
         database.flush_writing_file()?;
@@ -191,7 +191,7 @@ impl MergeManager {
         merge_file_dir: &Path,
         key_dir_to_write: &KeyDir,
         known_max_storage_id: StorageId,
-    ) -> BitcaskResult<(Vec<StorageId>, KeyDir)> {
+    ) -> BitcaskyResult<(Vec<StorageId>, KeyDir)> {
         write_merge_meta(
             merge_file_dir,
             MergeMeta {
@@ -213,7 +213,7 @@ impl MergeManager {
                 let pos =
                     merge_db.write(k, TimedValue::expirable_value(v.value, v.expire_timestamp))?;
                 merged_key_dir.checked_put(k.clone(), pos);
-                debug!(target: "Bitcask", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, expire_timestamp: {}", 
+                debug!(target: "Bitcasky", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, expire_timestamp: {}", 
                 k, pos.storage_id, pos.row_offset, v.expire_timestamp);
                 write_key_count += 1;
             }
@@ -221,7 +221,7 @@ impl MergeManager {
 
         merge_db.flush_writing_file()?;
         let storage_ids = merge_db.get_storage_ids();
-        info!(target: "Bitcask", "{} keys in database merged to files with ids: {:?}", write_key_count, &storage_ids.stable_storage_ids);
+        info!(target: "Bitcasky", "{} keys in database merged to files with ids: {:?}", write_key_count, &storage_ids.stable_storage_ids);
         // we do not write anything in writing file
         // so we can only use stable files
         Ok((storage_ids.stable_storage_ids, merged_key_dir))
@@ -231,7 +231,7 @@ impl MergeManager {
         &self,
         merged_storage_ids: &Vec<StorageId>,
         known_max_storage_id: StorageId,
-    ) -> BitcaskResult<Vec<StorageId>> {
+    ) -> BitcaskyResult<Vec<StorageId>> {
         let mut data_storage_ids = self.shift_data_files(known_max_storage_id)?;
 
         commit_merge_files(&self.database_dir, merged_storage_ids)?;
@@ -241,7 +241,7 @@ impl MergeManager {
         Ok(data_storage_ids)
     }
 
-    fn shift_data_files(&self, known_max_storage_id: StorageId) -> BitcaskResult<Vec<StorageId>> {
+    fn shift_data_files(&self, known_max_storage_id: StorageId) -> BitcaskyResult<Vec<StorageId>> {
         let mut data_storage_ids =
             fs::get_storage_ids_in_dir(&self.database_dir, FileType::DataFile)
                 .into_iter()
@@ -271,7 +271,7 @@ fn merge_file_dir(base_dir: &Path) -> PathBuf {
     base_dir.join(MERGE_FILES_DIRECTORY)
 }
 
-fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
+fn create_merge_file_dir(base_dir: &Path) -> BitcaskyResult<PathBuf> {
     let merge_dir_path = merge_file_dir(base_dir);
 
     fs::create_dir(&merge_dir_path)?;
@@ -307,7 +307,7 @@ fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
                 "delete merge directory failed. {}",
                 delete_ret.unwrap_err()
             );
-            return Err(BitcaskError::MergeFileDirectoryNotEmpty(
+            return Err(BitcaskyError::MergeFileDirectoryNotEmpty(
                 merge_dir_path.display().to_string(),
             ));
         }
@@ -316,7 +316,7 @@ fn create_merge_file_dir(base_dir: &Path) -> BitcaskResult<PathBuf> {
     Ok(merge_dir_path)
 }
 
-fn commit_merge_files(base_dir: &Path, storage_ids: &Vec<StorageId>) -> BitcaskResult<()> {
+fn commit_merge_files(base_dir: &Path, storage_ids: &Vec<StorageId>) -> BitcaskyResult<()> {
     let merge_dir_path = merge_file_dir(base_dir);
     for storage_id in storage_ids {
         fs::move_file(
@@ -335,7 +335,7 @@ fn commit_merge_files(base_dir: &Path, storage_ids: &Vec<StorageId>) -> BitcaskR
     Ok(())
 }
 
-fn purge_outdated_data_files(base_dir: &Path, max_storage_id: StorageId) -> BitcaskResult<()> {
+fn purge_outdated_data_files(base_dir: &Path, max_storage_id: StorageId) -> BitcaskyResult<()> {
     fs::get_storage_ids_in_dir(base_dir, FileType::DataFile)
         .iter()
         .filter(|id| **id < max_storage_id)
@@ -346,10 +346,10 @@ fn purge_outdated_data_files(base_dir: &Path, max_storage_id: StorageId) -> Bitc
     Ok(())
 }
 
-fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
+fn read_merge_meta(merge_file_dir: &Path) -> BitcaskyResult<MergeMeta> {
     let mut merge_meta_file = fs::open_file(merge_file_dir, FileType::MergeMeta, None)?;
     let formatter = get_formatter_from_file(&mut merge_meta_file.file).map_err(|e| {
-        BitcaskError::MergeMetaFileCorrupted(e, merge_meta_file.path.display().to_string())
+        BitcaskyError::MergeMetaFileCorrupted(e, merge_meta_file.path.display().to_string())
     })?;
 
     let mut buf = vec![0; formatter.merge_meta_size()];
@@ -358,9 +358,9 @@ fn read_merge_meta(merge_file_dir: &Path) -> BitcaskResult<MergeMeta> {
     Ok(formatter.decode_merge_meta(bs))
 }
 
-fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResult<()> {
+fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskyResult<()> {
     let mut merge_meta_file = fs::create_file(merge_file_dir, FileType::MergeMeta, None)?;
-    let formater = BitcaskFormatter::default();
+    let formater = BitcaskyFormatter::default();
     initialize_new_file(&mut merge_meta_file, formater.version())?;
     merge_meta_file.write_all(&formater.encode_merge_meta(&merge_meta))?;
     Ok(())
@@ -370,11 +370,11 @@ fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskResu
 mod tests {
     use std::{time::Duration, vec};
 
-    use common::{
-        formatter::{initialize_new_file, BitcaskFormatter},
+    use bitcasky_common::{
+        formatter::{initialize_new_file, BitcaskyFormatter},
         fs::FileType,
     };
-    use database::RowLocation;
+    use bitcasky_database::RowLocation;
 
     use super::*;
     use test_log::test;
@@ -392,9 +392,9 @@ mod tests {
         }
     }
 
-    fn get_options() -> Arc<BitcaskOptions> {
+    fn get_options() -> Arc<BitcaskyOptions> {
         Arc::new(
-            BitcaskOptions::default()
+            BitcaskyOptions::default()
                 .sync_interval(Duration::from_secs(60))
                 .init_hint_file_capacity(1024)
                 .max_data_file_size(1024)
@@ -449,7 +449,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let merge_file_path = create_merge_file_dir(&dir).unwrap();
         let mut file = fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap();
-        initialize_new_file(&mut file, BitcaskFormatter::default().version()).unwrap();
+        initialize_new_file(&mut file, BitcaskyFormatter::default().version()).unwrap();
 
         create_merge_file_dir(&dir).unwrap();
 
@@ -473,17 +473,17 @@ mod tests {
         let merge_file_path = create_merge_file_dir(&dir_path).unwrap();
         initialize_new_file(
             &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(0)).unwrap(),
-            BitcaskFormatter::default().version(),
+            BitcaskyFormatter::default().version(),
         )
         .unwrap();
         initialize_new_file(
             &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(1)).unwrap(),
-            BitcaskFormatter::default().version(),
+            BitcaskyFormatter::default().version(),
         )
         .unwrap();
         initialize_new_file(
             &mut fs::create_file(&merge_file_path, FileType::DataFile, Some(2)).unwrap(),
-            BitcaskFormatter::default().version(),
+            BitcaskyFormatter::default().version(),
         )
         .unwrap();
 
