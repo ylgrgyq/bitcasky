@@ -9,15 +9,14 @@ Bitcask-rs is a Rust implementation of the Bitcask key-value store. Bitcask is a
 - Append-only storage for durability and consistency
 - Memory-mapped files for efficient I/O
 - Key-value storage with O(1) read and write performance
-- Automatic compaction to reduce disk usage and improve read performance
 
 ## Usage
 
-To use Bitcask-rs, simply add it to your `Cargo.toml` file:
+To use Bitcask, simply add it to your `Cargo.toml` file:
 
 ```
 [dependencies]
-bitcask-rs = "0.1.0"
+bitcask = "0.1.0"
 
 ```
 
