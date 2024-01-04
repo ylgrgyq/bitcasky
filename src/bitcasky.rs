@@ -74,14 +74,18 @@ impl Bitcasky {
     }
 
     /// Stores the key and value in the database.
-    pub fn put<V: Deref<Target = [u8]>>(&self, key: Vec<u8>, value: V) -> BitcaskyResult<()> {
+    pub fn put<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &self,
+        key: K,
+        value: V,
+    ) -> BitcaskyResult<()> {
         self.do_put(key, TimedValue::immortal_value(value))
     }
 
     /// Stores the key, value in the database and set a expire time with this value.
-    pub fn put_with_ttl<V: Deref<Target = [u8]>>(
+    pub fn put_with_ttl<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &self,
-        key: Vec<u8>,
+        key: K,
         value: V,
         ttl: Duration,
     ) -> BitcaskyResult<()> {
@@ -99,10 +103,15 @@ impl Bitcasky {
     }
 
     /// Fetches value for a key
-    pub fn get(&self, key: &Vec<u8>) -> BitcaskyResult<Option<Vec<u8>>> {
+    pub fn get<K: AsRef<[u8]>>(&self, key: K) -> BitcaskyResult<Option<Vec<u8>>> {
         self.database.check_db_error()?;
 
-        let row_pos = { self.keydir.read().get(key).map(|r| *r.value()) };
+        let row_pos = {
+            self.keydir
+                .read()
+                .get(&key.as_ref().into())
+                .map(|r| *r.value())
+        };
 
         match row_pos {
             Some(e) => {
@@ -185,13 +194,13 @@ impl Bitcasky {
     }
 
     /// Deletes the named key.
-    pub fn delete(&self, key: &Vec<u8>) -> BitcaskyResult<()> {
+    pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> BitcaskyResult<()> {
         self.database.check_db_error()?;
         let kd = self.keydir.write();
 
-        if kd.contains_key(key) {
-            self.database.write(key, deleted_value())?;
-            kd.delete(key);
+        if kd.contains_key(&key.as_ref().into()) {
+            self.database.write(&key, deleted_value())?;
+            kd.delete(&key.as_ref().into());
         }
 
         Ok(())
@@ -236,12 +245,12 @@ impl Bitcasky {
         }
     }
 
-    pub fn do_put<V: Deref<Target = [u8]>>(
+    pub fn do_put<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &self,
-        key: Vec<u8>,
+        key: K,
         value: TimedValue<V>,
     ) -> BitcaskyResult<()> {
-        if key.len() > self.options.max_key_size {
+        if key.as_ref().len() > self.options.max_key_size {
             return Err(BitcaskyError::InvalidParameter(
                 "key".into(),
                 "key size overflow".into(),
@@ -265,8 +274,8 @@ impl Bitcasky {
         })?;
 
         debug!(target: "Bitcasky", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
-            key, ret.storage_id, ret.row_offset);
-        kd.put(key, ret);
+            key.as_ref(), ret.storage_id, ret.row_offset);
+        kd.put(key.as_ref().into(), ret);
         Ok(())
     }
 }

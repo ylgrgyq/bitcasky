@@ -52,7 +52,10 @@ pub enum DataStorageError {
 pub type Result<T> = std::result::Result<T, DataStorageError>;
 
 pub trait DataStorageWriter {
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation>;
+    fn write_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &mut self,
+        row: &RowToWrite<K, V>,
+    ) -> Result<RowLocation>;
 
     fn rewind(&mut self) -> Result<()>;
 
@@ -235,7 +238,10 @@ impl DataStorage {
 }
 
 impl DataStorageWriter for DataStorage {
-    fn write_row<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<RowLocation> {
+    fn write_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &mut self,
+        row: &RowToWrite<K, V>,
+    ) -> Result<RowLocation> {
         let r = match &mut self.storage_impl {
             DataStorageImpl::MmapStorage(s) => s.write_row(row),
         }?;

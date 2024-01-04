@@ -37,7 +37,7 @@ impl FormatterV1 {
         ck.update(&meta.expire_timestamp.to_be_bytes());
         ck.update(&meta.key_size.to_be_bytes());
         ck.update(&value.len().to_be_bytes());
-        ck.update(key);
+        ck.update(key.as_ref());
         ck.update(value);
         ck.finalize()
     }
@@ -58,18 +58,25 @@ impl Formatter for FormatterV1 {
         DATA_FILE_KEY_OFFSET
     }
 
-    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
-        self.row_header_size() + row.key.len() + row.value.len()
+    fn net_row_size<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &self,
+        row: &RowToWrite<K, V>,
+    ) -> usize {
+        self.row_header_size() + row.key.as_ref().len() + row.value.len()
     }
 
-    fn encode_row<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>, bs: &mut [u8]) -> usize {
-        let crc = self.gen_crc(&row.meta, row.key, &row.value);
+    fn encode_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &self,
+        row: &RowToWrite<K, V>,
+        bs: &mut [u8],
+    ) -> usize {
+        let crc = self.gen_crc(&row.meta, row.key.as_ref(), &row.value);
         LittleEndian::write_u32(bs, crc);
         LittleEndian::write_u64(&mut bs[4..], row.meta.expire_timestamp);
         LittleEndian::write_u64(&mut bs[12..], row.meta.key_size as u64);
         LittleEndian::write_u64(&mut bs[20..], row.meta.value_size as u64);
-        copy_memory(row.key, &mut bs[28..]);
-        copy_memory(&row.value, &mut bs[28 + row.key.len()..]);
+        copy_memory(row.key.as_ref(), &mut bs[28..]);
+        copy_memory(&row.value, &mut bs[28 + row.key.as_ref().len()..]);
         self.net_row_size(row)
     }
 
@@ -197,7 +204,7 @@ mod tests {
                 key_size: k.len(),
                 value_size: v.len(),
             },
-            key: &k,
+            key: k,
             value: v,
         };
 

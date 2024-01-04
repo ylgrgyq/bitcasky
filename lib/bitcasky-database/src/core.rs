@@ -134,13 +134,13 @@ impl Database {
         writing_file_ref.storage_id()
     }
 
-    pub fn write<V: Deref<Target = [u8]>>(
+    pub fn write<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &self,
-        key: &Vec<u8>,
+        key: K,
         value: TimedValue<V>,
     ) -> DatabaseResult<RowLocation> {
         let ts = value.expire_timestamp;
-        let row: RowToWrite<'_, TimedValue<V>> = RowToWrite::new_with_timestamp(key, value, ts);
+        let row: RowToWrite<K, TimedValue<V>> = RowToWrite::new_with_timestamp(key, value, ts);
         let mut writing_file_ref = self.writing_storage.lock();
 
         match writing_file_ref.write_row(&row) {
@@ -717,7 +717,7 @@ pub mod database_tests {
     pub fn write_kv_to_db(db: &Database, kv: TestingKV) -> TestingRow {
         let pos = db
             .write(
-                &kv.key(),
+                kv.key(),
                 TimedValue::expirable_value(kv.value(), kv.expire_timestamp()),
             )
             .unwrap();

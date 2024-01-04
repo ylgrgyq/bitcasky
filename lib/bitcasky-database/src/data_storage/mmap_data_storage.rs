@@ -57,7 +57,10 @@ impl MmapDataStorage {
         })
     }
 
-    fn ensure_capacity<V: Deref<Target = [u8]>>(&mut self, row: &RowToWrite<V>) -> Result<()> {
+    fn ensure_capacity<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &mut self,
+        row: &RowToWrite<K, V>,
+    ) -> Result<()> {
         let mut row_size = self.formatter.net_row_size(row);
         row_size += padding(row_size);
         let required_capacity = row_size + self.offset;
@@ -145,9 +148,9 @@ impl MmapDataStorage {
 }
 
 impl DataStorageWriter for MmapDataStorage {
-    fn write_row<V: std::ops::Deref<Target = [u8]>>(
+    fn write_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &mut self,
-        row: &bitcasky_common::formatter::RowToWrite<V>,
+        row: &bitcasky_common::formatter::RowToWrite<K, V>,
     ) -> super::Result<crate::RowLocation> {
         self.ensure_capacity(row)?;
 
@@ -282,12 +285,12 @@ mod tests {
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> = RowToWrite::new(k1, v1.clone());
         let row_location1 = storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
+        let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> = RowToWrite::new(k2, v2.clone());
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
         assert_eq!(
@@ -314,14 +317,14 @@ mod tests {
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k1, v1.clone(), time);
+        let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> =
+            RowToWrite::new_with_timestamp(k1, v1.clone(), time);
         let row_location1 = storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
-            RowToWrite::new_with_timestamp(&k2, v2.clone(), time + 1);
+        let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> =
+            RowToWrite::new_with_timestamp(k2, v2.clone(), time + 1);
         let row_location2 = storage.write_row(&row_to_write).unwrap();
 
         assert!(storage
@@ -351,7 +354,7 @@ mod tests {
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> = RowToWrite::new(k1, v1.clone());
         storage.write_row(&row_to_write).expect_err("overflow");
     }
 
@@ -368,7 +371,7 @@ mod tests {
 
             let k1: Vec<u8> = format!("key{}", i).into();
             let v1: Vec<u8> = format!("value{}", i).into();
-            let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+            let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> = RowToWrite::new(k1, v1.clone());
             storage.write_row(&row_to_write).unwrap();
             let net_size = storage.formatter.net_row_size(&row_to_write);
             size += net_size + padding(net_size);
@@ -383,12 +386,12 @@ mod tests {
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        let row_to_write: RowToWrite<&[u8], Vec<u8>> = RowToWrite::new(&k1, v1.clone());
         storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k2, v2.clone());
+        let row_to_write: RowToWrite<&[u8], Vec<u8>> = RowToWrite::new(&k2, v2.clone());
         storage.write_row(&row_to_write).unwrap();
 
         storage.rewind().unwrap();
@@ -410,13 +413,13 @@ mod tests {
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
+        let row_to_write: RowToWrite<&[u8], Vec<u8>> =
             RowToWrite::new_with_timestamp(&k1, v1.clone(), time + 1);
         storage.write_row(&row_to_write).unwrap();
 
         let k2: Vec<u8> = "key2".into();
         let v2: Vec<u8> = "value2".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> =
+        let row_to_write: RowToWrite<&[u8], Vec<u8>> =
             RowToWrite::new_with_timestamp(&k2, v2.clone(), time);
         storage.write_row(&row_to_write).unwrap();
 
@@ -452,7 +455,7 @@ mod tests {
 
         let k1: Vec<u8> = "key1".into();
         let v1: Vec<u8> = "value1".into();
-        let row_to_write: RowToWrite<'_, Vec<u8>> = RowToWrite::new(&k1, v1.clone());
+        let row_to_write: RowToWrite<Vec<u8>, Vec<u8>> = RowToWrite::new(k1, v1.clone());
         let location = storage.write_row(&row_to_write).unwrap();
         storage.rewind().unwrap();
 
