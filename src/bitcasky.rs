@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -74,16 +73,12 @@ impl Bitcasky {
     }
 
     /// Stores the key and value in the database.
-    pub fn put<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
-        &self,
-        key: K,
-        value: V,
-    ) -> BitcaskyResult<()> {
+    pub fn put<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V) -> BitcaskyResult<()> {
         self.do_put(key, TimedValue::immortal_value(value))
     }
 
     /// Stores the key, value in the database and set a expire time with this value.
-    pub fn put_with_ttl<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+    pub fn put_with_ttl<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         key: K,
         value: V,
@@ -250,7 +245,7 @@ impl Bitcasky {
         }
     }
 
-    pub fn do_put<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+    pub fn do_put<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         key: K,
         value: TimedValue<V>,

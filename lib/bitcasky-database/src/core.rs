@@ -1,7 +1,6 @@
 use std::{
     cell::Cell,
     mem,
-    ops::Deref,
     path::{Path, PathBuf},
     sync::Arc,
     thread::{self, JoinHandle},
@@ -134,7 +133,7 @@ impl Database {
         writing_file_ref.storage_id()
     }
 
-    pub fn write<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+    pub fn write<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         key: K,
         value: TimedValue<V>,

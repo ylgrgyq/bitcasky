@@ -29,8 +29,8 @@ use bitcasky::Bitcasky;
 fn main() {
     let mut db = Bitcasky::open("/path/to/db", BitcaskyOptions::default()).unwrap()
 
-    db.put(b"key", b"value").unwrap();
-    let value = db.get(b"key").unwrap();
+    db.put("key", "value").unwrap();
+    let value = db.get("key").unwrap();
 
     println!("{:?}", value);
 }
@@ -44,8 +44,8 @@ use bitcasky::Bitcasky;
 fn main() {
     let mut db = Bitcasky::open("/path/to/db", BitcaskyOptions::default()).unwrap()
 
-    db.put_with_ttl(b"key", b"value", Duration::from_secs(60)).unwrap();
-    let value = db.get(b"key").unwrap();
+    db.put_with_ttl("key", "value", Duration::from_secs(60)).unwrap();
+    let value = db.get("key").unwrap();
 
     println!("{:?}", value);
 }

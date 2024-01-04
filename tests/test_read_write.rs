@@ -44,10 +44,10 @@ fn test_open_db_twice() {
 fn test_read_write_writing_file() {
     let dir = get_temporary_directory_path();
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
-    bc.put("k1", "value1".as_bytes()).unwrap();
-    bc.put("k2", "value2".as_bytes()).unwrap();
-    bc.put("k3", "value3".as_bytes()).unwrap();
-    bc.put("k1", "value4".as_bytes()).unwrap();
+    bc.put("k1", "value1").unwrap();
+    bc.put("k2", "value2").unwrap();
+    bc.put("k3", "value3").unwrap();
+    bc.put("k1", "value4").unwrap();
 
     assert_eq!(bc.get("k1").unwrap().unwrap(), "value4".as_bytes());
     assert_eq!(bc.get("k2").unwrap().unwrap(), "value2".as_bytes());
@@ -115,10 +115,10 @@ fn test_recovery() {
 fn test_delete() {
     let dir = get_temporary_directory_path();
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
-    bc.put("k1", "value1".as_bytes()).unwrap();
-    bc.put("k2", "value2".as_bytes()).unwrap();
-    bc.put("k3", "value3".as_bytes()).unwrap();
-    bc.put("k1", "value4".as_bytes()).unwrap();
+    bc.put("k1", "value1").unwrap();
+    bc.put("k2", "value2").unwrap();
+    bc.put("k3", "value3").unwrap();
+    bc.put("k1", "value4").unwrap();
 
     bc.delete("k1").unwrap();
     assert_eq!(bc.get("k1").unwrap(), None);
