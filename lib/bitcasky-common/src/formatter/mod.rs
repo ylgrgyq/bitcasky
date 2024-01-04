@@ -54,7 +54,7 @@ pub struct RowHint {
     pub key: Vec<u8>,
 }
 
-impl<'a, K: AsRef<[u8]>, V: Deref<Target = [u8]>> RowToWrite<K, V> {
+impl<K: AsRef<[u8]>, V: Deref<Target = [u8]>> RowToWrite<K, V> {
     pub fn new(key: K, value: V) -> RowToWrite<K, V> {
         RowToWrite::new_with_timestamp(key, value, 0)
     }

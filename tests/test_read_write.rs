@@ -67,7 +67,7 @@ fn test_random_put_and_delete() {
     execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
-        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+        assert_eq!(bc.get(op.key()).unwrap().unwrap(), op.value());
     }
 }
 
@@ -88,7 +88,7 @@ fn test_random_put_delete_merge() {
     execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
-        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+        assert_eq!(bc.get(op.key()).unwrap().unwrap(), op.value());
     }
 }
 
@@ -107,7 +107,7 @@ fn test_recovery() {
     }
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
     for op in ops.squash() {
-        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+        assert_eq!(bc.get(op.key()).unwrap().unwrap(), op.value());
     }
 }
 
@@ -136,13 +136,13 @@ fn test_delete_not_exists_key() {
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
 
     bc.delete("k1").unwrap();
-    assert_eq!(bc.get(&"k1").unwrap(), None);
+    assert_eq!(bc.get("k1").unwrap(), None);
 
     bc.delete("k2").unwrap();
-    assert_eq!(bc.get(&"k2").unwrap(), None);
+    assert_eq!(bc.get("k2").unwrap(), None);
 
     bc.delete("k3").unwrap();
-    assert_eq!(bc.get(&"k3").unwrap(), None);
+    assert_eq!(bc.get("k3").unwrap(), None);
 }
 
 #[test]

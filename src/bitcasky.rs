@@ -125,10 +125,15 @@ impl Bitcasky {
     }
 
     /// Returns true if the key exists in the database, false otherwise.
-    pub fn has(&self, key: &Vec<u8>) -> BitcaskyResult<bool> {
+    pub fn has<K: AsRef<[u8]>>(&self, key: K) -> BitcaskyResult<bool> {
         self.database.check_db_error()?;
 
-        Ok(self.keydir.read().get(key).map(|r| *r.value()).is_some())
+        Ok(self
+            .keydir
+            .read()
+            .get(&key.as_ref().into())
+            .map(|r| *r.value())
+            .is_some())
     }
 
     /// Iterates all the keys in database and apply each of them to the function f

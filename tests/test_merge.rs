@@ -12,9 +12,9 @@ fn test_merge_delete_no_remain() {
     bc.put("k1", "value1".as_bytes()).unwrap();
     bc.put("k2", "value2".as_bytes()).unwrap();
     bc.put("k3", "value3".as_bytes()).unwrap();
-    bc.delete(&"k1").unwrap();
-    bc.delete(&"k2").unwrap();
-    bc.delete(&"k3").unwrap();
+    bc.delete("k1").unwrap();
+    bc.delete("k2").unwrap();
+    bc.delete("k3").unwrap();
 
     bc.merge().unwrap();
 
@@ -31,9 +31,9 @@ fn test_merge_has_remain() {
     bc.put("k2", "value2".as_bytes()).unwrap();
     bc.put("k3", "value3".as_bytes()).unwrap();
     bc.put("k4", "value4".as_bytes()).unwrap();
-    bc.delete(&"k1").unwrap();
-    bc.delete(&"k2").unwrap();
-    bc.delete(&"k3").unwrap();
+    bc.delete("k1").unwrap();
+    bc.delete("k2").unwrap();
+    bc.delete("k3").unwrap();
 
     let before_merge_telemetry = bc.get_telemetry_data();
     bc.merge().unwrap();
@@ -85,16 +85,16 @@ fn test_merge_recover_after_merge() {
         bc.put("k4", "value4value4".as_bytes()).unwrap();
 
         // delete duplicate
-        bc.delete(&"k1").unwrap();
+        bc.delete("k1").unwrap();
         // delete plain key
-        bc.delete(&"k3").unwrap();
+        bc.delete("k3").unwrap();
 
         bc.merge().unwrap();
     }
 
     let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
-    assert_eq!(bc.get(&"k2").unwrap().unwrap(), "value2value3".as_bytes());
-    assert_eq!(bc.get(&"k4").unwrap().unwrap(), "value4value4".as_bytes());
+    assert_eq!(bc.get("k2").unwrap().unwrap(), "value2value3".as_bytes());
+    assert_eq!(bc.get("k4").unwrap().unwrap(), "value4value4".as_bytes());
 }
 
 #[test]
@@ -132,15 +132,16 @@ fn test_recover_expirable_value() {
     }
 
     let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
+
     assert_eq!(
-        bc.get(&"importalK1").unwrap().unwrap(),
+        bc.get("importalK1").unwrap().unwrap(),
         "value1value1".as_bytes()
     );
     assert_eq!(
-        bc.get(&"expireToImortalK2").unwrap().unwrap(),
+        bc.get("expireToImortalK2").unwrap().unwrap(),
         "value2value2".as_bytes()
     );
-    assert!(bc.get(&"imortalToExpireK3").unwrap().is_none());
-    assert!(bc.get(&"expireK4").unwrap().is_none());
-    assert_eq!(bc.get(&"notEpireK5").unwrap().unwrap(), "value5".as_bytes());
+    assert!(bc.get("imortalToExpireK3").unwrap().is_none());
+    assert!(bc.get("expireK4").unwrap().is_none());
+    assert_eq!(bc.get("notEpireK5").unwrap().unwrap(), "value5".as_bytes());
 }
