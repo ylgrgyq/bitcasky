@@ -150,7 +150,7 @@ impl MmapDataStorage {
 impl DataStorageWriter for MmapDataStorage {
     fn write_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &mut self,
-        row: &bitcasky_common::formatter::RowToWrite<K, V>,
+        row: &RowToWrite<K, V>,
     ) -> super::Result<crate::RowLocation> {
         self.ensure_capacity(row)?;
 
