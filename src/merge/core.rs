@@ -429,7 +429,7 @@ mod tests {
         kvs.into_iter()
             .map(|kv| {
                 let pos = db
-                    .write(&kv.key(), TimedValue::immortal_value(kv.value()))
+                    .write(kv.key(), TimedValue::immortal_value(kv.value()))
                     .unwrap();
                 TestingRow::new(
                     kv,

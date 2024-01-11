@@ -30,9 +30,9 @@ pub struct RowHeader {
 }
 
 #[derive(Debug)]
-pub struct RowToWrite<'a, V: Deref<Target = [u8]>> {
+pub struct RowToWrite<K: AsRef<[u8]>, V: Deref<Target = [u8]>> {
     pub meta: RowMeta,
-    pub key: &'a Vec<u8>,
+    pub key: K,
     pub value: V,
 }
 
@@ -54,17 +54,13 @@ pub struct RowHint {
     pub key: Vec<u8>,
 }
 
-impl<'a, V: Deref<Target = [u8]>> RowToWrite<'a, V> {
-    pub fn new(key: &'a Vec<u8>, value: V) -> RowToWrite<'a, V> {
+impl<K: AsRef<[u8]>, V: Deref<Target = [u8]>> RowToWrite<K, V> {
+    pub fn new(key: K, value: V) -> RowToWrite<K, V> {
         RowToWrite::new_with_timestamp(key, value, 0)
     }
 
-    pub fn new_with_timestamp(
-        key: &'a Vec<u8>,
-        value: V,
-        expire_timestamp: u64,
-    ) -> RowToWrite<'a, V> {
-        let key_size = key.len();
+    pub fn new_with_timestamp(key: K, value: V, expire_timestamp: u64) -> RowToWrite<K, V> {
+        let key_size = key.as_ref().len();
         let value_size = value.len();
         RowToWrite {
             meta: RowMeta {
@@ -98,11 +94,14 @@ pub type Result<T> = std::result::Result<T, FormatterError>;
 pub trait Formatter: std::marker::Send + 'static + Copy {
     fn row_header_size(&self) -> usize;
 
-    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize;
-
-    fn encode_row<V: Deref<Target = [u8]>>(
+    fn net_row_size<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &self,
-        row: &RowToWrite<'_, V>,
+        row: &RowToWrite<K, V>,
+    ) -> usize;
+
+    fn encode_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &self,
+        row: &RowToWrite<K, V>,
         output: &mut [u8],
     ) -> usize;
 
@@ -143,15 +142,18 @@ impl Formatter for BitcaskyFormatter {
         }
     }
 
-    fn net_row_size<V: Deref<Target = [u8]>>(&self, row: &RowToWrite<'_, V>) -> usize {
+    fn net_row_size<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
+        &self,
+        row: &RowToWrite<K, V>,
+    ) -> usize {
         match self {
             BitcaskyFormatter::V1(f) => f.net_row_size(row),
         }
     }
 
-    fn encode_row<V: Deref<Target = [u8]>>(
+    fn encode_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &self,
-        row: &RowToWrite<'_, V>,
+        row: &RowToWrite<K, V>,
         output: &mut [u8],
     ) -> usize {
         match self {

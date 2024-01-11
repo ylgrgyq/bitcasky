@@ -13,14 +13,14 @@ pub struct RowLocation {
 }
 
 #[derive(Debug)]
-pub struct TimedValue<V: Deref<Target = [u8]>> {
+pub struct TimedValue<V: AsRef<[u8]>> {
     pub value: V,
     pub expire_timestamp: u64,
 }
 
-impl<V: Deref<Target = [u8]>> TimedValue<V> {
+impl<V: AsRef<[u8]>> TimedValue<V> {
     pub fn is_valid(&self, now: u64) -> bool {
-        if is_tombstone(&self.value) {
+        if is_tombstone(self.value.as_ref()) {
             return false;
         }
 
@@ -28,7 +28,7 @@ impl<V: Deref<Target = [u8]>> TimedValue<V> {
     }
 
     pub fn validate(self) -> Option<TimedValue<V>> {
-        if !is_tombstone(&self.value) {
+        if !is_tombstone(self.value.as_ref()) {
             Some(self)
         } else {
             None
@@ -36,11 +36,11 @@ impl<V: Deref<Target = [u8]>> TimedValue<V> {
     }
 }
 
-impl<V: Deref<Target = [u8]>> Deref for TimedValue<V> {
+impl<V: AsRef<[u8]>> Deref for TimedValue<V> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        &self.value
+        self.value.as_ref()
     }
 }
 
@@ -48,7 +48,7 @@ pub fn deleted_value() -> TimedValue<Vec<u8>> {
     TimedValue::immortal_value(TOMBSTONE_VALUE.as_bytes().to_vec())
 }
 
-impl<V: Deref<Target = [u8]>> TimedValue<V> {
+impl<V: AsRef<[u8]>> TimedValue<V> {
     pub fn immortal_value(value: V) -> TimedValue<V> {
         TimedValue {
             value,

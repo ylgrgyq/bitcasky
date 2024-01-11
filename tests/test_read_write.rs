@@ -44,14 +44,14 @@ fn test_open_db_twice() {
 fn test_read_write_writing_file() {
     let dir = get_temporary_directory_path();
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
-    bc.put("k1".into(), "value1".as_bytes()).unwrap();
-    bc.put("k2".into(), "value2".as_bytes()).unwrap();
-    bc.put("k3".into(), "value3".as_bytes()).unwrap();
-    bc.put("k1".into(), "value4".as_bytes()).unwrap();
+    bc.put("k1", "value1").unwrap();
+    bc.put("k2", "value2").unwrap();
+    bc.put("k3", "value3").unwrap();
+    bc.put("k1", "value4").unwrap();
 
-    assert_eq!(bc.get(&"k1".into()).unwrap().unwrap(), "value4".as_bytes());
-    assert_eq!(bc.get(&"k2".into()).unwrap().unwrap(), "value2".as_bytes());
-    assert_eq!(bc.get(&"k3".into()).unwrap().unwrap(), "value3".as_bytes());
+    assert_eq!(bc.get("k1").unwrap().unwrap(), "value4".as_bytes());
+    assert_eq!(bc.get("k2").unwrap().unwrap(), "value2".as_bytes());
+    assert_eq!(bc.get("k3").unwrap().unwrap(), "value3".as_bytes());
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn test_random_put_and_delete() {
     execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
-        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+        assert_eq!(bc.get(op.key()).unwrap().unwrap(), op.value());
     }
 }
 
@@ -88,7 +88,7 @@ fn test_random_put_delete_merge() {
     execute_testing_operations(&bc, &ops);
 
     for op in ops.squash() {
-        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+        assert_eq!(bc.get(op.key()).unwrap().unwrap(), op.value());
     }
 }
 
@@ -107,7 +107,7 @@ fn test_recovery() {
     }
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
     for op in ops.squash() {
-        assert_eq!(bc.get(&op.key()).unwrap().unwrap(), op.value());
+        assert_eq!(bc.get(op.key()).unwrap().unwrap(), op.value());
     }
 }
 
@@ -115,19 +115,19 @@ fn test_recovery() {
 fn test_delete() {
     let dir = get_temporary_directory_path();
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
-    bc.put("k1".into(), "value1".as_bytes()).unwrap();
-    bc.put("k2".into(), "value2".as_bytes()).unwrap();
-    bc.put("k3".into(), "value3".as_bytes()).unwrap();
-    bc.put("k1".into(), "value4".as_bytes()).unwrap();
+    bc.put("k1", "value1").unwrap();
+    bc.put("k2", "value2").unwrap();
+    bc.put("k3", "value3").unwrap();
+    bc.put("k1", "value4").unwrap();
 
-    bc.delete(&"k1".into()).unwrap();
-    assert_eq!(bc.get(&"k1".into()).unwrap(), None);
+    bc.delete("k1").unwrap();
+    assert_eq!(bc.get("k1").unwrap(), None);
 
-    bc.delete(&"k2".into()).unwrap();
-    assert_eq!(bc.get(&"k2".into()).unwrap(), None);
+    bc.delete("k2").unwrap();
+    assert_eq!(bc.get("k2").unwrap(), None);
 
-    bc.delete(&"k3".into()).unwrap();
-    assert_eq!(bc.get(&"k3".into()).unwrap(), None);
+    bc.delete("k3").unwrap();
+    assert_eq!(bc.get("k3").unwrap(), None);
 }
 
 #[test]
@@ -135,14 +135,14 @@ fn test_delete_not_exists_key() {
     let dir = get_temporary_directory_path();
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
 
-    bc.delete(&"k1".into()).unwrap();
-    assert_eq!(bc.get(&"k1".into()).unwrap(), None);
+    bc.delete("k1").unwrap();
+    assert_eq!(bc.get("k1").unwrap(), None);
 
-    bc.delete(&"k2".into()).unwrap();
-    assert_eq!(bc.get(&"k2".into()).unwrap(), None);
+    bc.delete("k2").unwrap();
+    assert_eq!(bc.get("k2").unwrap(), None);
 
-    bc.delete(&"k3".into()).unwrap();
-    assert_eq!(bc.get(&"k3".into()).unwrap(), None);
+    bc.delete("k3").unwrap();
+    assert_eq!(bc.get("k3").unwrap(), None);
 }
 
 #[test]
