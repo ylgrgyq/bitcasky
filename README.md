@@ -15,29 +15,24 @@ Bitcasky is a Rust implementation of the Bitcask key-value store. It is an ACID-
 
 To use Bitcasky, simply add it to your `Cargo.toml` file:
 
-```
+```rust
 [dependencies]
 bitcasky = "0.1.0"
-
 ```
 
 Then, in your Rust code, import the `bitcasky` crate and start using the key-value store:
 
-```
+```rust
 use bitcasky::Bitcasky;
 
 fn main() {
     let mut db = Bitcasky::open("/path/to/db", BitcaskyOptions::default()).unwrap()
 
     db.put("key", "value").unwrap();
-<<<<<<< Updated upstream
-    let value = db.get("key").unwrap();
-=======
 
     assert!(db.has("key").unwrap());
 
     let value = db.get("key").unwrap().unwrap();
->>>>>>> Stashed changes
 
     println!("{:?}", value);
 }
@@ -45,27 +40,16 @@ fn main() {
 
 ### Store expirable value
 
-```
+```rust
 db.put_with_ttl("key", "value", Duration::from_secs(60)).unwrap();
 
-<<<<<<< Updated upstream
-fn main() {
-    let mut db = Bitcasky::open("/path/to/db", BitcaskyOptions::default()).unwrap()
-
-    db.put_with_ttl("key", "value", Duration::from_secs(60)).unwrap();
-    let value = db.get("key").unwrap();
-
-    println!("{:?}", value);
-}
-=======
 // 60 seconds later
 assert!(db.get("key").unwrap().is_none());
->>>>>>> Stashed changes
 ```
 
 ### Delete some value or the entire database
 
-```
+```rust
 db.put("key1", "value1").unwrap();
 db.put("key2", "value2").unwrap();
 
@@ -82,7 +66,7 @@ assert!(db.get("key2").unwrap().is_none());
 
 Iterate all keys.
 
-```
+```rust
 // iterate and print all keys in database
 bc.foreach_key(|k| println!("{}", String::from_utf8_lossy(k))).unwrap();
 
@@ -103,4 +87,48 @@ assert!(ret.is_some());
 println!("{}", ret.unwrap());
 ```
 
+Iterate all keys and values.
 
+```rust
+// iterate and print all keys and values in database
+bc.foreach(|k, v| {
+    println!(
+        "key: {}, value: {}",
+        String::from_utf8_lossy(k),
+        String::from_utf8_lossy(v)
+    )
+})
+.unwrap();
+
+// fold all keys and values by concatenate them
+let ret = bc
+    .fold(
+        |k, v, accumulator: Option<String>| match accumulator {
+            // concatenate new key and value to folded values
+            Some(folded_vals) => Ok(Some(format!(
+                "{} key: {}, val: {};",
+                folded_vals,
+                String::from_utf8_lossy(k),
+                String::from_utf8_lossy(v)
+            ))),
+
+            // if we have not fold anything, use this new key and value as folded values
+            None => Ok(Some(format!(
+                "key: {}, val: {};",
+                String::from_utf8_lossy(k),
+                String::from_utf8_lossy(v)
+            ))),
+        },
+        // init accumulator
+        None,
+    )
+    .unwrap();
+assert!(ret.is_some());
+println!("{}", ret.unwrap());
+```
+
+### Maintainance
+
+```rust
+
+```
