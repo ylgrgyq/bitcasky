@@ -129,6 +129,12 @@ println!("{}", ret.unwrap());
 
 ### Maintainance
 
+Bitcasky need to call merge periodically to 
+
+The merge process traverses data files and reclaims space by eliminating out-of-date of deleted key/value pairs, writing only the current key/value pairs to a new set of files within the directory.
+
 ```rust
 
 ```
+
+### Telemetry data

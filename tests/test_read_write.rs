@@ -1,7 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use bitcasky::{bitcasky::Bitcasky, error::BitcaskyError};
-use bitcasky_common::options::BitcaskyOptions;
+use bitcasky_common::options::{BitcaskyOptions, SyncStrategy};
 use test_log::test;
 use utilities::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
@@ -23,7 +23,7 @@ fn get_default_options() -> BitcaskyOptions {
         .max_data_file_size(10 * 1024)
         .init_data_file_capacity(100)
         .init_hint_file_capacity(1024)
-        .sync_interval(Duration::from_secs(1))
+        .sync_interval(SyncStrategy::Interval(Duration::from_secs(1)))
         .max_key_size(64)
         .max_value_size(1024)
 }

@@ -114,6 +114,8 @@ fn test_recover_expirable_value() {
 
     {
         let bc = Bitcasky::open(&db_path, BitcaskyOptions::default()).unwrap();
+        bc.put("importalK1", "value1value1").unwrap();
+        
         bc.put("expireToImortalK2", "value2value2").unwrap();
         bc.put_with_ttl("imortalToExpireK3", "value3", Duration::from_nanos(1))
             .unwrap();

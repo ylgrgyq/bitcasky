@@ -15,7 +15,7 @@ use bitcasky_common::{
     clock::Clock,
     formatter::{BitcaskyFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
-    options::BitcaskyOptions,
+    options::{BitcaskyOptions, SyncStrategy},
     storage_id::{StorageId, StorageIdGenerator},
 };
 
@@ -113,11 +113,17 @@ impl Database {
             is_error: Mutex::new(None),
         };
 
-        if options.database.sync_interval_sec > 0 {
-            db.sync_worker = Some(SyncWorker::start_sync_worker(
-                db.writing_storage.clone(),
-                options.database.sync_interval_sec,
-            ));
+        match options.database.sync_strategy {
+            SyncStrategy::Interval(interval) => {
+                let secs = interval.as_secs();
+                if secs > 0 {
+                    db.sync_worker = Some(SyncWorker::start_sync_worker(
+                        db.writing_storage.clone(),
+                        interval.as_secs(),
+                    ));
+                }
+            }
+            _ => {}
         }
 
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
@@ -640,7 +646,10 @@ pub mod database_tests {
     };
 
     use bitcasky_common::{
-        clock::DebugClock, fs, fs::FileType, options::BitcaskyOptions,
+        clock::DebugClock,
+        fs,
+        fs::FileType,
+        options::{BitcaskyOptions, SyncStrategy},
         storage_id::StorageIdGenerator,
     };
     use utilities::common::{get_temporary_directory_path, TestingKV};
@@ -667,7 +676,7 @@ pub mod database_tests {
         BitcaskyOptions::default()
             .max_data_file_size(1024)
             .init_data_file_capacity(100)
-            .sync_interval(Duration::from_secs(60))
+            .sync_interval(SyncStrategy::Interval(Duration::from_secs(60)))
             .init_hint_file_capacity(1024)
     }
 

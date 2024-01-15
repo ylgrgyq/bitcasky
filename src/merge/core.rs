@@ -373,6 +373,7 @@ mod tests {
     use bitcasky_common::{
         formatter::{initialize_new_file, BitcaskyFormatter},
         fs::FileType,
+        options::SyncStrategy,
     };
     use bitcasky_database::RowLocation;
 
@@ -395,7 +396,7 @@ mod tests {
     fn get_options() -> Arc<BitcaskyOptions> {
         Arc::new(
             BitcaskyOptions::default()
-                .sync_interval(Duration::from_secs(60))
+                .sync_interval(SyncStrategy::Interval(Duration::from_secs(60)))
                 .init_hint_file_capacity(1024)
                 .max_data_file_size(1024)
                 .init_data_file_capacity(100),
