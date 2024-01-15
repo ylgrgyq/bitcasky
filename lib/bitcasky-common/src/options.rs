@@ -4,8 +4,13 @@ use crate::clock::{BitcaskyClock, ClockImpl, DebugClock};
 
 #[derive(Debug, Clone, Copy)]
 pub enum SyncStrategy {
+    // Never sync
     None,
+
+    // Sync after every write
     OSync,
+
+    // Sync at specified intervals
     Interval(Duration),
 }
 
@@ -141,7 +146,7 @@ impl BitcaskyOptions {
     }
 
     // How to sync data to file. default: sync data on every minute
-    pub fn sync_interval(mut self, sync_strategy: SyncStrategy) -> BitcaskyOptions {
+    pub fn sync_strategy(mut self, sync_strategy: SyncStrategy) -> BitcaskyOptions {
         self.database.sync_strategy = sync_strategy;
         self
     }

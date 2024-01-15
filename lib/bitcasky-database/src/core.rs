@@ -113,17 +113,14 @@ impl Database {
             is_error: Mutex::new(None),
         };
 
-        match options.database.sync_strategy {
-            SyncStrategy::Interval(interval) => {
-                let secs = interval.as_secs();
-                if secs > 0 {
-                    db.sync_worker = Some(SyncWorker::start_sync_worker(
-                        db.writing_storage.clone(),
-                        interval.as_secs(),
-                    ));
-                }
+        if let SyncStrategy::Interval(interval) = options.database.sync_strategy {
+            let secs = interval.as_secs();
+            if secs > 0 {
+                db.sync_worker = Some(SyncWorker::start_sync_worker(
+                    db.writing_storage.clone(),
+                    secs,
+                ));
             }
-            _ => {}
         }
 
         info!(target: "Database", "database opened at directory: {:?}, with {} data files", directory, data_storage_ids.len());
@@ -154,7 +151,15 @@ impl Database {
                 self.do_flush_writing_file(&mut writing_file_ref)?;
                 Ok(writing_file_ref.write_row(&row)?)
             }
-            r => Ok(r?),
+            r => {
+                let ret = r?;
+                if let SyncStrategy::OSync = self.options.database.sync_strategy {
+                    if let Err(e) = self.sync() {
+                        error!(target: "Database", "flush database failed: {}", e);
+                    }
+                };
+                Ok(ret)
+            }
         }
     }
 
@@ -676,7 +681,7 @@ pub mod database_tests {
         BitcaskyOptions::default()
             .max_data_file_size(1024)
             .init_data_file_capacity(100)
-            .sync_interval(SyncStrategy::Interval(Duration::from_secs(60)))
+            .sync_strategy(SyncStrategy::Interval(Duration::from_secs(60)))
             .init_hint_file_capacity(1024)
     }
 
