@@ -127,6 +127,25 @@ assert!(ret.is_some());
 println!("{}", ret.unwrap());
 ```
 
+### Sync strategy
+
+By choosing a sync strategy, you can configure the durability of writes by specifying when to synchronize data to disk.
+
+The following sync strategies are available:
+
+* None — lets the operating system manage syncing writes
+* OSync — uses the O_SYNC flag, which forces syncs on every write
+* Time interval — sync at specified intervals (default: 60 secs)
+
+Create a Bitcasky database which sync on every 35 secs:
+
+```rust
+let db = Bitcasky::open(
+        "/path/to/db", 
+        BitcaskyOptions::default().sync_strategy(SyncStrategy::Interval(Duration::from_secs(35)))
+    ).unwrap();
+```
+
 ### Maintainance
 
 Bitcasky need to call merge periodically to 
