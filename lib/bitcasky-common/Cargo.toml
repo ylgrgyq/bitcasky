@@ -18,6 +18,7 @@ fs4 = "0.6.6"
 # to use direct functions on FreeBSD
 rustix = { version = "0", features = [ "fs" ]}
 parking_lot = { version = "0.12.1" }
+libc = "0.2.152"
 
 [dev-dependencies]
 test-log = "0.2.11"
