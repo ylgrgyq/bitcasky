@@ -137,7 +137,7 @@ The following sync strategies are available:
 * OSync — uses the O_SYNC flag, which forces syncs on every write
 * Time interval — sync at specified intervals (default: 60 secs)
 
-Create a Bitcasky database which sync on every 35 secs:
+For example, create a Bitcasky database which sync on every 35 secs as follows:
 
 ```rust
 let db = Bitcasky::open(
