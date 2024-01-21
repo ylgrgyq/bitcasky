@@ -17,7 +17,7 @@ To use Bitcasky, simply add it to your `Cargo.toml` file:
 
 ```
 [dependencies]
-bitcasky = "0.1.0"
+bitcasky = "0.1.1"
 
 ```
 
