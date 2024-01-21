@@ -14,8 +14,8 @@ name = "test_read_write"
 name = "test_merge"
 
 [dependencies]
-bitcasky-common = { path = "lib/bitcasky-common", version = "0.1.0" }
-bitcasky-database = { path = "lib/bitcasky-database", version = "0.1.0" }
+bitcasky-common = { path = "lib/bitcasky-common", version = "0.1.1" }
+bitcasky-database = { path = "lib/bitcasky-database", version = "0.1.1" }
 
 bytes = "1.5.0"
 thiserror = "1.0.53"

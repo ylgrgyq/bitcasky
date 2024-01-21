@@ -28,7 +28,7 @@ To use Bitcasky, simply add it to your `Cargo.toml` file:
 
 ```rust
 [dependencies]
-bitcasky = "0.1.0"
+bitcasky = "0.1.1"
 ```
 
 Then, in your Rust code, import the `bitcasky` crate and start using the key-value store:
