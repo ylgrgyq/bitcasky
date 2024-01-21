@@ -153,6 +153,7 @@ impl Database {
             }
             r => {
                 let ret = r?;
+                #[cfg(not(unix))]
                 if let SyncStrategy::OSync = self.options.database.sync_strategy {
                     if let Err(e) = self.sync() {
                         error!(target: "Database", "flush database failed: {}", e);

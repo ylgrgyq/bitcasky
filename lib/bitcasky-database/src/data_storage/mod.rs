@@ -16,7 +16,7 @@ use bitcasky_common::{
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::BitcaskyOptions,
+    options::{BitcaskyOptions, SyncStrategy},
     storage_id::StorageId,
 };
 
@@ -107,12 +107,18 @@ impl DataStorage {
         formatter: Arc<BitcaskyFormatter>,
         options: Arc<BitcaskyOptions>,
     ) -> Result<Self> {
+        let mut is_o_sync = false;
+        #[cfg(unix)]
+        if let SyncStrategy::OSync = options.database.sync_strategy {
+            is_o_sync = true;
+        }
         let path = database_dir.as_ref().to_path_buf();
         let data_file = create_file(
             &path,
             FileType::DataFile,
             Some(storage_id),
             &formatter,
+            is_o_sync,
             options.database.storage.init_data_file_capacity,
         )?;
 
@@ -121,7 +127,6 @@ impl DataStorage {
             &path, storage_id
         );
         let meta = data_file.metadata()?;
-
         DataStorage::open_by_file(
             &path,
             storage_id,

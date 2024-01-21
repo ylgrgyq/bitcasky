@@ -266,7 +266,15 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = Arc::new(BitcaskyFormatter::default());
-        let file = create_file(dir, FileType::DataFile, Some(storage_id), &formatter, 512).unwrap();
+        let file = create_file(
+            dir,
+            FileType::DataFile,
+            Some(storage_id),
+            &formatter,
+            false,
+            512,
+        )
+        .unwrap();
         let meta = file.metadata().unwrap();
         MmapDataStorage::new(
             1,

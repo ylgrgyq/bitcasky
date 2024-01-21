@@ -58,6 +58,7 @@ impl HintFile {
             FileType::HintFile,
             Some(storage_id),
             &formatter,
+            false,
             init_hint_file_capacity,
         )?;
         debug!(
