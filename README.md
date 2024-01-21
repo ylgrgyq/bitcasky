@@ -146,14 +146,18 @@ let db = Bitcasky::open(
     ).unwrap();
 ```
 
-### Maintainance
+### Merge process
 
-Bitcasky need to call merge periodically to 
+Bitcasky need to call merge periodically to reduce disk usage. The merge process traverses data files and reclaims space by eliminating out-of-date of deleted key/value pairs, writing only the current key/value pairs to a new set of files within the directory.
 
-The merge process traverses data files and reclaims space by eliminating out-of-date of deleted key/value pairs, writing only the current key/value pairs to a new set of files within the directory.
+Start merge process by calling `merge` on Bitcaksy instance like this:
 
 ```rust
-
+db.merge().unwrap();
 ```
 
-### Telemetry data
+# License
+
+This project is licensed under the [MIT license].
+
+[MIT license]: https://github.com/ylgrgyq/bitcasky/blob/master/LICENSE
