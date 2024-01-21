@@ -19,6 +19,9 @@ fs4 = "0.6.6"
 rustix = { version = "0", features = [ "fs" ]}
 parking_lot = { version = "0.12.1" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.152"
+
 [dev-dependencies]
 test-log = "0.2.11"
 env_logger = "0.10.1"
