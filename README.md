@@ -1,5 +1,16 @@
 # Bitcasky
 
+[![Crates.io][crates-badge]][crates-url]
+[![MIT licensed][mit-badge]][mit-url]
+[![Build Status][actions-badge]][actions-url]
+
+[crates-badge]: https://img.shields.io/crates/v/bitcasky.svg
+[crates-url]: https://crates.io/crates/bitcasky
+[mit-badge]: https://img.shields.io/badge/license-MIT-yellow.svg
+[mit-url]: https://github.com/ylgrgyq/bitcasky/blob/master/LICENSE
+[actions-badge]: https://github.com/ylgrgyq/bitcasky/workflows/CI/badge.svg
+[actions-url]: https://github.com/ylgrgyq/bitcasky/actions?query=workflow%3ACI+branch%3Amaster
+
 Bitcasky is a Rust implementation of the Bitcask key-value store. It is an ACID-compliant, append-only key-value store that provides high write throughput. It is optimized for write-heavy workloads, and is commonly used for applications such as log storage and time-series data.
 
 ## Features
