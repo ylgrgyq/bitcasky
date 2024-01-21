@@ -1,3 +1,6 @@
+#[cfg(unix)]
+use libc::O_SYNC;
+use rustix::fs::OpenOptionsExt;
 use std::{
     fs::{File, OpenOptions},
     io::{Seek, SeekFrom},
@@ -29,6 +32,7 @@ pub fn create_file<P: AsRef<Path>>(
     file_type: FileType,
     storage_id: Option<StorageId>,
     formatter: &BitcaskyFormatter,
+    is_o_sync: bool,
     init_data_file_capacity: usize,
 ) -> std::io::Result<File> {
     // Round capacity down to the nearest 8-byte alignment, since the
@@ -68,11 +72,14 @@ pub fn create_file<P: AsRef<Path>>(
     // File renames are atomic, so we can safely rename the temporary file to the final file.
     std::fs::rename(&tmp_file_path, &path)?;
 
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(false)
-        .open(&path)?;
+    let mut options = File::options();
+    options.write(true).create(true).read(true);
+    #[cfg(unix)]
+    if is_o_sync {
+        options.custom_flags(O_SYNC);
+    }
+
+    let mut file = options.open(&path)?;
     file.seek(SeekFrom::Start(FILE_HEADER_SIZE as u64))?;
 
     Ok(file)
@@ -116,8 +123,15 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = BitcaskyFormatter::default();
-        let mut file =
-            create_file(&dir, FileType::DataFile, Some(storage_id), &formatter, 100).unwrap();
+        let mut file = create_file(
+            &dir,
+            FileType::DataFile,
+            Some(storage_id),
+            &formatter,
+            false,
+            100,
+        )
+        .unwrap();
 
         let mut bs = BytesMut::with_capacity(4);
         bs.put_u32(101);

@@ -3,6 +3,18 @@ use std::{sync::Arc, time::Duration};
 use crate::clock::{BitcaskyClock, ClockImpl, DebugClock};
 
 #[derive(Debug, Clone, Copy)]
+pub enum SyncStrategy {
+    // Never sync
+    None,
+
+    // Sync after every write
+    OSync,
+
+    // Sync at specified intervals
+    Interval(Duration),
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum DataSotrageType {
     Mmap,
 }
@@ -47,7 +59,7 @@ impl DataStorageOptions {
 pub struct DatabaseOptions {
     pub storage: DataStorageOptions,
     /// How frequent can we flush data
-    pub sync_interval_sec: u64,
+    pub sync_strategy: SyncStrategy,
     pub init_hint_file_capacity: usize,
 }
 
@@ -63,7 +75,7 @@ impl Default for DatabaseOptions {
         Self {
             storage: DataStorageOptions::default(),
             init_hint_file_capacity: 1024 * 1024,
-            sync_interval_sec: 60,
+            sync_strategy: SyncStrategy::Interval(Duration::from_secs(60)),
         }
     }
 }
@@ -133,10 +145,9 @@ impl BitcaskyOptions {
         self
     }
 
-    // How frequent can we sync data to file. 0 to stop auto sync. default: 1 min
-    pub fn sync_interval(mut self, interval: Duration) -> BitcaskyOptions {
-        assert!(!interval.is_zero());
-        self.database.sync_interval_sec = interval.as_secs();
+    // How to sync data to file. default: sync data on every minute
+    pub fn sync_strategy(mut self, sync_strategy: SyncStrategy) -> BitcaskyOptions {
+        self.database.sync_strategy = sync_strategy;
         self
     }
 

@@ -245,7 +245,7 @@ impl Bitcasky {
         }
     }
 
-    pub fn do_put<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+    fn do_put<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         key: K,
         value: TimedValue<V>,
