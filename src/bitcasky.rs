@@ -196,11 +196,18 @@ impl Bitcasky {
     /// Deletes the named key.
     pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> BitcaskyResult<()> {
         self.database.check_db_error()?;
-        let kd = self.keydir.write();
+        let mut location = None;
+        {
+            let kd = self.keydir.write();
 
-        if kd.contains_key(&key.as_ref().into()) {
-            self.database.write(&key, deleted_value())?;
-            kd.delete(&key.as_ref().into());
+            if kd.contains_key(&key.as_ref().into()) {
+                self.database.write(&key, deleted_value())?;
+                location = kd.delete(&key.as_ref().into());
+            }
+        }
+
+        if let Some(lo) = location {
+            self.database.
         }
 
         Ok(())

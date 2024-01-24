@@ -241,6 +241,13 @@ impl Database {
         Ok(ret)
     }
 
+    pub fn update_delete_bytes<K: AsRef<[u8]>, V: AsRef<[u8]>>(
+        &self,
+        key: K,
+        location: RowLocation,
+    ) {
+    }
+
     pub fn reload_data_files(&self, data_storage_ids: Vec<StorageId>) -> DatabaseResult<()> {
         let (writing, stables) = prepare_db_storages(
             &self.database_dir,

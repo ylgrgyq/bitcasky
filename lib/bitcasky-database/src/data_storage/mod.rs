@@ -98,6 +98,7 @@ pub struct DataStorage {
     options: Arc<BitcaskyOptions>,
     formatter: Arc<BitcaskyFormatter>,
     dirty: bool,
+    dead_bytes: usize,
 }
 
 impl DataStorage {
@@ -171,6 +172,10 @@ impl DataStorage {
         self.dirty
     }
 
+    pub fn add_dead_bytes(&mut self, dead_bytes: usize) {
+        self.dead_bytes += dead_bytes;
+    }
+
     pub fn iter(&self) -> Result<StorageIter> {
         let mut data_file = fs::open_file(
             &self.database_dir,
@@ -238,6 +243,7 @@ impl DataStorage {
             options,
             formatter,
             dirty: false,
+            dead_bytes: 0,
         })
     }
 }
