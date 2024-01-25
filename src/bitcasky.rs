@@ -207,7 +207,7 @@ impl Bitcasky {
         }
 
         if let Some(lo) = location {
-            self.database.
+            // self.database.add_dead_bytes(dead_bytes);
         }
 
         Ok(())

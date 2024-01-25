@@ -29,6 +29,7 @@ use memmap2::{MmapMut, MmapOptions};
 use crate::{
     common::{DatabaseError, DatabaseResult},
     data_storage::DataStorage,
+    RowLocation,
 };
 use crossbeam_channel::{unbounded, Sender};
 
@@ -177,9 +178,10 @@ impl Iterator for HintFileIterator {
             },
             Err(e) => Some(Err(e)),
             Ok(Some(r)) => Some(Ok(RecoveredRow {
-                row_location: super::RowLocation {
+                row_location: RowLocation {
                     storage_id: self.file.storage_id,
                     row_offset: r.header.row_offset,
+                    row_size: r.header.row_size,
                 },
                 invalid: false,
                 key: r.key,
@@ -299,6 +301,7 @@ impl HintWriter {
                                     expire_timestamp: r.value.expire_timestamp,
                                     key_size: r.key.len(),
                                     row_offset: r.row_location.row_offset,
+                                    row_size: r.row_location.row_size,
                                 },
                                 key: r.key,
                             },
@@ -375,6 +378,7 @@ mod tests {
                 expire_timestamp: 12345,
                 key_size: key.len(),
                 row_offset: 789,
+                row_size: 123,
             },
             key,
         };

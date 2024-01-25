@@ -432,13 +432,7 @@ mod tests {
                 let pos = db
                     .write(kv.key(), TimedValue::immortal_value(kv.value()))
                     .unwrap();
-                TestingRow::new(
-                    kv,
-                    RowLocation {
-                        storage_id: pos.storage_id,
-                        row_offset: pos.row_offset,
-                    },
-                )
+                TestingRow::new(kv, pos)
             })
             .collect::<Vec<TestingRow>>()
     }

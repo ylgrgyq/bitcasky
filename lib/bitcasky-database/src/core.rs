@@ -164,6 +164,8 @@ impl Database {
         }
     }
 
+    pub fn add_dead_bytes(&mut self, dead_bytes: usize) {}
+
     pub fn flush_writing_file(&self) -> DatabaseResult<()> {
         let mut writing_file_ref = self.writing_storage.lock();
         debug!(

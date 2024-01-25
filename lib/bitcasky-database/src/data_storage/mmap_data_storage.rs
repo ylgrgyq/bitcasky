@@ -151,18 +151,20 @@ impl DataStorageWriter for MmapDataStorage {
     fn write_row<K: AsRef<[u8]>, V: Deref<Target = [u8]>>(
         &mut self,
         row: &RowToWrite<K, V>,
-    ) -> super::Result<crate::RowLocation> {
+    ) -> super::Result<RowLocation> {
         self.ensure_capacity(row)?;
 
         let value_offset = self.offset;
         let formatter = self.formatter.clone();
         let net_size = formatter.encode_row(row, &mut self.as_mut_slice()[value_offset..]);
-        self.offset += net_size + padding(net_size);
+        let row_size = net_size + padding(net_size);
+        self.offset += row_size;
         self.write_times += 1;
 
         Ok(RowLocation {
             storage_id: self.storage_id,
             row_offset: value_offset,
+            row_size,
         })
     }
 
@@ -213,18 +215,21 @@ impl DataStorageReader for MmapDataStorage {
             return Ok(None);
         }
 
-        let (meta, key, v) = row.unwrap();
+        let (meta, k, v) = row.unwrap();
+        let key = k.into();
+        let net_size: usize = self.formatter.row_header_size() + meta.key_size + meta.value_size;
+        let row_size = net_size + padding(net_size);
         let row_to_read = RowToRead {
-            key: key.into(),
+            key,
             value: TimedValue::expirable_value(v.unwrap_or(vec![]), meta.expire_timestamp),
             row_location: RowLocation {
                 storage_id: self.storage_id,
                 row_offset,
+                row_size,
             },
         };
 
-        let net_size: usize = self.formatter.row_header_size() + meta.key_size + meta.value_size;
-        self.offset += net_size + padding(net_size);
+        self.offset += row_size;
 
         Ok(Some(row_to_read))
     }

@@ -10,6 +10,7 @@ use crate::DataStorageError;
 pub struct RowLocation {
     pub storage_id: StorageId,
     pub row_offset: usize,
+    pub row_size: usize,
 }
 
 #[derive(Debug)]

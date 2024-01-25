@@ -46,6 +46,7 @@ pub struct RowHintHeader {
     pub expire_timestamp: u64,
     pub key_size: usize,
     pub row_offset: usize,
+    pub row_size: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
