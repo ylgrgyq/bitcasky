@@ -88,6 +88,7 @@ pub struct DataStorageTelemetry {
     pub usage: f64,
     pub read_value_times: u64,
     pub write_times: u64,
+    pub dead_bytes: usize,
 }
 
 #[derive(Debug)]
@@ -214,6 +215,7 @@ impl DataStorage {
                 usage: s.offset as f64 / s.capacity as f64,
                 read_value_times: s.read_value_times,
                 write_times: s.write_times,
+                dead_bytes: self.dead_bytes,
             },
         }
     }

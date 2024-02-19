@@ -143,13 +143,13 @@ impl Database {
     ) -> DatabaseResult<RowLocation> {
         let ts = value.expire_timestamp;
         let row: RowToWrite<K, TimedValue<V>> = RowToWrite::new_with_timestamp(key, value, ts);
-        let mut writing_file_ref = self.writing_storage.lock();
+        let mut writing_storage_ref = self.writing_storage.lock();
 
-        match writing_file_ref.write_row(&row) {
+        match writing_storage_ref.write_row(&row) {
             Err(DataStorageError::StorageOverflow(id)) => {
                 debug!("Flush writing storage with id: {} on overflow", id);
-                self.do_flush_writing_file(&mut writing_file_ref)?;
-                Ok(writing_file_ref.write_row(&row)?)
+                self.do_flush_writing_file(&mut writing_storage_ref)?;
+                Ok(writing_storage_ref.write_row(&row)?)
             }
             r => {
                 let ret = r?;
@@ -164,7 +164,16 @@ impl Database {
         }
     }
 
-    pub fn add_dead_bytes(&mut self, dead_bytes: usize) {}
+    pub fn add_dead_bytes(&self, storage_id: StorageId, dead_bytes: usize) {
+        let mut writing_storage_ref = self.writing_storage.lock();
+        if storage_id.eq(&writing_storage_ref.storage_id()) {
+            writing_storage_ref.add_dead_bytes(dead_bytes);
+        } else {
+            if let Some(storage) = self.stable_storages.get(&storage_id) {
+                storage.lock().add_dead_bytes(dead_bytes);
+            }
+        }
+    }
 
     pub fn flush_writing_file(&self) -> DatabaseResult<()> {
         let mut writing_file_ref = self.writing_storage.lock();
