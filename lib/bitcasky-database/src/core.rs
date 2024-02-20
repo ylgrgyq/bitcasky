@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    collections::HashMap,
     mem,
     path::{Path, PathBuf},
     sync::Arc,
@@ -43,7 +44,7 @@ use super::{
 #[derive(Debug)]
 pub struct DatabaseTelemetry {
     pub writing_storage: DataStorageTelemetry,
-    pub stable_storages: Vec<DataStorageTelemetry>,
+    pub stable_storages: HashMap<StorageId, DataStorageTelemetry>,
     pub hint_file_writer: hint::HintWriterTelemetry,
 }
 
@@ -298,12 +299,15 @@ impl Database {
 
     pub fn get_telemetry_data(&self) -> DatabaseTelemetry {
         let writing_storage = { self.writing_storage.lock().get_telemetry_data() };
-        let stable_storages: Vec<DataStorageTelemetry> = {
+        let stable_storages: HashMap<StorageId, DataStorageTelemetry> = HashMap::from_iter(
             self.stable_storages
                 .iter()
-                .map(|s| s.lock().get_telemetry_data())
-                .collect()
-        };
+                .map(|s| {
+                    let d = s.lock();
+                    (d.storage_id(), d.get_telemetry_data())
+                })
+                .collect::<Vec<_>>(),
+        );
 
         DatabaseTelemetry {
             hint_file_writer: self
@@ -669,6 +673,7 @@ pub mod database_tests {
         options::{BitcaskyOptions, SyncStrategy},
         storage_id::StorageIdGenerator,
     };
+    use log::info;
     use utilities::common::{get_temporary_directory_path, TestingKV};
 
     use test_log::test;
@@ -1090,11 +1095,28 @@ pub mod database_tests {
             ),
         )
         .unwrap();
-        let lo = db
+        let stable_row_lo = db
             .write("key", TimedValue::permanent_value("value"))
             .unwrap();
-        db.add_dead_bytes(lo.storage_id, lo.row_size);
+        db.flush_writing_file().unwrap();
+        let writing_row_lo = db
+            .write("key2", TimedValue::permanent_value("value2"))
+            .unwrap();
+
+        db.add_dead_bytes(stable_row_lo.storage_id, stable_row_lo.row_size);
+        db.add_dead_bytes(writing_row_lo.storage_id, writing_row_lo.row_size);
         let telemetry = db.get_telemetry_data();
-        assert_eq!(lo.row_size, telemetry.writing_storage.dead_bytes);
+        assert_eq!(
+            writing_row_lo.row_size,
+            telemetry.writing_storage.dead_bytes
+        );
+        assert_eq!(
+            stable_row_lo.row_size,
+            telemetry
+                .stable_storages
+                .get(&stable_row_lo.storage_id)
+                .unwrap()
+                .dead_bytes
+        );
     }
 }
