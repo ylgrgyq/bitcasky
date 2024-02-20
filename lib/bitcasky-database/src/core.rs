@@ -252,13 +252,6 @@ impl Database {
         Ok(ret)
     }
 
-    pub fn update_delete_bytes<K: AsRef<[u8]>, V: AsRef<[u8]>>(
-        &self,
-        key: K,
-        location: RowLocation,
-    ) {
-    }
-
     pub fn reload_data_files(&self, data_storage_ids: Vec<StorageId>) -> DatabaseResult<()> {
         let (writing, stables) = prepare_db_storages(
             &self.database_dir,
@@ -1081,5 +1074,27 @@ pub mod database_tests {
         assert_rows_value(&db, &rows);
         assert_eq!(1, db.stable_storages.len());
         assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_add_dead_bytes() {
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+        let dir = get_temporary_directory_path();
+        let db = Database::open(
+            &dir,
+            storage_id_generator,
+            Arc::new(
+                BitcaskyOptions::default()
+                    .max_data_file_size(120)
+                    .init_data_file_capacity(100),
+            ),
+        )
+        .unwrap();
+        let lo = db
+            .write("key", TimedValue::permanent_value("value"))
+            .unwrap();
+        db.add_dead_bytes(lo.storage_id, lo.row_size);
+        let telemetry = db.get_telemetry_data();
+        assert_eq!(lo.row_size, telemetry.writing_storage.dead_bytes);
     }
 }

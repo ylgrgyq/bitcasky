@@ -48,20 +48,20 @@ impl KeyDir {
         })
     }
 
-    pub fn put(&self, key: Vec<u8>, value: RowLocation) {
-        self.index.insert(key, value);
+    pub fn put(&self, key: Vec<u8>, value: RowLocation) -> Option<RowLocation> {
+        self.index.insert(key, value)
     }
 
-    pub fn checked_put(&self, key: Vec<u8>, value: RowLocation) {
+    pub fn checked_put(&self, key: Vec<u8>, value: RowLocation) -> Option<RowLocation> {
         let r = self.index.get(&key);
         if let Some(pos) = r {
             let old_pos: RowLocation = *(pos);
             // key was written again during merge
             if value.storage_id < old_pos.storage_id {
-                return;
+                return Option::None;
             }
         }
-        self.index.insert(key, value);
+        self.index.insert(key, value)
     }
 
     pub fn get(&self, key: &Vec<u8>) -> Option<Ref<Vec<u8>, RowLocation>> {
