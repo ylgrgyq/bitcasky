@@ -2,6 +2,7 @@ use std::{collections::HashSet, time::Duration};
 
 use bitcasky::{bitcasky::Bitcasky, error::BitcaskyError};
 use bitcasky_common::options::{BitcaskyOptions, SyncStrategy};
+use log::info;
 use test_log::test;
 use utilities::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
@@ -242,4 +243,21 @@ fn test_fold() {
         .unwrap();
     assert_eq!(expected_pair.len(), ret.unwrap());
     assert_eq!(expected_pair, actual_pair);
+}
+
+#[test]
+fn test_dead_bytes_by_delete() {
+    let dir = get_temporary_directory_path();
+    let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
+    bc.put("k1", "value1").unwrap();
+    bc.put("k2", "value2").unwrap();
+    bc.put("k3", "value3").unwrap();
+
+    bc.delete("k1").unwrap();
+    bc.delete("k2").unwrap();
+    bc.delete("k3").unwrap();
+    assert_eq!(
+        1 as f64,
+        bc.get_telemetry_data().database.writing_storage.fragment
+    );
 }

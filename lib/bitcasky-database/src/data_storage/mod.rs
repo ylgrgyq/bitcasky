@@ -1,6 +1,6 @@
 pub mod mmap_data_storage;
 
-use log::{debug, error};
+use log::{debug, error, info};
 use std::{
     fs::{File, Metadata},
     ops::Deref,
@@ -12,7 +12,7 @@ use thiserror::Error;
 use bitcasky_common::{
     create_file,
     formatter::{
-        self, get_formatter_from_file, BitcaskyFormatter, FormatterError, RowToWrite,
+        self, get_formatter_from_file, BitcaskyFormatter, Formatter, FormatterError, RowToWrite,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
@@ -84,8 +84,9 @@ pub struct DataStorageTelemetry {
     pub storage_id: StorageId,
     pub formatter_version: u8,
     pub capacity: usize,
-    pub offset: usize,
+    pub data_size: usize,
     pub usage: f64,
+    pub fragment: f64,
     pub read_value_times: u64,
     pub write_times: u64,
     pub dead_bytes: usize,
@@ -207,16 +208,20 @@ impl DataStorage {
 
     pub fn get_telemetry_data(&self) -> DataStorageTelemetry {
         match &self.storage_impl {
-            DataStorageImpl::MmapStorage(s) => DataStorageTelemetry {
-                storage_id: self.storage_id,
-                formatter_version: self.formatter.version(),
-                capacity: s.capacity,
-                offset: s.offset,
-                usage: s.offset as f64 / s.capacity as f64,
-                read_value_times: s.read_value_times,
-                write_times: s.write_times,
-                dead_bytes: self.dead_bytes,
-            },
+            DataStorageImpl::MmapStorage(s) => {
+                let data_size = s.offset - FILE_HEADER_SIZE;
+                DataStorageTelemetry {
+                    storage_id: self.storage_id,
+                    formatter_version: self.formatter.version(),
+                    capacity: s.capacity,
+                    data_size,
+                    usage: s.offset as f64 / s.capacity as f64,
+                    fragment: self.dead_bytes as f64 / data_size as f64,
+                    read_value_times: s.read_value_times,
+                    write_times: s.write_times,
+                    dead_bytes: self.dead_bytes,
+                }
+            }
         }
     }
 
