@@ -79,11 +79,11 @@ enum DataStorageImpl {
     MmapStorage(MmapDataStorage),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct DataStorageTelemetry {
     pub storage_id: StorageId,
     pub formatter_version: u8,
-    pub capacity: usize,
+    pub data_capacity: usize,
     pub data_size: usize,
     pub usage: f64,
     pub fragment: f64,
@@ -210,13 +210,18 @@ impl DataStorage {
         match &self.storage_impl {
             DataStorageImpl::MmapStorage(s) => {
                 let data_size = s.offset - FILE_HEADER_SIZE;
+                let data_capacity = s.capacity - FILE_HEADER_SIZE;
+                let mut fragment = self.dead_bytes as f64 / data_size as f64;
+                if fragment.is_nan() {
+                    fragment = 0.0;
+                }
                 DataStorageTelemetry {
                     storage_id: self.storage_id,
                     formatter_version: self.formatter.version(),
-                    capacity: s.capacity,
+                    data_capacity,
                     data_size,
-                    usage: s.offset as f64 / s.capacity as f64,
-                    fragment: self.dead_bytes as f64 / data_size as f64,
+                    usage: data_size as f64 / data_capacity as f64,
+                    fragment,
                     read_value_times: s.read_value_times,
                     write_times: s.write_times,
                     dead_bytes: self.dead_bytes,

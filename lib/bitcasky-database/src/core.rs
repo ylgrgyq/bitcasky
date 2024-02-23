@@ -37,6 +37,18 @@ use super::{
     common::{RowLocation, RowToRead},
     hint::HintFile,
 };
+
+#[derive(Debug)]
+pub struct StorageAggregatedTelemetry {
+    pub total_data_capacity: usize,
+    pub total_data_size: usize,
+    pub total_usage: f64,
+    pub total_fragment: f64,
+    pub total_read_value_times: u64,
+    pub total_write_times: u64,
+    pub total_dead_bytes: usize,
+}
+
 /**
  * Statistics of a Database.
  * Some of the metrics may not accurate due to concurrent access.
@@ -45,6 +57,7 @@ use super::{
 pub struct DatabaseTelemetry {
     pub writing_storage: DataStorageTelemetry,
     pub stable_storages: HashMap<StorageId, DataStorageTelemetry>,
+    pub storage_aggregate: StorageAggregatedTelemetry,
     pub hint_file_writer: hint::HintWriterTelemetry,
 }
 
@@ -309,6 +322,28 @@ impl Database {
                 .collect::<Vec<_>>(),
         );
 
+        let total_telemetry = stable_storages.iter().map(|(_, s)| s).fold(
+            writing_storage.clone(),
+            |mut acc, next| {
+                acc.data_size += next.data_size;
+                acc.data_capacity += next.data_capacity;
+                acc.dead_bytes += next.dead_bytes;
+                acc.read_value_times += next.read_value_times;
+                acc.write_times += next.write_times;
+                return acc;
+            },
+        );
+        let total_fragment = total_telemetry.dead_bytes as f64 / total_telemetry.data_size as f64;
+        let total_usage = total_telemetry.data_size as f64 / total_telemetry.data_capacity as f64;
+        let storage_aggregate = StorageAggregatedTelemetry {
+            total_data_capacity: total_telemetry.data_capacity,
+            total_data_size: total_telemetry.data_size,
+            total_fragment,
+            total_usage,
+            total_read_value_times: total_telemetry.read_value_times,
+            total_write_times: total_telemetry.write_times,
+            total_dead_bytes: total_telemetry.dead_bytes,
+        };
         DatabaseTelemetry {
             hint_file_writer: self
                 .hint_file_writer
@@ -317,6 +352,7 @@ impl Database {
                 .unwrap_or_default(),
             writing_storage,
             stable_storages,
+            storage_aggregate,
         }
     }
 

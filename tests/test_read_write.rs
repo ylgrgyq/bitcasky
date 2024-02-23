@@ -251,13 +251,49 @@ fn test_dead_bytes_by_delete() {
     let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
     bc.put("k1", "value1").unwrap();
     bc.put("k2", "value2").unwrap();
-    bc.put("k3", "value3").unwrap();
 
     bc.delete("k1").unwrap();
+
+    assert!(
+        bc.get_telemetry_data()
+            .database
+            .storage_aggregate
+            .total_fragment
+            < 1.0
+    );
+
     bc.delete("k2").unwrap();
-    bc.delete("k3").unwrap();
     assert_eq!(
-        1 as f64,
-        bc.get_telemetry_data().database.writing_storage.fragment
+        1.0,
+        bc.get_telemetry_data()
+            .database
+            .storage_aggregate
+            .total_fragment
+    );
+}
+
+#[test]
+fn test_dead_bytes_by_put() {
+    let dir = get_temporary_directory_path();
+    let bc = Bitcasky::open(&dir, get_default_options()).unwrap();
+    bc.put("k1", "value1").unwrap();
+    bc.put("k2", "value2").unwrap();
+
+    bc.delete("k1").unwrap();
+    assert!(
+        bc.get_telemetry_data()
+            .database
+            .storage_aggregate
+            .total_fragment
+            < 1.0
+    );
+
+    bc.delete("k2").unwrap();
+    assert_eq!(
+        1.0,
+        bc.get_telemetry_data()
+            .database
+            .storage_aggregate
+            .total_fragment
     );
 }
