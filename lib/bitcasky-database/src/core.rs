@@ -750,7 +750,7 @@ pub mod database_tests {
         }
     }
 
-    pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
+    pub fn assert_database_rows(db: &Database, expect_rows: &[TestingRow]) {
         let mut i = 0;
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
