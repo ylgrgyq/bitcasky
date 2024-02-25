@@ -2,7 +2,6 @@ use std::{collections::HashSet, time::Duration};
 
 use bitcasky::{bitcasky::Bitcasky, error::BitcaskyError};
 use bitcasky_common::options::{BitcaskyOptions, SyncStrategy};
-use log::info;
 use test_log::test;
 use utilities::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,

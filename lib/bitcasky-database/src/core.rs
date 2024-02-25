@@ -182,10 +182,8 @@ impl Database {
         let mut writing_storage_ref = self.writing_storage.lock();
         if storage_id.eq(&writing_storage_ref.storage_id()) {
             writing_storage_ref.add_dead_bytes(dead_bytes);
-        } else {
-            if let Some(storage) = self.stable_storages.get(&storage_id) {
-                storage.lock().add_dead_bytes(dead_bytes);
-            }
+        } else if let Some(storage) = self.stable_storages.get(&storage_id) {
+            storage.lock().add_dead_bytes(dead_bytes);
         }
     }
 
@@ -322,17 +320,17 @@ impl Database {
                 .collect::<Vec<_>>(),
         );
 
-        let total_telemetry = stable_storages.iter().map(|(_, s)| s).fold(
-            writing_storage.clone(),
-            |mut acc, next| {
-                acc.data_size += next.data_size;
-                acc.data_capacity += next.data_capacity;
-                acc.dead_bytes += next.dead_bytes;
-                acc.read_value_times += next.read_value_times;
-                acc.write_times += next.write_times;
-                return acc;
-            },
-        );
+        let total_telemetry =
+            stable_storages
+                .values()
+                .fold(writing_storage.clone(), |mut acc, next| {
+                    acc.data_size += next.data_size;
+                    acc.data_capacity += next.data_capacity;
+                    acc.dead_bytes += next.dead_bytes;
+                    acc.read_value_times += next.read_value_times;
+                    acc.write_times += next.write_times;
+                    acc
+                });
         let total_fragment = total_telemetry.dead_bytes as f64 / total_telemetry.data_size as f64;
         let total_usage = total_telemetry.data_size as f64 / total_telemetry.data_capacity as f64;
         let storage_aggregate = StorageAggregatedTelemetry {
@@ -709,7 +707,6 @@ pub mod database_tests {
         options::{BitcaskyOptions, SyncStrategy},
         storage_id::StorageIdGenerator,
     };
-    use log::info;
     use utilities::common::{get_temporary_directory_path, TestingKV};
 
     use test_log::test;

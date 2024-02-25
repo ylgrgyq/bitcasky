@@ -1,6 +1,6 @@
 pub mod mmap_data_storage;
 
-use log::{debug, error, info};
+use log::{debug, error};
 use std::{
     fs::{File, Metadata},
     ops::Deref,
@@ -12,7 +12,7 @@ use thiserror::Error;
 use bitcasky_common::{
     create_file,
     formatter::{
-        self, get_formatter_from_file, BitcaskyFormatter, Formatter, FormatterError, RowToWrite,
+        self, get_formatter_from_file, BitcaskyFormatter, FormatterError, RowToWrite,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
