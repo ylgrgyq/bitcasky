@@ -279,18 +279,10 @@ fn test_dead_bytes_by_put() {
     bc.put("k1", "value1").unwrap();
     bc.put("k2", "value2").unwrap();
 
-    bc.delete("k1").unwrap();
-    assert!(
-        bc.get_telemetry_data()
-            .database
-            .storage_aggregate
-            .total_fragment
-            < 1.0
-    );
-
-    bc.delete("k2").unwrap();
+    bc.put("k1", "value3").unwrap();
+    bc.put("k2", "value4").unwrap();
     assert_eq!(
-        1.0,
+        0.5,
         bc.get_telemetry_data()
             .database
             .storage_aggregate
