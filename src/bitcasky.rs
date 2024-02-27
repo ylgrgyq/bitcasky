@@ -74,7 +74,7 @@ impl Bitcasky {
 
     /// Stores the key and value in the database.
     pub fn put<K: AsRef<[u8]>, V: AsRef<[u8]>>(&self, key: K, value: V) -> BitcaskyResult<()> {
-        self.do_put(key, TimedValue::immortal_value(value))
+        self.do_put(key, TimedValue::permanent_value(value))
     }
 
     /// Stores the key, value in the database and set a expire time with this value.
@@ -199,8 +199,12 @@ impl Bitcasky {
         let kd = self.keydir.write();
 
         if kd.contains_key(&key.as_ref().into()) {
-            self.database.write(&key, deleted_value())?;
-            kd.delete(&key.as_ref().into());
+            let delete_location = self.database.write(&key, deleted_value())?;
+            let (_, prev_lo) = kd.delete(&key.as_ref().into()).unwrap();
+            self.database
+                .add_dead_bytes(prev_lo.storage_id, prev_lo.row_size);
+            self.database
+                .add_dead_bytes(delete_location.storage_id, delete_location.row_size);
         }
 
         Ok(())
@@ -275,7 +279,9 @@ impl Bitcasky {
 
         debug!(target: "Bitcasky", "put data success. key: {:?}, storage_id: {}, row_offset: {}", 
             key.as_ref(), ret.storage_id, ret.row_offset);
-        kd.put(key.as_ref().into(), ret);
+        if let Some(lo) = kd.put(key.as_ref().into(), ret) {
+            self.database.add_dead_bytes(lo.storage_id, lo.row_size);
+        }
         Ok(())
     }
 }

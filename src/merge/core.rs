@@ -90,7 +90,7 @@ impl MergeManager {
                 })?;
 
             for (k, v) in merged_key_dir.into_iter() {
-                kd.checked_put(k, v)
+                kd.checked_put(k, v);
             }
         }
 
@@ -212,7 +212,9 @@ impl MergeManager {
             if let Some(v) = database.read_value(r.value())? {
                 let pos =
                     merge_db.write(k, TimedValue::expirable_value(v.value, v.expire_timestamp))?;
-                merged_key_dir.checked_put(k.clone(), pos);
+                if let Some(lo) = merged_key_dir.checked_put(k.clone(), pos) {
+                    merge_db.add_dead_bytes(lo.storage_id, lo.row_offset);
+                }
                 debug!(target: "Bitcasky", "put data to merged file success. key: {:?}, storage_id: {}, row_offset: {}, expire_timestamp: {}", 
                 k, pos.storage_id, pos.row_offset, v.expire_timestamp);
                 write_key_count += 1;
@@ -408,7 +410,7 @@ mod tests {
         assert_eq!(*expect.kv.value(), *actual.unwrap().value);
     }
 
-    pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
+    pub fn assert_database_rows(db: &Database, expect_rows: &[TestingRow]) {
         let mut i = 0;
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
@@ -430,15 +432,9 @@ mod tests {
         kvs.into_iter()
             .map(|kv| {
                 let pos = db
-                    .write(kv.key(), TimedValue::immortal_value(kv.value()))
+                    .write(kv.key(), TimedValue::permanent_value(kv.value()))
                     .unwrap();
-                TestingRow::new(
-                    kv,
-                    RowLocation {
-                        storage_id: pos.storage_id,
-                        row_offset: pos.row_offset,
-                    },
-                )
+                TestingRow::new(kv, pos)
             })
             .collect::<Vec<TestingRow>>()
     }

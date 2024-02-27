@@ -20,10 +20,12 @@ const DATA_FILE_VALUE_SIZE_OFFSET: usize = DATA_FILE_KEY_SIZE_OFFSET + KEY_SIZE_
 const DATA_FILE_KEY_OFFSET: usize = CRC_SIZE + TSTAMP_SIZE + KEY_SIZE_SIZE + VALUE_SIZE_SIZE;
 
 const ROW_OFFSET_SIZE: usize = 8;
+const ROW_SIZE_SIZE: usize = 8;
 const HINT_FILE_KEY_SIZE_OFFSET: usize = TSTAMP_SIZE;
 const HINT_FILE_ROW_OFFSET_OFFSET: usize = HINT_FILE_KEY_SIZE_OFFSET + KEY_SIZE_SIZE;
-const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
-const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SIZE;
+const HINT_FILE_ROW_SIZE_OFFSET: usize = HINT_FILE_ROW_OFFSET_OFFSET + ROW_OFFSET_SIZE;
+const HINT_FILE_KEY_OFFSET: usize = HINT_FILE_ROW_SIZE_OFFSET + ROW_SIZE_SIZE;
+const HINT_FILE_HEADER_SIZE: usize = TSTAMP_SIZE + KEY_SIZE_SIZE + ROW_OFFSET_SIZE + ROW_SIZE_SIZE;
 
 const MERGE_META_FILE_SIZE: usize = 4;
 
@@ -115,9 +117,20 @@ impl Formatter for FormatterV1 {
         let header = &hint.header;
 
         LittleEndian::write_u64(output, header.expire_timestamp);
-        LittleEndian::write_u64(&mut output[8..], header.key_size as u64);
-        LittleEndian::write_u64(&mut output[16..], header.row_offset as u64);
-        copy_memory(&hint.key, &mut output[24..]);
+        LittleEndian::write_u64(
+            &mut output[HINT_FILE_KEY_SIZE_OFFSET..],
+            header.key_size as u64,
+        );
+        LittleEndian::write_u64(
+            &mut output[HINT_FILE_ROW_OFFSET_OFFSET..],
+            header.row_offset as u64,
+        );
+        LittleEndian::write_u64(
+            &mut output[HINT_FILE_ROW_SIZE_OFFSET..],
+            header.row_size as u64,
+        );
+
+        copy_memory(&hint.key, &mut output[HINT_FILE_KEY_OFFSET..]);
         HINT_FILE_HEADER_SIZE + hint.key.len()
     }
 
@@ -130,13 +143,17 @@ impl Formatter for FormatterV1 {
         let key_size = LittleEndian::read_u64(
             &header_bs[HINT_FILE_KEY_SIZE_OFFSET..HINT_FILE_ROW_OFFSET_OFFSET],
         ) as usize;
-        let row_offset =
-            LittleEndian::read_u64(&header_bs[HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_KEY_OFFSET])
+        let row_offset = LittleEndian::read_u64(
+            &header_bs[HINT_FILE_ROW_OFFSET_OFFSET..HINT_FILE_ROW_SIZE_OFFSET],
+        ) as usize;
+        let row_size =
+            LittleEndian::read_u64(&header_bs[HINT_FILE_ROW_SIZE_OFFSET..HINT_FILE_KEY_OFFSET])
                 as usize;
         RowHintHeader {
             expire_timestamp: timestamp,
             key_size,
             row_offset,
+            row_size,
         }
     }
 
@@ -184,6 +201,7 @@ mod tests {
                 expire_timestamp: 12345,
                 key_size: k.len(),
                 row_offset: 56789,
+                row_size: 12345,
             },
             key: k,
         };

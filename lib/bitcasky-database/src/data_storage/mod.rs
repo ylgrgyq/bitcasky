@@ -79,15 +79,17 @@ enum DataStorageImpl {
     MmapStorage(MmapDataStorage),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct DataStorageTelemetry {
     pub storage_id: StorageId,
     pub formatter_version: u8,
-    pub capacity: usize,
-    pub offset: usize,
+    pub data_capacity: usize,
+    pub data_size: usize,
     pub usage: f64,
+    pub fragment: f64,
     pub read_value_times: u64,
     pub write_times: u64,
+    pub dead_bytes: usize,
 }
 
 #[derive(Debug)]
@@ -98,6 +100,7 @@ pub struct DataStorage {
     options: Arc<BitcaskyOptions>,
     formatter: Arc<BitcaskyFormatter>,
     dirty: bool,
+    dead_bytes: usize,
 }
 
 impl DataStorage {
@@ -171,6 +174,10 @@ impl DataStorage {
         self.dirty
     }
 
+    pub fn add_dead_bytes(&mut self, dead_bytes: usize) {
+        self.dead_bytes += dead_bytes;
+    }
+
     pub fn iter(&self) -> Result<StorageIter> {
         let mut data_file = fs::open_file(
             &self.database_dir,
@@ -201,15 +208,25 @@ impl DataStorage {
 
     pub fn get_telemetry_data(&self) -> DataStorageTelemetry {
         match &self.storage_impl {
-            DataStorageImpl::MmapStorage(s) => DataStorageTelemetry {
-                storage_id: self.storage_id,
-                formatter_version: self.formatter.version(),
-                capacity: s.capacity,
-                offset: s.offset,
-                usage: s.offset as f64 / s.capacity as f64,
-                read_value_times: s.read_value_times,
-                write_times: s.write_times,
-            },
+            DataStorageImpl::MmapStorage(s) => {
+                let data_size = s.offset - FILE_HEADER_SIZE;
+                let data_capacity = s.capacity - FILE_HEADER_SIZE;
+                let mut fragment = self.dead_bytes as f64 / data_size as f64;
+                if fragment.is_nan() {
+                    fragment = 0.0;
+                }
+                DataStorageTelemetry {
+                    storage_id: self.storage_id,
+                    formatter_version: self.formatter.version(),
+                    data_capacity,
+                    data_size,
+                    usage: data_size as f64 / data_capacity as f64,
+                    fragment,
+                    read_value_times: s.read_value_times,
+                    write_times: s.write_times,
+                    dead_bytes: self.dead_bytes,
+                }
+            }
         }
     }
 
@@ -238,6 +255,7 @@ impl DataStorage {
             options,
             formatter,
             dirty: false,
+            dead_bytes: 0,
         })
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    collections::HashMap,
     mem,
     path::{Path, PathBuf},
     sync::Arc,
@@ -36,6 +37,18 @@ use super::{
     common::{RowLocation, RowToRead},
     hint::HintFile,
 };
+
+#[derive(Debug)]
+pub struct StorageAggregatedTelemetry {
+    pub total_data_capacity: usize,
+    pub total_data_size: usize,
+    pub total_usage: f64,
+    pub total_fragment: f64,
+    pub total_read_value_times: u64,
+    pub total_write_times: u64,
+    pub total_dead_bytes: usize,
+}
+
 /**
  * Statistics of a Database.
  * Some of the metrics may not accurate due to concurrent access.
@@ -43,7 +56,8 @@ use super::{
 #[derive(Debug)]
 pub struct DatabaseTelemetry {
     pub writing_storage: DataStorageTelemetry,
-    pub stable_storages: Vec<DataStorageTelemetry>,
+    pub stable_storages: HashMap<StorageId, DataStorageTelemetry>,
+    pub storage_aggregate: StorageAggregatedTelemetry,
     pub hint_file_writer: hint::HintWriterTelemetry,
 }
 
@@ -143,13 +157,13 @@ impl Database {
     ) -> DatabaseResult<RowLocation> {
         let ts = value.expire_timestamp;
         let row: RowToWrite<K, TimedValue<V>> = RowToWrite::new_with_timestamp(key, value, ts);
-        let mut writing_file_ref = self.writing_storage.lock();
+        let mut writing_storage_ref = self.writing_storage.lock();
 
-        match writing_file_ref.write_row(&row) {
+        match writing_storage_ref.write_row(&row) {
             Err(DataStorageError::StorageOverflow(id)) => {
                 debug!("Flush writing storage with id: {} on overflow", id);
-                self.do_flush_writing_file(&mut writing_file_ref)?;
-                Ok(writing_file_ref.write_row(&row)?)
+                self.do_flush_writing_file(&mut writing_storage_ref)?;
+                Ok(writing_storage_ref.write_row(&row)?)
             }
             r => {
                 let ret = r?;
@@ -161,6 +175,15 @@ impl Database {
                 };
                 Ok(ret)
             }
+        }
+    }
+
+    pub fn add_dead_bytes(&self, storage_id: StorageId, dead_bytes: usize) {
+        let mut writing_storage_ref = self.writing_storage.lock();
+        if storage_id.eq(&writing_storage_ref.storage_id()) {
+            writing_storage_ref.add_dead_bytes(dead_bytes);
+        } else if let Some(storage) = self.stable_storages.get(&storage_id) {
+            storage.lock().add_dead_bytes(dead_bytes);
         }
     }
 
@@ -287,13 +310,38 @@ impl Database {
 
     pub fn get_telemetry_data(&self) -> DatabaseTelemetry {
         let writing_storage = { self.writing_storage.lock().get_telemetry_data() };
-        let stable_storages: Vec<DataStorageTelemetry> = {
+        let stable_storages: HashMap<StorageId, DataStorageTelemetry> = HashMap::from_iter(
             self.stable_storages
                 .iter()
-                .map(|s| s.lock().get_telemetry_data())
-                .collect()
-        };
+                .map(|s| {
+                    let d = s.lock();
+                    (d.storage_id(), d.get_telemetry_data())
+                })
+                .collect::<Vec<_>>(),
+        );
 
+        let total_telemetry =
+            stable_storages
+                .values()
+                .fold(writing_storage.clone(), |mut acc, next| {
+                    acc.data_size += next.data_size;
+                    acc.data_capacity += next.data_capacity;
+                    acc.dead_bytes += next.dead_bytes;
+                    acc.read_value_times += next.read_value_times;
+                    acc.write_times += next.write_times;
+                    acc
+                });
+        let total_fragment = total_telemetry.dead_bytes as f64 / total_telemetry.data_size as f64;
+        let total_usage = total_telemetry.data_size as f64 / total_telemetry.data_capacity as f64;
+        let storage_aggregate = StorageAggregatedTelemetry {
+            total_data_capacity: total_telemetry.data_capacity,
+            total_data_size: total_telemetry.data_size,
+            total_fragment,
+            total_usage,
+            total_read_value_times: total_telemetry.read_value_times,
+            total_write_times: total_telemetry.write_times,
+            total_dead_bytes: total_telemetry.dead_bytes,
+        };
         DatabaseTelemetry {
             hint_file_writer: self
                 .hint_file_writer
@@ -302,6 +350,7 @@ impl Database {
                 .unwrap_or_default(),
             writing_storage,
             stable_storages,
+            storage_aggregate,
         }
     }
 
@@ -701,7 +750,7 @@ pub mod database_tests {
         }
     }
 
-    pub fn assert_database_rows(db: &Database, expect_rows: &Vec<TestingRow>) {
+    pub fn assert_database_rows(db: &Database, expect_rows: &[TestingRow]) {
         let mut i = 0;
         for actual_row in db.iter().unwrap().map(|r| r.unwrap()) {
             let expect_row = expect_rows.get(i).unwrap();
@@ -1063,5 +1112,44 @@ pub mod database_tests {
         assert_rows_value(&db, &rows);
         assert_eq!(1, db.stable_storages.len());
         assert_database_rows(&db, &rows);
+    }
+
+    #[test]
+    fn test_add_dead_bytes() {
+        let storage_id_generator = Arc::new(StorageIdGenerator::default());
+        let dir = get_temporary_directory_path();
+        let db = Database::open(
+            &dir,
+            storage_id_generator,
+            Arc::new(
+                BitcaskyOptions::default()
+                    .max_data_file_size(120)
+                    .init_data_file_capacity(100),
+            ),
+        )
+        .unwrap();
+        let stable_row_lo = db
+            .write("key", TimedValue::permanent_value("value"))
+            .unwrap();
+        db.flush_writing_file().unwrap();
+        let writing_row_lo = db
+            .write("key2", TimedValue::permanent_value("value2"))
+            .unwrap();
+
+        db.add_dead_bytes(stable_row_lo.storage_id, stable_row_lo.row_size);
+        db.add_dead_bytes(writing_row_lo.storage_id, writing_row_lo.row_size);
+        let telemetry = db.get_telemetry_data();
+        assert_eq!(
+            writing_row_lo.row_size,
+            telemetry.writing_storage.dead_bytes
+        );
+        assert_eq!(
+            stable_row_lo.row_size,
+            telemetry
+                .stable_storages
+                .get(&stable_row_lo.storage_id)
+                .unwrap()
+                .dead_bytes
+        );
     }
 }

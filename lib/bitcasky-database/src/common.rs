@@ -10,6 +10,7 @@ use crate::DataStorageError;
 pub struct RowLocation {
     pub storage_id: StorageId,
     pub row_offset: usize,
+    pub row_size: usize,
 }
 
 #[derive(Debug)]
@@ -45,11 +46,11 @@ impl<V: AsRef<[u8]>> Deref for TimedValue<V> {
 }
 
 pub fn deleted_value() -> TimedValue<Vec<u8>> {
-    TimedValue::immortal_value(TOMBSTONE_VALUE.as_bytes().to_vec())
+    TimedValue::permanent_value(TOMBSTONE_VALUE.as_bytes().to_vec())
 }
 
 impl<V: AsRef<[u8]>> TimedValue<V> {
-    pub fn immortal_value(value: V) -> TimedValue<V> {
+    pub fn permanent_value(value: V) -> TimedValue<V> {
         TimedValue {
             value,
             expire_timestamp: 0,
