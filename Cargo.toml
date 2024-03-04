@@ -1,8 +1,27 @@
-[package]
+[workspace]
+members = [
+  "lib/bitcasky-common",
+  "lib/bitcasky-database",
+  "utilities",
+]
+
+resolver = "2"
+
+exclude = [
+    "*.md",
+    "*.txt",
+    ".circleci/",
+    ".editorconfig",
+    ".git*",
+    ".github/",
+    ".kodiak.toml",
+    "LICENSE*",
+]
+
+[workspace.package]
 name = "bitcasky"
 version = "0.1.1"
 edition = "2021"
-resolver = "2"
 license = "MIT"
 repository = "https://github.com/ylgrgyq/bitcask"
 description = "Bitcasky is a Rust implementation of the Bitcask key-value store"
@@ -32,9 +51,3 @@ uuid = { version = "1.6.1", features = [
 test-log = "0.2.11"
 env_logger = "0.10.1"
 utilities = { path = "./utilities" }
-
-[workspace]
-members = [
-  "lib/*",
-  "utilities",
-]
