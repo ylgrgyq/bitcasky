@@ -3,7 +3,6 @@ name = "bitcasky-database"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-authors.workspace = true
 
 description = "Database for bitcasky lib"
 
@@ -17,18 +16,18 @@ bench = false
 [dependencies]
 bitcasky-common = { path = "../bitcasky-common", version = "0.1.0" }
 
-thiserror = "1.0.53"
-memmap2 = "0.9.3"
-dashmap = "5.5.3"
-log = "0.4.20"
-rand = "0.8"
-parking_lot = { version = "0.12.1" }
-crossbeam = "0.8.2"
-crossbeam-channel = "0.5.8"
+thiserror.workspace = true
+memmap2.workspace = true
+dashmap.workspace = true
+log.workspace = true
+rand.workspace = true
+parking_lot.workspace = true
+crossbeam.workspace = true
+crossbeam-channel.workspace = true
 
 [dev-dependencies]
-test-log = "0.2.11"
-env_logger = "0.10.1"
-criterion = "0.5"
-tempfile = "3.3.0"
-utilities = { path = "../../utilities" }
+test-log.workspace = true
+env_logger.workspace = true
+criterion.workspace = true
+tempfile.workspace = true
+utilities.workspace = true

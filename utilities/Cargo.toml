@@ -1,9 +1,0 @@
-[package]
-name = "utilities"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-tempfile = "3.3.0"
-rand = "0.8.5"
-bytes = "1.5.0"
