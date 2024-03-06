@@ -1,22 +1,44 @@
-[package]
-name = "bitcasky"
+[workspace]
+members = [
+  "src/bitcasky-common",
+  "src/bitcasky-database",
+  "src/utilities",
+]
+
+resolver = "2"
+
+exclude = [
+    "*.md",
+    "*.txt",
+    ".circleci/",
+    ".editorconfig",
+    ".git*",
+    ".github/",
+    ".kodiak.toml",
+    "LICENSE*",
+]
+
+[workspace.package]
 version = "0.1.1"
 edition = "2021"
-resolver = "2"
 license = "MIT"
 repository = "https://github.com/ylgrgyq/bitcask"
-description = "Bitcasky is a Rust implementation of the Bitcask key-value store"
 
-[[test]]
-name = "test_read_write"
+[workspace.dependencies]
+## workspaces members
+bitcasky-common = { path = "src/bitcasky-common" }
+bitcasky-database = { path = "src/bitcasky-database" }
+utilities = { path = "src/utilities" }
 
-[[test]]
-name = "test_merge"
-
-[dependencies]
-bitcasky-common = { path = "lib/bitcasky-common", version = "0.1.1" }
-bitcasky-database = { path = "lib/bitcasky-database", version = "0.1.1" }
-
+crc = "3.0.0"
+byteorder = "1.4"
+fs4 = "0.6.6"
+# fs4 depends on rustix, but pulling this dependency explicitly into the tree
+# to use direct functions on FreeBSD
+rustix = { version = "0", features = [ "fs" ]}
+libc = "0.2.152"
+tempfile = "3.3.0"
+rand = "0.8.5"
 bytes = "1.5.0"
 thiserror = "1.0.53"
 dashmap = "5.5.3"
@@ -27,14 +49,11 @@ uuid = { version = "1.6.1", features = [
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
     "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
 ]}
+memmap2 = "0.9.3"
+crossbeam = "0.8.2"
+crossbeam-channel = "0.5.8"
+criterion = "0.5"
 
-[dev-dependencies]
 test-log = "0.2.11"
 env_logger = "0.10.1"
-utilities = { path = "./utilities" }
-
-[workspace]
-members = [
-  "lib/*",
-  "utilities",
-]
+assert_matches = "1.5.0"

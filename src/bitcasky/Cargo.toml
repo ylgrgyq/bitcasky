@@ -1,0 +1,30 @@
+[package]
+name = "bitcasky"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+description = "Bitcasky is a Rust implementation of the Bitcask key-value store"
+
+[[test]]
+name = "test_read_write"
+
+[[test]]
+name = "test_merge"
+
+[dependencies]
+## workspaces members
+bitcasky-common.workspace = true
+bitcasky-database.workspace = true
+utilities.workspace = true
+
+bytes.workspace = true
+thiserror.workspace = true
+dashmap.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+env_logger.workspace = true
+
+[dev-dependencies]
+test-log.workspace = true

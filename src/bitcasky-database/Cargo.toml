@@ -1,0 +1,33 @@
+[package]
+name = "bitcasky-database"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+description = "Database for bitcasky lib"
+
+[[bench]]
+name = "mmap_data_storage"
+harness = false
+
+[lib]
+bench = false
+
+[dependencies]
+bitcasky-common = { path = "../bitcasky-common", version = "0.1.0" }
+
+thiserror.workspace = true
+memmap2.workspace = true
+dashmap.workspace = true
+log.workspace = true
+rand.workspace = true
+parking_lot.workspace = true
+crossbeam.workspace = true
+crossbeam-channel.workspace = true
+
+[dev-dependencies]
+test-log.workspace = true
+env_logger.workspace = true
+criterion.workspace = true
+tempfile.workspace = true
+utilities.workspace = true
