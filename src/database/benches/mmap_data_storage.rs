@@ -1,10 +1,10 @@
 use std::{sync::Arc, vec};
 
-use bitcasky_common::{
+use common::{
     formatter::{BitcaskyFormatter, RowToWrite},
     options::BitcaskyOptions,
 };
-use bitcasky_database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
+use database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
 use utilities::common::RandomTestingDataGenerator;
 
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -20,7 +20,7 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
             BitcaskyOptions::default()
                 .max_data_file_size(usize::MAX)
                 .init_data_file_capacity(100)
-                .storage_type(bitcasky_common::options::DataSotrageType::Mmap),
+                .storage_type(common::options::DataSotrageType::Mmap),
         ),
     )
     .unwrap()

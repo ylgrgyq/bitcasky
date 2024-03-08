@@ -10,7 +10,7 @@ use bytes::Bytes;
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
-use bitcasky_common::{
+use common::{
     formatter::{
         get_formatter_from_file, initialize_new_file, BitcaskyFormatter, Formatter, MergeMeta,
     },
@@ -18,7 +18,7 @@ use bitcasky_common::{
     options::BitcaskyOptions,
     storage_id::{StorageId, StorageIdGenerator},
 };
-use bitcasky_database::{Database, TimedValue};
+use database::{Database, TimedValue};
 
 use crate::{
     error::{BitcaskyError, BitcaskyResult},
@@ -372,12 +372,12 @@ fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskyRes
 mod tests {
     use std::{time::Duration, vec};
 
-    use bitcasky_common::{
+    use common::{
         formatter::{initialize_new_file, BitcaskyFormatter},
         fs::FileType,
         options::SyncStrategy,
     };
-    use bitcasky_database::RowLocation;
+    use database::RowLocation;
 
     use super::*;
     use test_log::test;

@@ -12,7 +12,7 @@ use crossbeam_channel::{select, Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
-use bitcasky_common::{
+use common::{
     clock::Clock,
     formatter::{BitcaskyFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
@@ -700,7 +700,7 @@ pub mod database_tests {
         time::Duration,
     };
 
-    use bitcasky_common::{
+    use common::{
         clock::DebugClock,
         fs,
         fs::FileType,

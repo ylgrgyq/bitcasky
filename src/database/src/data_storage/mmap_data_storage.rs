@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc, vec};
 
-use bitcasky_common::{
+use common::{
     clock::Clock,
     formatter::{padding, BitcaskyFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     options::BitcaskyOptions,
@@ -78,7 +78,7 @@ impl MmapDataStorage {
 
             self.flush()?;
 
-            new_capacity = bitcasky_common::resize_file(&self.data_file, new_capacity)?;
+            new_capacity = common::resize_file(&self.data_file, new_capacity)?;
             debug!(
                 "data file with storage id: {:?}, require {} bytes, resizing from {} to {} bytes. ",
                 self.storage_id, required_capacity, self.capacity, new_capacity
@@ -250,7 +250,7 @@ impl DataStorageReader for MmapDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use bitcasky_common::{
+    use common::{
         clock::DebugClock, create_file, formatter::FILE_HEADER_SIZE, fs::FileType,
         options::DataSotrageType,
     };
