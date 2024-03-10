@@ -69,7 +69,7 @@ jobs:
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install --locked grcov; fi
       - name: Run tests
         run: |
-          make test_matrix
+          make run-all-unit-test
         env:
           RUSTFLAGS: '-Zinstrument-coverage'
           LLVM_PROFILE_FILE: '%p-%m.profraw'
