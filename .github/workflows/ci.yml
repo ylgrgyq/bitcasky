@@ -59,7 +59,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2023-07-01
+          toolchain: nightly-2023-12-19
           override: true
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v1
