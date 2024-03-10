@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 
-use bitcasky_common::{
+use common::{
     create_file,
     formatter::{
         self, get_formatter_from_file, BitcaskyFormatter, FormatterError, RowToWrite,

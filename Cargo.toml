@@ -1,7 +1,7 @@
 [workspace]
 members = [
-  "src/bitcasky-common",
-  "src/bitcasky-database",
+  "src/common",
+  "src/database",
   "src/utilities",
 ]
 
@@ -26,8 +26,8 @@ repository = "https://github.com/ylgrgyq/bitcask"
 
 [workspace.dependencies]
 ## workspaces members
-bitcasky-common = { path = "src/bitcasky-common" }
-bitcasky-database = { path = "src/bitcasky-database" }
+common = { path = "src/common" }
+database = { path = "src/database" }
 utilities = { path = "src/utilities" }
 
 crc = "3.0.0"

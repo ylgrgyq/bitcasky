@@ -1,5 +1,5 @@
 [package]
-name = "bitcasky-database"
+name = "database"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,7 +14,7 @@ harness = false
 bench = false
 
 [dependencies]
-bitcasky-common = { path = "../bitcasky-common", version = "0.1.0" }
+common.workspace = true
 
 thiserror.workspace = true
 memmap2.workspace = true

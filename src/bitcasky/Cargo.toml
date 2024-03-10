@@ -14,8 +14,8 @@ name = "test_merge"
 
 [dependencies]
 ## workspaces members
-bitcasky-common.workspace = true
-bitcasky-database.workspace = true
+common.workspace = true
+database.workspace = true
 utilities.workspace = true
 
 bytes.workspace = true
