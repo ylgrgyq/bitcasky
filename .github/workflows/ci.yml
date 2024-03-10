@@ -55,11 +55,11 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Install nightly toolchain
+      - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable-2023-04-05
+          toolchain: 1.76.0
           override: true
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v1
