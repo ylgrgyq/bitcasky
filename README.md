@@ -2,12 +2,15 @@
 
 [![Crates.io][crates-badge]][crates-url]
 [![MIT licensed][mit-badge]][mit-url]
+[![codecov][codecov-badge]][codecov-url]
 [![Build Status][actions-badge]][actions-url]
 
 [crates-badge]: https://img.shields.io/crates/v/bitcasky.svg
 [crates-url]: https://crates.io/crates/bitcasky
 [mit-badge]: https://img.shields.io/badge/license-MIT-yellow.svg
 [mit-url]: https://github.com/ylgrgyq/bitcasky/blob/master/LICENSE
+[codecov-badge]: https://codecov.io/gh/ylgrgyq/bitcasky/branch/master/graph/badge.svg
+[codecov-url]: https://app.codecov.io/gh/ylgrgyq/bitcasky/tree/master
 [actions-badge]: https://github.com/ylgrgyq/bitcasky/workflows/CI/badge.svg
 [actions-url]: https://github.com/ylgrgyq/bitcasky/actions?query=workflow%3ACI+branch%3Amaster
 
