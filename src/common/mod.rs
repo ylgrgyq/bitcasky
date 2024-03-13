@@ -8,19 +8,13 @@ use std::{
     ptr,
 };
 
-use formatter::BitcaskyFormatter;
-use fs::FileType;
+use crate::formatter::BitcaskyFormatter;
+use crate::fs::FileType;
+use crate::storage_id::StorageId;
 #[cfg(not(unix))]
 use fs4::FileExt;
-use storage_id::StorageId;
 
-use crate::common::formatter::FILE_HEADER_SIZE;
-
-pub mod clock;
-pub mod formatter;
-pub mod fs;
-pub mod storage_id;
-pub mod tombstone;
+use crate::formatter::FILE_HEADER_SIZE;
 
 pub fn create_file<P: AsRef<Path>>(
     base_dir: P,
@@ -53,9 +47,9 @@ pub fn create_file<P: AsRef<Path>>(
             .create(true)
             .open(&tmp_file_path)?;
 
-        fs::truncate_file(&mut file, capacity)?;
+        crate::fs::truncate_file(&mut file, capacity)?;
 
-        formatter::initialize_new_file(&mut file, formatter.version())?;
+        crate::formatter::initialize_new_file(&mut file, formatter.version())?;
 
         // Manually sync each file in Windows since sync-ing cannot be done for the whole directory.
         #[cfg(target_os = "windows")]
@@ -105,7 +99,7 @@ pub fn copy_memory(src: &[u8], dst: &mut [u8]) {
 mod tests {
     use std::io::{Read, Write};
 
-    use crate::common::formatter::get_formatter_from_file;
+    use crate::formatter::get_formatter_from_file;
 
     use super::*;
 
@@ -134,7 +128,7 @@ mod tests {
         file.write_all(&bs.freeze()).unwrap();
         file.flush().unwrap();
 
-        let mut reopen_file = fs::open_file(dir, FileType::DataFile, Some(storage_id))
+        let mut reopen_file = crate::fs::open_file(dir, FileType::DataFile, Some(storage_id))
             .unwrap()
             .file;
         assert_eq!(

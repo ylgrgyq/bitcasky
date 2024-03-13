@@ -6,7 +6,7 @@ use std::{
 
 use log::debug;
 
-use crate::common::{fs::FileType, storage_id::StorageId};
+use crate::{fs::FileType, storage_id::StorageId};
 
 const TESTING_DIRECTORY: &str = "Testing";
 

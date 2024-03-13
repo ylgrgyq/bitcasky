@@ -8,14 +8,14 @@ use log::{debug, error};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
-use crate::common::{
-    fs::{self},
-    storage_id::StorageIdGenerator,
-};
 use crate::database::{deleted_value, Database, DatabaseTelemetry, TimedValue};
 use crate::error::{BitcaskyError, BitcaskyResult};
 use crate::keydir::{KeyDir, KeyDirTelemetry};
 use crate::merge::{MergeManager, MergeManagerTelemetry};
+use crate::{
+    fs::{self},
+    storage_id::StorageIdGenerator,
+};
 
 #[derive(Debug)]
 pub struct BitcaskTelemetry {

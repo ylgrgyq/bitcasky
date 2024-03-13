@@ -13,9 +13,10 @@ use std::{
 
 use log::{debug, error, warn};
 
-use crate::common::{
+use crate::common::create_file;
+use crate::options::BitcaskyOptions;
+use crate::{
     clock::Clock,
-    create_file,
     formatter::{
         get_formatter_from_file, padding, BitcaskyFormatter, Formatter, RowHint, RowHintHeader,
         FILE_HEADER_SIZE,
@@ -23,7 +24,6 @@ use crate::common::{
     fs::{self, FileType},
     storage_id::StorageId,
 };
-use crate::options::BitcaskyOptions;
 use memmap2::{MmapMut, MmapOptions};
 
 use crate::database::{
@@ -360,8 +360,8 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::formatter::RowToWrite;
     use crate::database::data_storage::DataStorageWriter;
+    use crate::formatter::RowToWrite;
 
     use super::*;
     use test_log::test;

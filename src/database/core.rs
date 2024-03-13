@@ -12,13 +12,13 @@ use crossbeam_channel::{select, Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
-use crate::common::{
+use crate::options::{BitcaskyOptions, SyncStrategy};
+use crate::{
     clock::Clock,
     formatter::{BitcaskyFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
     storage_id::{StorageId, StorageIdGenerator},
 };
-use crate::options::{BitcaskyOptions, SyncStrategy};
 
 use crate::database::{
     common::{DatabaseError, DatabaseResult},
@@ -700,9 +700,9 @@ pub mod database_tests {
         time::Duration,
     };
 
-    use crate::common::{clock::DebugClock, fs, fs::FileType, storage_id::StorageIdGenerator};
     use crate::options::{BitcaskyOptions, SyncStrategy};
     use crate::utilities::common::{get_temporary_directory_path, TestingKV};
+    use crate::{clock::DebugClock, fs, fs::FileType, storage_id::StorageIdGenerator};
 
     use test_log::test;
 

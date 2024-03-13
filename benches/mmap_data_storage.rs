@@ -1,11 +1,11 @@
 use std::{sync::Arc, vec};
 
-use crate::utilities::common::RandomTestingDataGenerator;
-use common::{
+use bitcasky::database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
+use bitcasky::utilities::common::RandomTestingDataGenerator;
+use bitcasky::{
     formatter::{BitcaskyFormatter, RowToWrite},
     options::BitcaskyOptions,
 };
-use database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{seq::SliceRandom, thread_rng};
@@ -20,7 +20,7 @@ fn create_data_storage(dir: &TempDir) -> DataStorage {
             BitcaskyOptions::default()
                 .max_data_file_size(usize::MAX)
                 .init_data_file_capacity(100)
-                .storage_type(common::options::DataSotrageType::Mmap),
+                .storage_type(bitcasky::options::DataSotrageType::Mmap),
         ),
     )
     .unwrap()

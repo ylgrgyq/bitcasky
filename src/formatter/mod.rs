@@ -4,7 +4,7 @@ use std::{
     ops::Deref,
 };
 
-use crate::common::storage_id::StorageId;
+use crate::storage_id::StorageId;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use thiserror::Error;
@@ -254,7 +254,7 @@ pub fn padding(len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::fs::{create_file, open_file, FileType};
+    use crate::fs::{create_file, open_file, FileType};
 
     use super::*;
 

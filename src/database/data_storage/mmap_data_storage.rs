@@ -1,11 +1,11 @@
 use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc, vec};
 
-use crate::common::{
+use crate::options::BitcaskyOptions;
+use crate::{
     clock::Clock,
     formatter::{padding, BitcaskyFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
     storage_id::StorageId,
 };
-use crate::options::BitcaskyOptions;
 use log::debug;
 use memmap2::{MmapMut, MmapOptions};
 
@@ -250,10 +250,9 @@ impl DataStorageReader for MmapDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{
-        clock::DebugClock, create_file, formatter::FILE_HEADER_SIZE, fs::FileType,
-    };
+    use crate::common::create_file;
     use crate::options::DataSotrageType;
+    use crate::{clock::DebugClock, formatter::FILE_HEADER_SIZE, fs::FileType};
 
     use super::*;
 

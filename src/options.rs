@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::common::clock::{BitcaskyClock, ClockImpl, DebugClock};
+use crate::clock::{BitcaskyClock, ClockImpl, DebugClock};
 
 #[derive(Debug, Clone, Copy)]
 pub enum SyncStrategy {

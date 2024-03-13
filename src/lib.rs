@@ -1,11 +1,16 @@
 pub mod bitcasky;
 pub mod error;
 
-pub mod common;
-mod database;
+mod clock;
+mod common;
+pub mod database;
+pub mod formatter;
+mod fs;
 mod keydir;
 mod merge;
 pub mod options;
+mod storage_id;
+mod tombstone;
 pub mod utilities;
 
 #[cfg(test)]

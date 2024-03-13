@@ -1,7 +1,7 @@
 use core::panic;
 use std::path::{Path, PathBuf};
 
-use crate::common::storage_id::StorageId;
+use crate::storage_id::StorageId;
 
 const LOCK_FILE_EXTENSION: &str = "lock";
 const MERGE_META_FILE_EXTENSION: &str = "meta";

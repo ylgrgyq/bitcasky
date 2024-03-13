@@ -175,7 +175,7 @@ impl Formatter for FormatterV1 {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::formatter::RowHint;
+    use crate::formatter::RowHint;
 
     use super::*;
 
