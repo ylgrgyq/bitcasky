@@ -4,7 +4,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
 
-use crate::copy_memory;
+use crate::common::copy_memory;
 
 use super::{
     Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta, RowToWrite,
@@ -175,7 +175,7 @@ impl Formatter for FormatterV1 {
 
 #[cfg(test)]
 mod tests {
-    use crate::formatter::RowHint;
+    use crate::common::formatter::RowHint;
 
     use super::*;
 

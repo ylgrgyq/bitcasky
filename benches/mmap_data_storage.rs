@@ -1,11 +1,11 @@
 use std::{sync::Arc, vec};
 
+use crate::utilities::common::RandomTestingDataGenerator;
 use common::{
     formatter::{BitcaskyFormatter, RowToWrite},
     options::BitcaskyOptions,
 };
 use database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
-use utilities::common::RandomTestingDataGenerator;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{seq::SliceRandom, thread_rng};

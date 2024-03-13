@@ -1,7 +1,7 @@
 use core::panic;
 use std::path::{Path, PathBuf};
 
-use crate::storage_id::StorageId;
+use crate::common::storage_id::StorageId;
 
 const LOCK_FILE_EXTENSION: &str = "lock";
 const MERGE_META_FILE_EXTENSION: &str = "meta";
@@ -83,7 +83,7 @@ impl std::fmt::Display for FileType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use utilities::common::get_temporary_directory_path;
+    use crate::utilities::common::get_temporary_directory_path;
 
     #[test]
     fn test_file_type() {

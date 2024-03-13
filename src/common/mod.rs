@@ -14,18 +14,13 @@ use fs::FileType;
 use fs4::FileExt;
 use storage_id::StorageId;
 
-use crate::formatter::FILE_HEADER_SIZE;
+use crate::common::formatter::FILE_HEADER_SIZE;
 
 pub mod clock;
 pub mod formatter;
 pub mod fs;
-pub mod options;
 pub mod storage_id;
 pub mod tombstone;
-
-#[cfg(test)]
-#[macro_use]
-extern crate assert_matches;
 
 pub fn create_file<P: AsRef<Path>>(
     base_dir: P,
@@ -110,13 +105,13 @@ pub fn copy_memory(src: &[u8], dst: &mut [u8]) {
 mod tests {
     use std::io::{Read, Write};
 
-    use crate::formatter::get_formatter_from_file;
+    use crate::common::formatter::get_formatter_from_file;
 
     use super::*;
 
+    use crate::utilities::common::get_temporary_directory_path;
     use bytes::{Buf, BufMut, Bytes, BytesMut};
     use test_log::test;
-    use utilities::common::get_temporary_directory_path;
 
     #[test]
     fn test_create_file() {

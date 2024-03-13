@@ -9,16 +9,16 @@ use std::{
 };
 use thiserror::Error;
 
-use common::{
+use crate::common::{
     create_file,
     formatter::{
         self, get_formatter_from_file, BitcaskyFormatter, FormatterError, RowToWrite,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::{BitcaskyOptions, SyncStrategy},
     storage_id::StorageId,
 };
+use crate::options::{BitcaskyOptions, SyncStrategy};
 
 use self::mmap_data_storage::MmapDataStorage;
 

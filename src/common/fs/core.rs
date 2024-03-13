@@ -6,7 +6,7 @@ use std::{
 
 use log::debug;
 
-use crate::{fs::FileType, storage_id::StorageId};
+use crate::common::{fs::FileType, storage_id::StorageId};
 
 const TESTING_DIRECTORY: &str = "Testing";
 
@@ -191,9 +191,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::utilities::common::get_temporary_directory_path;
     use bytes::{Buf, Bytes, BytesMut};
     use test_log::test;
-    use utilities::common::get_temporary_directory_path;
 
     fn open_file_by_path(file_type: FileType, file_path: &Path) -> Result<IdentifiedFile> {
         if file_type.check_file_belongs_to_type(file_path) {

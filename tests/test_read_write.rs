@@ -1,11 +1,11 @@
 use std::{collections::HashSet, time::Duration};
 
-use bitcasky::{bitcasky::Bitcasky, error::BitcaskyError};
-use common::options::{BitcaskyOptions, SyncStrategy};
-use test_log::test;
-use utilities::common::{
+use bitcasky::options::{BitcaskyOptions, SyncStrategy};
+use bitcasky::utilities::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
+use bitcasky::{bitcasky::Bitcasky, error::BitcaskyError};
+use test_log::test;
 
 fn execute_testing_operations(bc: &Bitcasky, ops: &TestingOperations) {
     for op in ops.operations() {
