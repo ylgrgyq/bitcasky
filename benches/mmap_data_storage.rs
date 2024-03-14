@@ -1,11 +1,9 @@
 use std::{sync::Arc, vec};
 
-use bitcasky::database::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
-use bitcasky::utilities::common::RandomTestingDataGenerator;
-use bitcasky::{
-    formatter::{BitcaskyFormatter, RowToWrite},
-    options::BitcaskyOptions,
-};
+use bitcasky::internals::common::RandomTestingDataGenerator;
+use bitcasky::internals::data_storage::{DataStorage, DataStorageReader, DataStorageWriter};
+use bitcasky::internals::{BitcaskyFormatter, RowToWrite};
+use bitcasky::options::BitcaskyOptions;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{seq::SliceRandom, thread_rng};

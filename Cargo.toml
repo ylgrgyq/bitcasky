@@ -22,12 +22,18 @@ repository = "https://github.com/ylgrgyq/bitcasky"
 [[bench]]
 name = "mmap_data_storage"
 harness = false
+required-features = ["internals"]
 
 [[test]]
 name = "test_read_write"
+required-features = ["internals"]
 
 [[test]]
 name = "test_merge"
+required-features = ["internals"]
+
+[features]
+internals = []
 
 [dependencies]
 crc = "3.0.0"

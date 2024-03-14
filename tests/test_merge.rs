@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use bitcasky::bitcasky::Bitcasky;
+use bitcasky::internals::common::get_temporary_directory_path;
 use bitcasky::options::BitcaskyOptions;
-use bitcasky::utilities::common::get_temporary_directory_path;
 use test_log::test;
 
 #[test]

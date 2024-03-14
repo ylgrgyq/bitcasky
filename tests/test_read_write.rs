@@ -1,9 +1,9 @@
 use std::{collections::HashSet, time::Duration};
 
-use bitcasky::options::{BitcaskyOptions, SyncStrategy};
-use bitcasky::utilities::common::{
+use bitcasky::internals::common::{
     get_temporary_directory_path, RandomTestingDataGenerator, TestingOperations, TestingOperator,
 };
+use bitcasky::options::{BitcaskyOptions, SyncStrategy};
 use bitcasky::{bitcasky::Bitcasky, error::BitcaskyError};
 use test_log::test;
 
