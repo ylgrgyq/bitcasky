@@ -3,7 +3,6 @@
 extern crate assert_matches;
 
 mod clock;
-mod common;
 mod database;
 mod formatter;
 mod fs;

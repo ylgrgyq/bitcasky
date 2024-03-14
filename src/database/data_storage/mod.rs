@@ -9,7 +9,7 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::common::create_file;
+use crate::fs::create_data_file;
 use crate::options::{BitcaskyOptions, SyncStrategy};
 use crate::{
     formatter::{
@@ -116,7 +116,7 @@ impl DataStorage {
             is_o_sync = true;
         }
         let path = database_dir.as_ref().to_path_buf();
-        let data_file = create_file(
+        let data_file = create_data_file(
             &path,
             FileType::DataFile,
             Some(storage_id),

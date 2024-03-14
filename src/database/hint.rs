@@ -13,7 +13,7 @@ use std::{
 
 use log::{debug, error, warn};
 
-use crate::common::create_file;
+use crate::fs::create_data_file;
 use crate::options::BitcaskyOptions;
 use crate::{
     clock::Clock,
@@ -54,7 +54,7 @@ impl HintFile {
         init_hint_file_capacity: usize,
     ) -> DatabaseResult<Self> {
         let formatter = BitcaskyFormatter::default();
-        let file = create_file(
+        let file = create_data_file(
             database_dir,
             FileType::HintFile,
             Some(storage_id),

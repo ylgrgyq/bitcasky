@@ -118,6 +118,19 @@ pub fn truncate_file(file: &mut File, capacity: usize) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<usize> {
+    let capacity = required_capacity & !7;
+    // fs4 provides some cross-platform bindings which help for Windows.
+    #[cfg(not(unix))]
+    file.allocate(capacity as u64)?;
+    // For all unix systems WAL can just use ftruncate directly
+    #[cfg(unix)]
+    {
+        rustix::fs::ftruncate(file, capacity as u64)?;
+    }
+    Ok(capacity)
+}
+
 pub fn change_storage_id(
     base_dir: &Path,
     file_type: FileType,

@@ -78,7 +78,7 @@ impl MmapDataStorage {
 
             self.flush()?;
 
-            new_capacity = crate::common::resize_file(&self.data_file, new_capacity)?;
+            new_capacity = crate::fs::resize_file(&self.data_file, new_capacity)?;
             debug!(
                 "data file with storage id: {:?}, require {} bytes, resizing from {} to {} bytes. ",
                 self.storage_id, required_capacity, self.capacity, new_capacity
@@ -250,7 +250,7 @@ impl DataStorageReader for MmapDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_file;
+    use crate::fs::create_data_file;
     use crate::options::DataSotrageType;
     use crate::{clock::DebugClock, formatter::FILE_HEADER_SIZE, fs::FileType};
 
@@ -270,7 +270,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = Arc::new(BitcaskyFormatter::default());
-        let file = create_file(
+        let file = create_data_file(
             dir,
             FileType::DataFile,
             Some(storage_id),
