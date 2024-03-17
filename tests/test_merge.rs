@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use bitcasky::bitcasky::Bitcasky;
-use common::options::BitcaskyOptions;
+use bitcasky::internals::common::get_temporary_directory_path;
+use bitcasky::options::BitcaskyOptions;
 use test_log::test;
-use utilities::common::get_temporary_directory_path;
 
 #[test]
 fn test_merge_delete_no_remain() {

@@ -118,6 +118,19 @@ pub fn truncate_file(file: &mut File, capacity: usize) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<usize> {
+    let capacity = required_capacity & !7;
+    // fs4 provides some cross-platform bindings which help for Windows.
+    #[cfg(not(unix))]
+    file.allocate(capacity as u64)?;
+    // For all unix systems WAL can just use ftruncate directly
+    #[cfg(unix)]
+    {
+        rustix::fs::ftruncate(file, capacity as u64)?;
+    }
+    Ok(capacity)
+}
+
 pub fn change_storage_id(
     base_dir: &Path,
     file_type: FileType,
@@ -191,9 +204,9 @@ mod tests {
     };
 
     use super::*;
+    use crate::utilities::common::get_temporary_directory_path;
     use bytes::{Buf, Bytes, BytesMut};
     use test_log::test;
-    use utilities::common::get_temporary_directory_path;
 
     fn open_file_by_path(file_type: FileType, file_path: &Path) -> Result<IdentifiedFile> {
         if file_type.check_file_belongs_to_type(file_path) {

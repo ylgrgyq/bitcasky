@@ -13,20 +13,20 @@ use std::{
 
 use log::{debug, error, warn};
 
-use common::{
+use crate::fs::create_data_file;
+use crate::options::BitcaskyOptions;
+use crate::{
     clock::Clock,
-    create_file,
     formatter::{
         get_formatter_from_file, padding, BitcaskyFormatter, Formatter, RowHint, RowHintHeader,
         FILE_HEADER_SIZE,
     },
     fs::{self, FileType},
-    options::BitcaskyOptions,
     storage_id::StorageId,
 };
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::{
+use crate::database::{
     common::{DatabaseError, DatabaseResult},
     data_storage::DataStorage,
     RowLocation,
@@ -54,7 +54,7 @@ impl HintFile {
         init_hint_file_capacity: usize,
     ) -> DatabaseResult<Self> {
         let formatter = BitcaskyFormatter::default();
-        let file = create_file(
+        let file = create_data_file(
             database_dir,
             FileType::HintFile,
             Some(storage_id),
@@ -360,13 +360,13 @@ fn hint_file_tmp_dir(base_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::data_storage::DataStorageWriter;
-    use common::formatter::RowToWrite;
+    use crate::database::data_storage::DataStorageWriter;
+    use crate::formatter::RowToWrite;
 
     use super::*;
     use test_log::test;
 
-    use utilities::common::get_temporary_directory_path;
+    use crate::utilities::common::get_temporary_directory_path;
 
     #[test]
     fn test_read_write_hint_file() {

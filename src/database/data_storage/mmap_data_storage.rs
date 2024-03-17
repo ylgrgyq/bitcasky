@@ -1,15 +1,15 @@
 use std::{fs::File, io::Write, mem, ops::Deref, sync::Arc, vec};
 
-use common::{
+use crate::options::BitcaskyOptions;
+use crate::{
     clock::Clock,
     formatter::{padding, BitcaskyFormatter, Formatter, RowMeta, RowToWrite, FILE_HEADER_SIZE},
-    options::BitcaskyOptions,
     storage_id::StorageId,
 };
 use log::debug;
 use memmap2::{MmapMut, MmapOptions};
 
-use crate::{common::RowToRead, DataStorageError, RowLocation, TimedValue};
+use crate::database::{common::RowToRead, DataStorageError, RowLocation, TimedValue};
 
 use super::{DataStorageReader, DataStorageWriter, Result};
 
@@ -78,7 +78,7 @@ impl MmapDataStorage {
 
             self.flush()?;
 
-            new_capacity = common::resize_file(&self.data_file, new_capacity)?;
+            new_capacity = crate::fs::resize_file(&self.data_file, new_capacity)?;
             debug!(
                 "data file with storage id: {:?}, require {} bytes, resizing from {} to {} bytes. ",
                 self.storage_id, required_capacity, self.capacity, new_capacity
@@ -250,15 +250,14 @@ impl DataStorageReader for MmapDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use common::{
-        clock::DebugClock, create_file, formatter::FILE_HEADER_SIZE, fs::FileType,
-        options::DataSotrageType,
-    };
+    use crate::fs::create_data_file;
+    use crate::options::DataSotrageType;
+    use crate::{clock::DebugClock, formatter::FILE_HEADER_SIZE, fs::FileType};
 
     use super::*;
 
+    use crate::utilities::common::get_temporary_directory_path;
     use test_log::test;
-    use utilities::common::get_temporary_directory_path;
 
     fn get_options(max_size: usize) -> BitcaskyOptions {
         BitcaskyOptions::default()
@@ -271,7 +270,7 @@ mod tests {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = Arc::new(BitcaskyFormatter::default());
-        let file = create_file(
+        let file = create_data_file(
             dir,
             FileType::DataFile,
             Some(storage_id),

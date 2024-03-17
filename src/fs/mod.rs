@@ -1,33 +1,30 @@
+mod file_type;
+pub use self::file_type::*;
+
+mod file_lock;
+pub use self::file_lock::*;
+
+mod core;
+pub use self::core::*;
+
 #[cfg(unix)]
 use libc::O_SYNC;
 use rustix::fs::OpenOptionsExt;
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::{
-    fs::{File, OpenOptions},
     io::{Seek, SeekFrom},
     path::{Path, PathBuf},
-    ptr,
 };
 
-use formatter::BitcaskyFormatter;
-use fs::FileType;
+use crate::formatter::BitcaskyFormatter;
+use crate::storage_id::StorageId;
 #[cfg(not(unix))]
 use fs4::FileExt;
-use storage_id::StorageId;
 
 use crate::formatter::FILE_HEADER_SIZE;
 
-pub mod clock;
-pub mod formatter;
-pub mod fs;
-pub mod options;
-pub mod storage_id;
-pub mod tombstone;
-
-#[cfg(test)]
-#[macro_use]
-extern crate assert_matches;
-
-pub fn create_file<P: AsRef<Path>>(
+pub fn create_data_file<P: AsRef<Path>>(
     base_dir: P,
     file_type: FileType,
     storage_id: Option<StorageId>,
@@ -58,9 +55,9 @@ pub fn create_file<P: AsRef<Path>>(
             .create(true)
             .open(&tmp_file_path)?;
 
-        fs::truncate_file(&mut file, capacity)?;
+        crate::fs::truncate_file(&mut file, capacity)?;
 
-        formatter::initialize_new_file(&mut file, formatter.version())?;
+        crate::formatter::initialize_new_file(&mut file, formatter.version())?;
 
         // Manually sync each file in Windows since sync-ing cannot be done for the whole directory.
         #[cfg(target_os = "windows")]
@@ -85,27 +82,6 @@ pub fn create_file<P: AsRef<Path>>(
     Ok(file)
 }
 
-pub fn resize_file(file: &File, required_capacity: usize) -> std::io::Result<usize> {
-    let capacity = required_capacity & !7;
-    // fs4 provides some cross-platform bindings which help for Windows.
-    #[cfg(not(unix))]
-    file.allocate(capacity as u64)?;
-    // For all unix systems WAL can just use ftruncate directly
-    #[cfg(unix)]
-    {
-        rustix::fs::ftruncate(file, capacity as u64)?;
-    }
-    Ok(capacity)
-}
-
-pub fn copy_memory(src: &[u8], dst: &mut [u8]) {
-    let len_src = src.len();
-    assert!(dst.len() >= len_src);
-    unsafe {
-        ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len_src);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
@@ -114,16 +90,16 @@ mod tests {
 
     use super::*;
 
+    use crate::utilities::common::get_temporary_directory_path;
     use bytes::{Buf, BufMut, Bytes, BytesMut};
     use test_log::test;
-    use utilities::common::get_temporary_directory_path;
 
     #[test]
     fn test_create_file() {
         let dir = get_temporary_directory_path();
         let storage_id = 1;
         let formatter = BitcaskyFormatter::default();
-        let mut file = create_file(
+        let mut file = create_data_file(
             &dir,
             FileType::DataFile,
             Some(storage_id),
@@ -139,7 +115,7 @@ mod tests {
         file.write_all(&bs.freeze()).unwrap();
         file.flush().unwrap();
 
-        let mut reopen_file = fs::open_file(dir, FileType::DataFile, Some(storage_id))
+        let mut reopen_file = crate::fs::open_file(dir, FileType::DataFile, Some(storage_id))
             .unwrap()
             .file;
         assert_eq!(

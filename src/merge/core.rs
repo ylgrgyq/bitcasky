@@ -10,15 +10,15 @@ use bytes::Bytes;
 use log::{debug, error, info, warn};
 use parking_lot::{Mutex, RwLock};
 
-use common::{
+use crate::database::{Database, TimedValue};
+use crate::options::BitcaskyOptions;
+use crate::{
     formatter::{
         get_formatter_from_file, initialize_new_file, BitcaskyFormatter, Formatter, MergeMeta,
     },
     fs::{self, FileType},
-    options::BitcaskyOptions,
     storage_id::{StorageId, StorageIdGenerator},
 };
-use database::{Database, TimedValue};
 
 use crate::{
     error::{BitcaskyError, BitcaskyResult},
@@ -372,16 +372,16 @@ fn write_merge_meta(merge_file_dir: &Path, merge_meta: MergeMeta) -> BitcaskyRes
 mod tests {
     use std::{time::Duration, vec};
 
-    use common::{
+    use crate::database::RowLocation;
+    use crate::options::SyncStrategy;
+    use crate::{
         formatter::{initialize_new_file, BitcaskyFormatter},
         fs::FileType,
-        options::SyncStrategy,
     };
-    use database::RowLocation;
 
     use super::*;
+    use crate::utilities::common::{get_temporary_directory_path, TestingKV};
     use test_log::test;
-    use utilities::common::{get_temporary_directory_path, TestingKV};
 
     #[derive(Debug)]
     pub struct TestingRow {

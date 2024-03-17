@@ -6,8 +6,8 @@ use dashmap::{
     DashMap,
 };
 
+use crate::database::{Database, RowLocation};
 use crate::error::BitcaskyResult;
-use database::{Database, RowLocation};
 
 #[derive(Debug)]
 pub struct KeyDirTelemetry {

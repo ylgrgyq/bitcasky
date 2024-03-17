@@ -1,10 +1,8 @@
-use std::ops::Deref;
+use std::{ops::Deref, ptr};
 
 use byteorder::{ByteOrder, LittleEndian};
 use bytes::{Buf, Bytes};
 use crc::{Crc, CRC_32_CKSUM};
-
-use crate::copy_memory;
 
 use super::{
     Formatter, FormatterError, MergeMeta, Result, RowHeader, RowHintHeader, RowMeta, RowToWrite,
@@ -170,6 +168,14 @@ impl Formatter for FormatterV1 {
         MergeMeta {
             known_max_storage_id,
         }
+    }
+}
+
+fn copy_memory(src: &[u8], dst: &mut [u8]) {
+    let len_src = src.len();
+    assert!(dst.len() >= len_src);
+    unsafe {
+        ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), len_src);
     }
 }
 

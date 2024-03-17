@@ -12,15 +12,15 @@ use crossbeam_channel::{select, Receiver, Sender};
 use dashmap::{mapref::one::RefMut, DashMap};
 use parking_lot::{Mutex, MutexGuard};
 
-use common::{
+use crate::options::{BitcaskyOptions, SyncStrategy};
+use crate::{
     clock::Clock,
     formatter::{BitcaskyFormatter, RowToWrite},
     fs::{self as SelfFs, FileType},
-    options::{BitcaskyOptions, SyncStrategy},
     storage_id::{StorageId, StorageIdGenerator},
 };
 
-use crate::{
+use crate::database::{
     common::{DatabaseError, DatabaseResult},
     data_storage::DataStorageTelemetry,
     hint::{self, HintWriter},
@@ -241,7 +241,7 @@ impl Database {
 
         let mut opened_stable_files = files?;
         opened_stable_files.sort_by_key(|e| e.storage_id());
-        let iters: crate::data_storage::Result<Vec<StorageIter>> =
+        let iters: crate::database::data_storage::Result<Vec<StorageIter>> =
             opened_stable_files.iter().rev().map(|f| f.iter()).collect();
 
         Ok(DatabaseIter::new(iters?))
@@ -656,7 +656,7 @@ fn open_storages<P: AsRef<Path>>(
     Ok(storage_ids
         .iter()
         .map(|id| DataStorage::open(&database_dir, *id, options.clone()))
-        .collect::<crate::data_storage::Result<Vec<DataStorage>>>()?)
+        .collect::<crate::database::data_storage::Result<Vec<DataStorage>>>()?)
 }
 
 fn prepare_db_storages<P: AsRef<Path>>(
@@ -700,18 +700,13 @@ pub mod database_tests {
         time::Duration,
     };
 
-    use common::{
-        clock::DebugClock,
-        fs,
-        fs::FileType,
-        options::{BitcaskyOptions, SyncStrategy},
-        storage_id::StorageIdGenerator,
-    };
-    use utilities::common::{get_temporary_directory_path, TestingKV};
+    use crate::options::{BitcaskyOptions, SyncStrategy};
+    use crate::utilities::common::{get_temporary_directory_path, TestingKV};
+    use crate::{clock::DebugClock, fs, fs::FileType, storage_id::StorageIdGenerator};
 
     use test_log::test;
 
-    use crate::{data_storage::DataStorageReader, RowLocation, TimedValue};
+    use crate::database::{data_storage::DataStorageReader, RowLocation, TimedValue};
 
     use super::Database;
 

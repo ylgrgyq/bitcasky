@@ -1,7 +1,7 @@
-use database::DatabaseError;
+use crate::database::DatabaseError;
 use thiserror::Error;
 
-use common::formatter::FormatterError;
+use crate::formatter::FormatterError;
 
 #[derive(Error, Debug)]
 pub enum BitcaskyError {
