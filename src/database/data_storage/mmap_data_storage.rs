@@ -250,13 +250,13 @@ impl DataStorageReader for MmapDataStorage {
 
 #[cfg(test)]
 mod tests {
-    use crate::fs::create_data_file;
+    use crate::database::create_data_file;
     use crate::options::DataSotrageType;
     use crate::{clock::DebugClock, formatter::FILE_HEADER_SIZE, fs::FileType};
 
     use super::*;
 
-    use crate::utilities::common::get_temporary_directory_path;
+    use crate::test_utils::get_temporary_directory_path;
     use test_log::test;
 
     fn get_options(max_size: usize) -> BitcaskyOptions {

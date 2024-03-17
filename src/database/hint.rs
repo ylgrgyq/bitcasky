@@ -13,8 +13,6 @@ use std::{
 
 use log::{debug, error, warn};
 
-use crate::fs::create_data_file;
-use crate::options::BitcaskyOptions;
 use crate::{
     clock::Clock,
     formatter::{
@@ -24,6 +22,7 @@ use crate::{
     fs::{self, FileType},
     storage_id::StorageId,
 };
+use crate::{database::create_data_file, options::BitcaskyOptions};
 use memmap2::{MmapMut, MmapOptions};
 
 use crate::database::{
@@ -366,7 +365,7 @@ mod tests {
     use super::*;
     use test_log::test;
 
-    use crate::utilities::common::get_temporary_directory_path;
+    use crate::test_utils::get_temporary_directory_path;
 
     #[test]
     fn test_read_write_hint_file() {

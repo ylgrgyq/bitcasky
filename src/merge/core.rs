@@ -380,7 +380,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::utilities::common::{get_temporary_directory_path, TestingKV};
+    use crate::test_utils::{get_temporary_directory_path, TestingKV};
     use test_log::test;
 
     #[derive(Debug)]

@@ -83,7 +83,7 @@ impl std::fmt::Display for FileType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utilities::common::get_temporary_directory_path;
+    use crate::test_utils::get_temporary_directory_path;
 
     #[test]
     fn test_file_type() {
