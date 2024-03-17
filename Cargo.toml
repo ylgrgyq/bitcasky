@@ -18,6 +18,7 @@ version = "0.1.2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ylgrgyq/bitcasky"
+description = "Bitcasky is a Rust implementation of the Bitcask key-value store"
 
 [[bench]]
 name = "mmap_data_storage"
