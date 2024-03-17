@@ -1,6 +1,7 @@
 use rand::{rngs::ThreadRng, RngCore};
 use std::{collections::HashMap, path::PathBuf};
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct TestingKV {
     key: Vec<u8>,
@@ -8,6 +9,7 @@ pub struct TestingKV {
     expire_timestamp: u64,
 }
 
+#[allow(dead_code)]
 impl TestingKV {
     pub fn new(k: &str, v: &str) -> TestingKV {
         TestingKV {
@@ -53,6 +55,7 @@ impl TestingKV {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub enum TestingOperator {
     NONE,
@@ -67,6 +70,7 @@ pub struct TestingOperation {
     operator: TestingOperator,
 }
 
+#[allow(dead_code)]
 impl TestingOperation {
     pub fn operator(&self) -> &TestingOperator {
         &self.operator
@@ -81,11 +85,13 @@ impl TestingOperation {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct TestingOperations {
     operations: Vec<TestingOperation>,
 }
 
+#[allow(dead_code)]
 impl TestingOperations {
     pub fn operations(&self) -> &Vec<TestingOperation> {
         &self.operations
@@ -115,6 +121,7 @@ impl TestingOperations {
     }
 }
 
+#[allow(dead_code)]
 pub struct RandomTestingDataGenerator {
     rng: ThreadRng,
     key_size: usize,
@@ -122,6 +129,7 @@ pub struct RandomTestingDataGenerator {
     candidate_operators: Vec<TestingOperator>,
 }
 
+#[allow(dead_code)]
 impl RandomTestingDataGenerator {
     pub fn new(
         key_size: usize,
@@ -177,6 +185,7 @@ impl RandomTestingDataGenerator {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_temporary_directory_path() -> PathBuf {
     let dir = tempfile::tempdir().unwrap();
     dir.into_path()
