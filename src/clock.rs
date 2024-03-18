@@ -1,20 +1,23 @@
 use std::{
     fmt::Debug,
-    ops::{Deref, DerefMut},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    ops::Deref,
     time::{SystemTime, UNIX_EPOCH},
 };
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::Arc;
 
 pub trait Clock {
     fn now(&self) -> u64;
 }
 
+#[cfg(not(test))]
 #[derive(Debug)]
 pub struct SystemClock {}
 
+#[cfg(not(test))]
 impl Clock for SystemClock {
     fn now(&self) -> u64 {
         SystemTime::now()
@@ -24,11 +27,13 @@ impl Clock for SystemClock {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 pub struct DebugClock {
     time: AtomicU64,
 }
 
+#[cfg(test)]
 impl DebugClock {
     pub fn new(time: u64) -> DebugClock {
         DebugClock {
@@ -41,30 +46,23 @@ impl DebugClock {
     }
 }
 
+#[cfg(test)]
 impl Clock for DebugClock {
     fn now(&self) -> u64 {
         self.time.load(Ordering::Acquire)
     }
 }
 
-#[derive(Debug)]
-pub enum ClockImpl {
-    System(SystemClock),
-    Debug(Arc<DebugClock>),
-}
-
-impl Clock for ClockImpl {
-    fn now(&self) -> u64 {
-        match self {
-            ClockImpl::System(c) => c.now(),
-            ClockImpl::Debug(c) => c.now(),
-        }
-    }
-}
-
+#[cfg(test)]
 #[derive(Debug)]
 pub struct BitcaskyClock {
-    pub clock: ClockImpl,
+    pub clock: Arc<DebugClock>,
+}
+
+#[cfg(not(test))]
+#[derive(Debug)]
+pub struct BitcaskyClock {
+    pub clock: SystemClock,
 }
 
 impl Clock for BitcaskyClock {
@@ -74,23 +72,31 @@ impl Clock for BitcaskyClock {
 }
 
 impl Deref for BitcaskyClock {
-    type Target = ClockImpl;
+    #[cfg(not(test))]
+    type Target = SystemClock;
+    #[cfg(test)]
+    type Target = DebugClock;
 
     fn deref(&self) -> &Self::Target {
         &self.clock
     }
 }
 
-impl DerefMut for BitcaskyClock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.clock
-    }
-}
-
 impl Default for BitcaskyClock {
     fn default() -> Self {
+        #[cfg(not(test))]
+        return Self {
+            clock: SystemClock {},
+        };
+
+        #[cfg(test)]
         Self {
-            clock: ClockImpl::System(SystemClock {}),
+            clock: Arc::new(DebugClock::new(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            )),
         }
     }
 }

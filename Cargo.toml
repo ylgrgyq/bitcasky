@@ -60,6 +60,8 @@ memmap2 = "0.9.3"
 crossbeam = "0.8.2"
 crossbeam-channel = "0.5.8"
 criterion = "0.5"
+serde = { version = "1.0.197", features = ["derive"] }
+serde_repr = "0.1"
 
 [dev-dependencies]
 test-log = "0.2.11"
