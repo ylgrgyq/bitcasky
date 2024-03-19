@@ -26,7 +26,7 @@ pub struct BitcaskTelemetry {
 
 pub struct Bitcasky {
     instance_id: String,
-    directory_lock_file: File,
+    _directory_lock_file: File,
     keydir: RwLock<KeyDir>,
     options: Arc<BitcaskyOptions>,
     database: Database,
@@ -36,7 +36,7 @@ pub struct Bitcasky {
 impl Bitcasky {
     /// Open opens the database at the given path with optional options.
     pub fn open(directory: &Path, options: BitcaskyOptions) -> BitcaskyResult<Bitcasky> {
-        let directory_lock_file = match fs::lock_directory(directory)? {
+        let _directory_lock_file = match fs::lock_directory(directory)? {
             Some(f) => f,
             None => {
                 return Err(BitcaskyError::LockDirectoryFailed(
@@ -64,7 +64,7 @@ impl Bitcasky {
         debug!(target: "Bitcasky", "Bitcask created. instanceId: {}", id);
         Ok(Bitcasky {
             instance_id: id.to_string(),
-            directory_lock_file,
+            _directory_lock_file,
             keydir,
             database,
             options,
@@ -288,7 +288,6 @@ impl Bitcasky {
 
 impl Drop for Bitcasky {
     fn drop(&mut self) {
-        fs::unlock_directory(&self.directory_lock_file);
         debug!(target: "Bitcasky", "Bitcask shutdown. instanceId = {}", self.instance_id);
     }
 }

@@ -9,8 +9,10 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::fs::create_data_file;
-use crate::options::{BitcaskyOptions, SyncStrategy};
+use crate::{
+    database::create_data_file,
+    options::{BitcaskyOptions, SyncStrategy},
+};
 use crate::{
     formatter::{
         self, get_formatter_from_file, BitcaskyFormatter, FormatterError, RowToWrite,

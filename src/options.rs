@@ -1,6 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use crate::clock::{BitcaskyClock, ClockImpl, DebugClock};
+use crate::clock::BitcaskyClock;
+
+#[cfg(test)]
+use crate::clock::DebugClock;
+#[cfg(test)]
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SyncStrategy {
@@ -151,11 +156,10 @@ impl BitcaskyOptions {
         self
     }
 
+    #[cfg(test)]
     // Use debug clock
     pub fn debug_clock(mut self, clock: Arc<DebugClock>) -> BitcaskyOptions {
-        self.clock = BitcaskyClock {
-            clock: ClockImpl::Debug(clock),
-        };
+        self.clock = BitcaskyClock { clock };
         self
     }
 }

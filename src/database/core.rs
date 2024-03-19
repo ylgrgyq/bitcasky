@@ -701,7 +701,7 @@ pub mod database_tests {
     };
 
     use crate::options::{BitcaskyOptions, SyncStrategy};
-    use crate::utilities::common::{get_temporary_directory_path, TestingKV};
+    use crate::test_utils::{get_temporary_directory_path, TestingKV};
     use crate::{clock::DebugClock, fs, fs::FileType, storage_id::StorageIdGenerator};
 
     use test_log::test;

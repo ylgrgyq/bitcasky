@@ -9,8 +9,8 @@ mod fs;
 mod keydir;
 mod merge;
 mod storage_id;
+mod test_utils;
 mod tombstone;
-mod utilities;
 
 pub mod bitcasky;
 pub mod error;
@@ -21,5 +21,5 @@ pub mod internals {
     //! `internals` feature only.
     pub use crate::database::*;
     pub use crate::formatter::*;
-    pub use crate::utilities::*;
+    pub use crate::test_utils::*;
 }
